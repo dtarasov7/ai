@@ -1,0 +1,23 @@
+@startuml Metric_Taxonomy
+title Иерархия собираемых метрик
+
+top to bottom direction
+
+folder "RADOSGW" {
+    folder "Bucket" {
+        file "ops_total"
+        file "bytes_sent"
+        file "quota_enabled"
+    }
+    folder "User" {
+        file "metadata"
+        file "quota_size"
+    }
+}
+
+folder "Collector" {
+    file "scrape_duration"
+    file "up_status"
+    file "errors_total"
+}
+@enduml

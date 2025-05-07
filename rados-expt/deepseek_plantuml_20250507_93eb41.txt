@@ -1,0 +1,26 @@
+@startuml Component_Diagram
+title Архитектурные компоненты
+
+component "HTTP Server" {
+    component "MetricsHandler"
+}
+
+component "Core Logic" {
+    component "AsyncMetricsUpdater"
+    component "RADOSGWCollector"
+}
+
+component "Supporting" {
+    component "CollectorMetrics"
+}
+
+[MetricsHandler] --> [AsyncMetricsUpdater]
+[AsyncMetricsUpdater] --> [RADOSGWCollector]
+[AsyncMetricsUpdater] --> [CollectorMetrics]
+
+database "RADOSGW" as radosgw
+[RADOSGWCollector] --> radosgw
+
+cloud "Prometheus" as prom
+[MetricsHandler] --> prom
+@enduml

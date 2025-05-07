@@ -1,0 +1,50 @@
+@startuml RADOSGW_Exporter_Russian
+
+title Алгоритм работы RADOSGW Prometheus Экспортера\n(с сохранением оригинальных имен классов)
+
+actor "Пользователь" as user
+participant "Prometheus" as prometheus
+participant "MetricsHandler" as handler
+participant "AsyncMetricsUpdater" as updater
+participant "RADOSGWCollector" as collector
+participant "RADOSGW API" as radosgw
+
+== Инициализация ==
+
+user -> main: Запуск экспортера
+main -> collector: Инициализация RADOSGWCollector(host, access_key, ...)
+main -> updater: Создание AsyncMetricsUpdater(collector, interval)
+main -> handler: Создание MetricsHandler(updater)
+
+updater -> collector: Запуск _update_loop() в отдельном потоке
+
+== Фоновое обновление метрик ==
+
+loop Каждые interval секунд
+    updater -> collector: Вызов collect()
+    collector -> radosgw: Запрос _request_data("usage", ...)
+    collector -> radosgw: Запрос _request_data("bucket", ...)
+    collector -> radosgw: Запрос _request_data("user", ...)
+    radosgw --> collector: Возврат JSON данных
+    collector --> updater: Обработанные метрики
+    updater -> CollectorMetrics: Вызов update_success()/update_failure()
+end
+
+== Обработка запроса /metrics ==
+
+prometheus -> handler: GET /metrics
+alt Если идет обновление (_update_in_progress)
+    handler -> updater: Вызов get_metrics() с ожиданием
+else
+    handler -> updater: Вызов get_metrics()
+end
+updater --> handler: Возврат _metrics_cache
+handler -> prometheus: Ответ через generate_latest()
+
+== Завершение работы ==
+
+user -> main: Сигнал Ctrl+C
+main -> updater: Установка _stop_event = True
+main --> user: Завершение работы
+
+@enduml

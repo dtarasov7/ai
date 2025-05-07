@@ -1,0 +1,21 @@
+@startuml Error_Handling
+title Обработка ошибок
+
+start
+:Запрос к RADOSGW API;
+if (Ошибка соединения?) then (Да)
+    ->[timeout];
+    :Запись в CollectorMetrics;
+    :Тип ошибки: request_error;
+else if (Ошибка JSON?) then (Да)
+    ->[parse error];
+    :Тип ошибки: json_error;
+else (Другая ошибка)
+    ->[unknown];
+    :Тип ошибки: other_error;
+endif
+
+:Увеличение scrape_errors_total;
+:Обновление метрик коллектора;
+stop
+@enduml

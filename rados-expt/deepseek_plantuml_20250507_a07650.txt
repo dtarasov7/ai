@@ -1,0 +1,27 @@
+@startuml Sequence_Request_Flow
+title Последовательность обработки запроса /metrics
+
+participant Prometheus
+participant MetricsHandler
+participant AsyncMetricsUpdater
+participant RADOSGWCollector
+participant CollectorMetrics
+
+Prometheus -> MetricsHandler: GET /metrics
+MetricsHandler -> AsyncMetricsUpdater: get_metrics()
+
+alt Обновление в процессе
+    AsyncMetricsUpdater -> AsyncMetricsUpdater: Ожидание завершения _update_loop()
+end
+
+AsyncMetricsUpdater -> RADOSGWCollector: collect()
+RADOSGWCollector -> RADOSGWCollector: _request_data()
+RADOSGWCollector -> RADOSGWCollector: Обработка ответа
+RADOSGWCollector --> AsyncMetricsUpdater: Метрики приложения
+
+AsyncMetricsUpdater -> CollectorMetrics: collect()
+CollectorMetrics --> AsyncMetricsUpdater: Метрики коллектора
+
+AsyncMetricsUpdater --> MetricsHandler: Объединенные метрики
+MetricsHandler -> Prometheus: HTTP 200 с данными
+@enduml

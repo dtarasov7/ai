@@ -1,0 +1,9 @@
+@startuml Updater_States
+title Состояния AsyncMetricsUpdater
+
+[*] --> Stopped: Инициализация
+Stopped --> Running: start()
+Running --> Updating: _update_loop()
+Updating --> Running: Завершение обновления
+Running --> Stopped: stop()
+@enduml

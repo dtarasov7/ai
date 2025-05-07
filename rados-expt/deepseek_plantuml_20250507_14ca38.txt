@@ -1,0 +1,58 @@
+@startuml RADOSGW_Exporter_Classes_Russian
+
+class RADOSGWCollector {
+  - host: str
+  - access_key: str
+  - secret_key: str
+  - session: requests.Session
+  + collect(): List[Metric]
+  - _request_data(): Dict
+  - _get_usage()
+  - _get_bucket_usage()
+  - _get_user_info()
+  __
+  "Сборщик метрик из RADOSGW API"
+}
+
+class AsyncMetricsUpdater {
+  - collector: RADOSGWCollector
+  - interval: int
+  - _metrics_cache: List[Metric]
+  + start()
+  + stop()
+  + get_metrics(): List[Metric]
+  - _update_loop()
+  __
+  "Управление фоновым обновлением метрик"
+}
+
+class MetricsHandler {
+  - metrics_updater: AsyncMetricsUpdater
+  + do_GET()
+  __
+  "Обработчик HTTP запросов"
+}
+
+class CollectorMetrics {
+  - _metrics: Dict[str, Metric]
+  + update_success()
+  + update_failure()
+  + collect(): List[Metric]
+  __
+  "Метрики работы самого экспортера"
+}
+
+RADOSGWCollector --> AsyncMetricsUpdater : "Периодически\nобновляет"
+AsyncMetricsUpdater --> MetricsHandler : "Предоставляет\nметрики"
+MetricsHandler --> CollectorMetrics : "Включает"
+AsyncMetricsUpdater --> CollectorMetrics : "Обновляет"
+
+note right of RADOSGWCollector::collect
+  Основной метод сбора метрик:
+  1. Запрашивает данные usage
+  2. Запрашивает данные bucket
+  3. Запрашивает данные user
+  4. Преобразует в Prometheus метрики
+end note
+
+@enduml

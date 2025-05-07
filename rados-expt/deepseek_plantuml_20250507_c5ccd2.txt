@@ -1,0 +1,17 @@
+@startuml Data_Flow_Diagram
+title Поток данных в системе
+
+rectangle "RADOSGW API" as radosgw
+rectangle "RADOSGWCollector" as collector
+rectangle "AsyncMetricsUpdater" as updater
+rectangle "MetricsHandler" as handler
+rectangle "Prometheus" as prometheus
+
+radosgw --> collector: JSON данные (usage/bucket/user)
+collector --> updater: Обработанные метрики
+updater --> handler: Кэшированные метрики
+handler --> prometheus: Prometheus-формат
+
+updater -> updater: Кэш метрик (_metrics_cache)
+updater -> collector: Периодический collect()
+@enduml
