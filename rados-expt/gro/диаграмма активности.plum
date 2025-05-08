@@ -1,0 +1,95 @@
+@startuml
+
+' Основной процесс
+start
+
+:parse_args();
+' Парсинг аргументов командной строки
+
+:logging.basicConfig();
+' Настройка логирования
+
+if (tls_cert и tls_key указаны?) then (да)
+  :Проверка наличия файлов SSL;
+  ' Проверка файлов сертификатов
+  if (Файлы существуют?) then (да)
+    :Настройка SSL-контекста;
+    ' Подготовка HTTPS
+  else (нет)
+    :Логирование ошибки, переход к HTTP;
+    ' Использование HTTP без SSL
+  endif
+else (нет)
+  :Использование HTTP;
+  ' Сервер будет без SSL
+endif
+
+:Создание RADOSGWCollector;
+' Инициализация коллектора метрик
+:RADOSGWCollector._session();
+' Настройка HTTP-сессии
+
+:Создание AsyncMetricsUpdater;
+' Инициализация обновления метрик
+:AsyncMetricsUpdater.start();
+' Запуск фонового потока
+
+fork
+  ' Фоновый процесс обновления метрик
+  while (_stop_event не установлен?)
+    :AsyncMetricsUpdater._update_loop();
+    ' Цикл обновления
+    :RADOSGWCollector.collect();
+    ' Сбор метрик
+    :_request_data();
+    ' Запрос данных API
+    :_get_usage();
+    ' Обработка данных использования
+    :_get_bucket_usage();
+    ' Обработка данных бакетов
+    :_get_user_info();
+    ' Обработка данных пользователей
+    :_collector_metrics.update_success();
+    ' Обновление метрик коллектора
+    :Обновление _metrics_cache;
+    ' Кэширование метрик
+    :sleep(interval);
+    ' Ожидание следующего цикла
+  endwhile
+  :AsyncMetricsUpdater.stop();
+  ' Остановка обновления
+fork end
+
+:run_http_server();
+' Запуск HTTP/HTTPS-сервера
+
+while (Сервер активен?)
+  if (Получен GET /metrics?) then (да)
+    :MetricsHandler.do_GET();
+    ' Обработка запроса
+    :AsyncMetricsUpdater.get_metrics();
+    ' Получение кэшированных метрик
+    if (_update_in_progress?) then (да)
+      :Ожидание завершения обновления;
+      ' Ожидание текущего цикла
+    endif
+    :exposition.generate_latest();
+    ' Форматирование метрик
+    :Отправка ответа 200;
+    ' Возврат метрик клиенту
+  else (нет)
+    :Отправка ответа 404;
+    ' Запрос к неизвестному эндпоинту
+  endif
+endwhile
+
+if (KeyboardInterrupt?) then (да)
+  :Остановка AsyncMetricsUpdater;
+  ' Завершение фонового потока
+  :Остановка сервера;
+  ' Завершение HTTP-сервера
+  stop
+endif
+
+@enduml
+

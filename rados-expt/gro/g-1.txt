@@ -1,0 +1,222 @@
+Для визуализации алгоритма работы предоставленного Python-кода я создам две дополнительные диаграммы с использованием PlantUML: **диаграмму классов** (class diagram) и **диаграмму активности** (activity diagram). Как и в предыдущем ответе, имена переменных, методов и классов останутся на английском, а комментарии будут на русском языке. Диаграммы будут сосредоточены на ключевых аспектах кода, чтобы оставаться читаемыми и информативными.
+
+---
+
+### 1. Диаграмма классов
+
+Диаграмма классов отобразит структуру классов (`CollectorMetrics`, `AsyncMetricsUpdater`, `RADOSGWCollector`, `MetricsHandler`) и их взаимосвязи, включая основные атрибуты и методы, используемые в коде. Я исключу второстепенные детали, чтобы диаграмма была компактной.
+
+#### PlantUML-код для диаграммы классов
+
+```plantuml
+@startuml
+
+' Определение классов и их связей
+
+' Класс CollectorMetrics
+class CollectorMetrics {
+  -_metrics : Dict
+  +__init__()
+  +_create_metrics() : void ' Инициализация метрик
+  +update_success(duration: float) : void ' Обновление при успешном сборе
+  +update_failure(duration: float, error_type: str) : void ' Обновление при ошибке
+  +update_wait_time(wait_time: float) : void ' Обновление времени ожидания
+  +collect() : List ' Возврат текущих метрик
+}
+
+' Класс AsyncMetricsUpdater
+class AsyncMetricsUpdater {
+  -collector : RADOSGWCollector
+  -interval : int
+  -_lock : Lock
+  -_metrics_cache : List
+  -_collector_metrics : CollectorMetrics
+  -_stop_event : bool
+  -_update_in_progress : Event
+  -_thread : Thread
+  +__init__(collector, interval)
+  +start() : void ' Запуск фонового потока
+  +stop() : void ' Остановка обновления
+  -_update_loop() : void ' Цикл обновления метрик
+  +get_metrics() : List ' Получение кэшированных метрик
+}
+
+' Класс RADOSGWCollector
+class RADOSGWCollector {
+  -host : str
+  -access_key : str
+  -secret_key : str
+  -store : str
+  -insecure : bool
+  -timeout : int
+  -tag_list : str
+  -url : str
+  -session : requests.Session
+  -_prometheus_metrics : Dict
+  -usage_dict : defaultdict
+  +__init__(host, admin_entry, access_key, secret_key, store, insecure, timeout, tag_list)
+  -_session() : void ' Настройка HTTP-сессии
+  +collect() : List ' Сбор метрик RADOSGW
+  -_setup_empty_prometheus_metrics() : void ' Инициализация метрик Prometheus
+  -_request_data(query: str, args: str) : Dict ' Запрос данных API
+  -_get_usage(entry: Dict) : void ' Обработка данных использования
+  -_update_usage_metrics() : void ' Обновление метрик использования
+  -_get_bucket_usage(bucket: Dict) : void ' Обработка данных бакетов
+  -_get_rgw_users() : List ' Получение списка пользователей
+  -_get_user_info(user: str) : void ' Обработка информации о пользователе
+}
+
+' Класс MetricsHandler
+class MetricsHandler {
+  -metrics_updater : AsyncMetricsUpdater
+  +__init__(metrics_updater, *args, **kwargs)
+  +do_GET() : void ' Обработка HTTP-запроса /metrics
+}
+
+' Взаимосвязи
+AsyncMetricsUpdater o--> "1" CollectorMetrics : _collector_metrics ' Содержит
+AsyncMetricsUpdater o--> "1" RADOSGWCollector : collector ' Использует
+MetricsHandler o--> "1" AsyncMetricsUpdater : metrics_updater ' Использует
+RADOSGWCollector --> "1" requests.Session : session ' Использует
+
+@enduml
+```
+
+#### Описание диаграммы классов
+- **Классы**:
+  - `CollectorMetrics`: Управляет метриками о производительности самого коллектора (например, время сбора, ошибки). Содержит методы для инициализации и обновления метрик.
+  - `AsyncMetricsUpdater`: Отвечает за асинхронное обновление метрик в фоновом потоке. Хранит кэш метрик и управляет их обновлением.
+  - `RADOSGWCollector`: Основной класс для сбора метрик из RADOSGW через API. Обрабатывает данные об использовании, бакетах и пользователях, преобразуя их в формат Prometheus.
+  - `MetricsHandler`: Обрабатывает HTTP-запросы к эндпоинту `/metrics`, возвращая метрики в формате Prometheus.
+- **Взаимосвязи**:
+  - `AsyncMetricsUpdater` содержит экземпляр `CollectorMetrics` для отслеживания производительности.
+  - `AsyncMetricsUpdater` использует `RADOSGWCollector` для сбора метрик.
+  - `MetricsHandler` зависит от `AsyncMetricsUpdater` для получения кэшированных метрик.
+  - `RADOSGWCollector` использует `requests.Session` для HTTP-запросов.
+- Комментарии на русском объясняют назначение методов.
+
+---
+
+### 2. Диаграмма активности
+
+Диаграмма активности отобразит поток выполнения программы, начиная с запуска `main()`, инициализации компонентов, асинхронного сбора метрик и обработки HTTP-запросов. Диаграмма будет компактной, с акцентом на ключевые этапы.
+
+#### PlantUML-код для диаграммы активности
+
+```plantuml
+@startuml
+
+' Основной процесс
+start
+
+:parse_args();
+' Парсинг аргументов командной строки
+
+:logging.basicConfig();
+' Настройка логирования
+
+if (tls_cert и tls_key указаны?) then (да)
+  :Проверка наличия файлов SSL;
+  ' Проверка файлов сертификатов
+  if (Файлы существуют?) then (да)
+    :Настройка SSL-контекста;
+    ' Подготовка HTTPS
+  else (нет)
+    :Логирование ошибки, переход к HTTP;
+    ' Использование HTTP без SSL
+  endif
+else (нет)
+  :Использование HTTP;
+  ' Сервер будет без SSL
+endif
+
+:Создание RADOSGWCollector;
+' Инициализация коллектора метрик
+:RADOSGWCollector._session();
+' Настройка HTTP-сессии
+
+:Создание AsyncMetricsUpdater;
+' Инициализация обновления метрик
+:AsyncMetricsUpdater.start();
+' Запуск фонового потока
+
+fork
+  ' Фоновый процесс обновления метрик
+  while (_stop_event не установлен?)
+    :AsyncMetricsUpdater._update_loop();
+    ' Цикл обновления
+    :RADOSGWCollector.collect();
+    ' Сбор метрик
+    :_request_data();
+    ' Запрос данных API
+    :_get_usage();
+    ' Обработка данных использования
+    :_get_bucket_usage();
+    ' Обработка данных бакетов
+    :_get_user_info();
+    ' Обработка данных пользователей
+    :_collector_metrics.update_success();
+    ' Обновление метрик коллектора
+    :Обновление _metrics_cache;
+    ' Кэширование метрик
+    :sleep(interval);
+    ' Ожидание следующего цикла
+  endwhile
+  :AsyncMetricsUpdater.stop();
+  ' Остановка обновления
+fork end
+
+:run_http_server();
+' Запуск HTTP/HTTPS-сервера
+
+while (Сервер активен?)
+  if (Получен GET /metrics?) then (да)
+    :MetricsHandler.do_GET();
+    ' Обработка запроса
+    :AsyncMetricsUpdater.get_metrics();
+    ' Получение кэшированных метрик
+    if (_update_in_progress?) then (да)
+      :Ожидание завершения обновления;
+      ' Ожидание текущего цикла
+    endif
+    :exposition.generate_latest();
+    ' Форматирование метрик
+    :Отправка ответа 200;
+    ' Возврат метрик клиенту
+  else (нет)
+    :Отправка ответа 404;
+    ' Запрос к неизвестному эндпоинту
+  endif
+endwhile
+
+if (KeyboardInterrupt?) then (да)
+  :Остановка AsyncMetricsUpdater;
+  ' Завершение фонового потока
+  :Остановка сервера;
+  ' Завершение HTTP-сервера
+  stop
+endif
+
+@enduml
+```
+
+#### Описание диаграммы активности
+- **Этапы**:
+  1. **Инициализация**: Парсинг аргументов, настройка логирования, проверка SSL-конфигурации.
+  2. **Создание компонентов**: Инициализация `RADOSGWCollector` и `AsyncMetricsUpdater`, настройка HTTP-сессии.
+  3. **Фоновое обновление метрик**: Параллельный процесс в `AsyncMetricsUpdater`, который периодически собирает метрики через `RADOSGWCollector`, обрабатывает данные и кэширует их.
+  4. **Обработка HTTP-запросов**: HTTP-сервер обрабатывает запросы к `/metrics`, получая кэшированные метрики через `MetricsHandler`. Если обновление метрик в процессе, сервер ждет его завершения.
+  5. **Завершение**: При получении сигнала прерывания программа останавливает обновление метрик и сервер, затем завершается.
+- **Условные переходы**:
+  - Проверка SSL-конфигурации определяет, будет ли сервер использовать HTTPS или HTTP.
+  - Проверка пути запроса в `MetricsHandler` определяет, возвращать метрики или ошибку 404.
+  - Проверка `_update_in_progress` в `get_metrics()` определяет, нужно ли ждать завершения обновления.
+- Комментарии на русском поясняют назначение каждого шага.
+
+---
+
+### Примечания
+- **Диаграмма классов** сосредоточена на структуре и связях классов, исключая второстепенные атрибуты и методы для компактности.
+- **Диаграмма активности** упрощена, чтобы показать основной поток выполнения, включая параллельные процессы (фоновое обновление и обработку запросов).
+- Если требуется доработка (например, добавление конкретных деталей или другой формат), уточните, и я обновлю диаграммы.
+- Для просмотра диаграмм используйте PlantUML-совместимый инструмент (например, PlantUML онлайн-редактор или плагин для IDE).

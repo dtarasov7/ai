@@ -1,0 +1,71 @@
+@startuml
+
+' Определение классов и их связей
+
+' Класс CollectorMetrics
+class CollectorMetrics {
+  -_metrics : Dict
+  +__init__()
+  +_create_metrics() : void ' Инициализация метрик
+  +update_success(duration: float) : void ' Обновление при успешном сборе
+  +update_failure(duration: float, error_type: str) : void ' Обновление при ошибке
+  +update_wait_time(wait_time: float) : void ' Обновление времени ожидания
+  +collect() : List ' Возврат текущих метрик
+}
+
+' Класс AsyncMetricsUpdater
+class AsyncMetricsUpdater {
+  -collector : RADOSGWCollector
+  -interval : int
+  -_lock : Lock
+  -_metrics_cache : List
+  -_collector_metrics : CollectorMetrics
+  -_stop_event : bool
+  -_update_in_progress : Event
+  -_thread : Thread
+  +__init__(collector, interval)
+  +start() : void ' Запуск фонового потока
+  +stop() : void ' Остановка обновления
+  -_update_loop() : void ' Цикл обновления метрик
+  +get_metrics() : List ' Получение кэшированных метрик
+}
+
+' Класс RADOSGWCollector
+class RADOSGWCollector {
+  -host : str
+  -access_key : str
+  -secret_key : str
+  -store : str
+  -insecure : bool
+  -timeout : int
+  -tag_list : str
+  -url : str
+  -session : requests.Session
+  -_prometheus_metrics : Dict
+  -usage_dict : defaultdict
+  +__init__(host, admin_entry, access_key, secret_key, store, insecure, timeout, tag_list)
+  -_session() : void ' Настройка HTTP-сессии
+  +collect() : List ' Сбор метрик RADOSGW
+  -_setup_empty_prometheus_metrics() : void ' Инициализация метрик Prometheus
+  -_request_data(query: str, args: str) : Dict ' Запрос данных API
+  -_get_usage(entry: Dict) : void ' Обработка данных использования
+  -_update_usage_metrics() : void ' Обновление метрик использования
+  -_get_bucket_usage(bucket: Dict) : void ' Обработка данных бакетов
+  -_get_rgw_users() : List ' Получение списка пользователей
+  -_get_user_info(user: str) : void ' Обработка информации о пользователе
+}
+
+' Класс MetricsHandler
+class MetricsHandler {
+  -metrics_updater : AsyncMetricsUpdater
+  +__init__(metrics_updater, *args, **kwargs)
+  +do_GET() : void ' Обработка HTTP-запроса /metrics
+}
+
+' Взаимосвязи
+AsyncMetricsUpdater o--> "1" CollectorMetrics : _collector_metrics ' Содержит
+AsyncMetricsUpdater o--> "1" RADOSGWCollector : collector ' Использует
+MetricsHandler o--> "1" AsyncMetricsUpdater : metrics_updater ' Использует
+RADOSGWCollector --> "1" requests.Session : session ' Использует
+
+@enduml

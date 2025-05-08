@@ -1,0 +1,141 @@
+В Ansible 2.11 можно реализовать подмену DNS-разрешения конкретного имени на 127.0.0.1 только для определенных задач, используя следующие подходы:
+
+### 1. Локальный hosts-файл для задач (наилучший вариант)
+
+```yaml
+- name: Подмена DNS для конкретных задач
+  hosts: target_host
+  tasks:
+    - name: Создаем временный hosts-файл
+      ansible.builtin.copy:
+        dest: /tmp/custom_hosts
+        content: |
+          127.0.0.1 example.com
+          {{ ansible_facts['hosts_file_content'] | default('') }}
+      register: temp_hosts
+
+    - name: Запускаем задачи с подменой DNS
+      ansible.builtin.shell: |
+        export HOSTALIASES=/tmp/custom_hosts
+        curl http://example.com  # Будет использовать 127.0.0.1
+      environment:
+        HOSTALIASES: "/tmp/custom_hosts"
+
+    - name: Удаляем временный hosts-файл
+      ansible.builtin.file:
+        path: /tmp/custom_hosts
+        state: absent
+      when: temp_hosts.changed
+```
+
+### 2. Использование локального DNS через dnsmasq (требует прав)
+
+```yaml
+- name: Временная настройка локального DNS
+  hosts: target_host
+  become: yes
+  tasks:
+    - name: Устанавливаем dnsmasq
+      ansible.builtin.apt:
+        name: dnsmasq
+        state: present
+
+    - name: Конфигурируем временный DNS
+      ansible.builtin.copy:
+        dest: /etc/dnsmasq.d/temp.conf
+        content: |
+          address=/example.com/127.0.0.1
+      notify: restart dnsmasq
+
+    - name: Запускаем задачи с локальным DNS
+      ansible.builtin.shell: |
+        dig example.com  # Будет возвращать 127.0.0.1
+      register: cmd_result
+      changed_when: false
+
+    - name: Восстанавливаем оригинальную конфигурацию
+      ansible.builtin.file:
+        path: /etc/dnsmasq.d/temp.conf
+        state: absent
+      notify: restart dnsmasq
+
+  handlers:
+    - name: restart dnsmasq
+      ansible.builtin.service:
+        name: dnsmasq
+        state: restarted
+```
+
+### 3. Подмена через LD_PRELOAD (продвинутый способ)
+
+```yaml
+- name: Компилируем и используем библиотеку для подмены gethostbyname
+  hosts: target_host
+  tasks:
+    - name: Копируем код библиотеки
+      ansible.builtin.copy:
+        dest: /tmp/hook.c
+        content: |
+          #include <netdb.h>
+          struct hostent *gethostbyname(const char *name) {
+            static struct hostent h;
+            static char *addr[2] = { (char *)"127.0.0.1", NULL };
+            static char alias[1] = { 0 };
+            h.h_name = "localhost";
+            h.h_aliases = &alias;
+            h.h_addrtype = AF_INET;
+            h.h_length = 4;
+            h.h_addr_list = addr;
+            return &h;
+          }
+
+    - name: Компилируем shared library
+      ansible.builtin.shell: |
+        gcc -fPIC -shared -o /tmp/hook.so /tmp/hook.c -ldl
+      args:
+        creates: /tmp/hook.so
+
+    - name: Запускаем команду с подменой
+      ansible.builtin.shell: |
+        LD_PRELOAD=/tmp/hook.so curl http://example.com
+      environment:
+        LD_PRELOAD: "/tmp/hook.so"
+
+    - name: Удаляем временные файлы
+      ansible.builtin.file:
+        path: "/tmp/hook.{{ item }}"
+        state: absent
+      loop: [ "c", "so" ]
+```
+
+### 4. Использование network namespaces (самый изолированный способ)
+
+```yaml
+- name: Создаем изолированное сетевое пространство
+  hosts: target_host
+  become: yes
+  tasks:
+    - name: Создаем network namespace
+      ansible.builtin.command: ip netns add tempns
+
+    - name: Настраиваем локальный DNS в namespace
+      ansible.builtin.command: |
+        ip netns exec tempns bash -c '
+        echo "127.0.0.1 example.com" > /etc/hosts.temp
+        mount --bind /etc/hosts.temp /etc/hosts
+        ping -c 1 example.com  # Будет пинговаться 127.0.0.1
+        '
+      args:
+        executable: /bin/bash
+
+    - name: Удаляем network namespace
+      ansible.builtin.command: ip netns del tempns
+```
+
+### Ключевые моменты:
+1. **Для большинства случаев** достаточно первого варианта с `HOSTALIASES`
+2. **Для изолированных задач** лучше подходит network namespace
+3. **Изменения действуют только во время выполнения задач** и не затрагивают другие процессы
+4. **Требуемые права** зависят от выбранного метода (обычно нужен root для методов 2 и 4)
+
+Все методы сохраняют глобальные DNS-настройки хоста неизменными, воздействуя только на конкретные выполняемые задачи.

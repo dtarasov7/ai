@@ -1,0 +1,136 @@
+Для визуализации алгоритма работы предоставленного Python-кода с использованием PlantUML я создам диаграмму последовательности (sequence diagram), которая отобразит основные этапы работы программы, включая взаимодействие между ключевыми компонентами: `main()`, `RADOSGWCollector`, `AsyncMetricsUpdater`, `MetricsHandler` и HTTP-сервером. Диаграмма будет сосредоточена на жизненном цикле приложения, начиная с запуска, инициализации коллектора, асинхронного обновления метрик и обработки HTTP-запросов.
+
+Имена переменных, функций и классов останутся на английском, как в исходном коде, а комментарии будут переведены на русский. Для упрощения я выделю основные этапы работы программы и исключу второстепенные детали, чтобы диаграмма оставалась читаемой.
+
+### PlantUML-код
+
+```plantuml
+@startuml
+actor "User" as User
+participant "main()" as Main
+participant "RADOSGWCollector" as Collector
+participant "AsyncMetricsUpdater" as Updater
+participant "MetricsHandler" as Handler
+participant "HTTPServer" as Server
+
+' Запуск программы
+User -> Main: Запуск скрипта
+activate Main
+  Main -> Main: parse_args()
+  note right: Парсинг аргументов командной строки
+  Main -> Main: logging.basicConfig()
+  note right: Настройка логирования
+
+  ' Проверка конфигурации SSL
+  Main -> Main: Проверка tls_cert и tls_key
+  note right: Проверка наличия сертификатов для HTTPS
+
+  ' Инициализация коллектора
+  Main -> Collector: new(host, admin_entry, access_key, secret_key, store, insecure, timeout, tag_list)
+  activate Collector
+  Collector -> Collector: _session()
+  note right: Настройка HTTP-сессии для запросов к RADOSGW
+  Collector --> Main: Возврат объекта коллектора
+  deactivate Collector
+
+  ' Запуск асинхронного обновления метрик
+  Main -> Updater: new(collector, interval)
+  activate Updater
+  Updater -> Updater: start()
+  note right: Запуск фонового потока для обновления метрик
+  Updater -> Updater: _update_loop()
+  activate Updater
+  loop Пока не установлен _stop_event
+    Updater -> Collector: collect()
+    activate Collector
+    note right: Сбор метрик из RADOSGW
+    Collector -> Collector: _request_data(query, args)
+    note right: Запрос данных через API RADOSGW
+    Collector -> Collector: _get_usage(entry)
+    note right: Обработка данных об использовании
+    Collector -> Collector: _get_bucket_usage(bucket)
+    note right: Обработка данных о бакетах
+    Collector -> Collector: _get_user_info(user)
+    note right: Обработка информации о пользователях
+    Collector --> Updater: Возврат метрик
+    deactivate Collector
+    Updater -> Updater: _collector_metrics.update_success(duration)
+    note right: Обновление метрик коллектора
+    Updater -> Updater: _metrics_cache = app_metrics + collector_metrics
+    note right: Кэширование собранных метрик
+    Updater -> Updater: sleep(interval)
+    note right: Ожидание следующего цикла обновления
+  end loop
+  deactivate Updater
+
+  ' Запуск HTTP-сервера
+  Main -> Server: run_http_server(metrics_updater, port, certfile, keyfile)
+  activate Server
+  note right: Запуск HTTP/HTTPS сервера
+  Server -> Server: Инициализация HTTPServer
+  note right: Настройка сервера с SSL (если указано)
+
+  ' Обработка запроса на /metrics
+  User -> Server: GET /metrics
+  activate Server
+  Server -> Handler: do_GET()
+  activate Handler
+  note right: Обработка HTTP-запроса
+  Handler -> Updater: get_metrics()
+  activate Updater
+  note right: Получение кэшированных метрик
+  Updater -> Updater: _update_in_progress.wait()
+  note right: Ожидание завершения обновления, если оно выполняется
+  Updater --> Handler: Возврат метрик
+  deactivate Updater
+  Handler -> Handler: exposition.generate_latest(registry)
+  note right: Генерация Prometheus-формата метрик
+  Handler --> Server: Ответ 200 с метриками
+  deactivate Handler
+  Server --> User: Ответ с метриками
+  deactivate Server
+
+  ' Завершение работы
+  User -> Main: KeyboardInterrupt
+  note right: Пользователь прерывает выполнение
+  Main -> Updater: stop()
+  note right: Остановка обновления метрик
+  deactivate Updater
+  Main -> Server: Завершение сервера
+  note right: Остановка HTTP-сервера
+  deactivate Server
+  Main --> User: Завершение программы
+  deactivate Main
+
+@enduml
+```
+
+### Описание диаграммы
+
+1. **Запуск программы**:
+   - Пользователь запускает скрипт, вызывая функцию `main()`.
+   - `main()` парсит аргументы командной строки (`parse_args()`) и настраивает логирование.
+
+2. **Инициализация компонентов**:
+   - Проверяется конфигурация SSL (наличие сертификатов `tls_cert` и `tls_key`).
+   - Создаётся объект `RADOSGWCollector`, который настраивает HTTP-сессию для взаимодействия с RADOSGW API.
+   - Инициализируется `AsyncMetricsUpdater` с указанным интервалом обновления метрик.
+
+3. **Асинхронное обновление метрик**:
+   - `AsyncMetricsUpdater` запускает фоновый поток (`_update_loop()`), который периодически вызывает метод `collect()` у `RADOSGWCollector`.
+   - `RADOSGWCollector` выполняет запросы к RADOSGW API через `_request_data()` и обрабатывает данные об использовании (`_get_usage()`), бакетах (`_get_bucket_usage()`) и пользователях (`_get_user_info()`).
+   - Собранные метрики кэшируются в `_metrics_cache`, а метрики коллектора обновляются (`_collector_metrics.update_success()`).
+
+4. **Обработка HTTP-запросов**:
+   - Запускается HTTP/HTTPS-сервер (`run_http_server()`), который ожидает запросы на эндпоинт `/metrics`.
+   - При получении запроса `MetricsHandler` вызывает `get_metrics()` у `AsyncMetricsUpdater`, который возвращает кэшированные метрики.
+   - Если обновление метрик в процессе, `get_metrics()` ожидает его завершения.
+   - Метрики форматируются в формате Prometheus и отправляются клиенту.
+
+5. **Завершение работы**:
+   - При получении сигнала прерывания (например, Ctrl+C) `main()` останавливает `AsyncMetricsUpdater` (`stop()`) и завершает работу сервера.
+
+### Примечания
+- Диаграмма упрощена, чтобы сосредоточиться на ключевых взаимодействиях. Детали, такие как обработка ошибок или второстепенные методы, опущены для читаемости.
+- Комментарии на русском языке объясняют назначение каждого шага.
+- Если требуется другая визуализация (например, диаграмма классов или активности), уточните, и я адаптирую код PlantUML.

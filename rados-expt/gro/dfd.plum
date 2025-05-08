@@ -1,0 +1,120 @@
+@startuml
+
+' Внешние сущности
+entity "RADOSGW API" as RADOSGW
+entity "Prometheus Client" as Prometheus
+
+' Хранилища данных
+database "_prometheus_metrics" as PrometheusMetrics
+note right of PrometheusMetrics
+  Хранит метрики в формате Prometheus:
+  ops, bytes_sent, bucket_usage_bytes, user_quota_max_size и др.
+end note
+
+database "_metrics_cache" as MetricsCache
+note right of MetricsCache
+  Хранит кэш всех метрик для быстрого доступа по /metrics
+end note
+
+database "usage_dict" as UsageDict
+note right of UsageDict
+  Временное хранилище структурированных данных о бакетах, пользователях, категориях
+end note
+
+' Процессы
+process "_request_data" as RequestData
+process "_get_usage" as GetUsage
+process "_get_bucket_usage" as GetBucketUsage
+process "_get_user_info" as GetUserInfo
+process "_update_usage_metrics" as UpdateUsageMetrics
+process "_update_loop" as UpdateLoop
+process "do_GET" as DoGet
+
+' Примечания к процессам
+note right of RequestData
+  Запрос JSON-данных через API RADOSGW
+end note
+note right of GetUsage
+  Парсит данные использования и сохраняет в usage_dict
+end note
+note right of GetBucketUsage
+  Парсит данные бакетов и создает метрики
+end note
+note right of GetUserInfo
+  Парсит данные пользователей и создает метрики
+end note
+note right of UpdateUsageMetrics
+  Преобразует данные из usage_dict в метрики Prometheus
+end note
+note right of UpdateLoop
+  Периодически собирает метрики и кэширует их
+end note
+note right of DoGet
+  Форматирует метрики и отправляет клиенту
+end note
+
+' Потоки данных
+RADOSGW --> RequestData : JSON данные
+note on link
+  Запрос данных API: usage, bucket, user
+end note
+RequestData --> GetUsage : JSON данные использования
+RequestData --> GetBucketUsage : JSON данные бакетов
+RequestData --> GetUserInfo : JSON данные пользователей
+
+GetUsage --> UsageDict : Структурированные данные
+note on link
+  Сохранение данных в usage_dict
+end note
+GetBucketUsage --> UsageDict : Структурированные данные
+note on link
+  Сохранение данных в usage_dict
+end note
+GetUserInfo --> UsageDict : Структурированные данные
+note on link
+  Сохранение данных в usage_dict
+end note
+
+UsageDict --> UpdateUsageMetrics : Данные
+note on link
+  Чтение данных из usage_dict
+end note
+GetBucketUsage --> PrometheusMetrics : Метрики
+note on link
+  Запись метрик в _prometheus_metrics
+end note
+GetUserInfo --> PrometheusMetrics : Метрики
+note on link
+  Запись метрик в _prometheus_metrics
+end note
+UpdateUsageMetrics --> PrometheusMetrics : Метрики
+note on link
+  Запись метрик в _prometheus_metrics
+end note
+
+PrometheusMetrics --> UpdateLoop : Метрики
+note on link
+  Чтение метрик из _prometheus_metrics
+end note
+UpdateLoop --> MetricsCache : Кэшированные метрики
+note on link
+  Сохранение метрик в _metrics_cache
+end note
+MetricsCache --> DoGet : Кэшированные метрики
+note on link
+  Чтение метрик из _metrics_cache
+end note
+DoGet --> Prometheus : Форматированные метрики
+note on link
+  Ответ /metrics с метриками в формате Prometheus
+end note
+
+' Комментарии к внешним сущностям
+note right of RADOSGW
+  Источник данных: JSON с информацией о бакетах, пользователях и использовании
+end note
+note right of Prometheus
+  Клиент, запрашивающий метрики в формате Prometheus через /metrics
+end note
+
+@enduml
