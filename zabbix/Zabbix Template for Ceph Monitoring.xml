@@ -1,0 +1,217 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<zabbix_export>
+    <version>5.0</version>
+    <date>2025-05-08T17:52:00Z</date>
+    <groups>
+        <group>
+            <name>Templates</name>
+        </group>
+    </groups>
+    <templates>
+        <!-- Шаблон для серверов мониторов (mon) -->
+        <template>
+            <name>Ceph Mon Template</name>
+            <groups>
+                <group>
+                    <name>Templates</name>
+                </group>
+            </groups>
+            <items>
+                <!-- Общий статус кластера -->
+                <item>
+                    <name>Ceph Cluster Health</name>
+                    <type>0</type>
+                    <key>ceph.health</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <status>0</status>
+                    <value_type>3</value_type>
+                    <units></units>
+                    <delta>0</delta>
+                    <description>0=HEALTH_OK, 1=HEALTH_WARN, 2=HEALTH_ERR</description>
+                </item>
+                <!-- Доступность мониторов -->
+                <item>
+                    <name>Ceph Monitors Up</name>
+                    <type>0</type>
+                    <key>ceph.mon.up</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <status>0</status>
+                    <value_type>3</value_type>
+                    <units></units>
+                    <delta>0</delta>
+                    <description>0=All monitors up, 1=Some monitors down</description>
+                </item>
+                <!-- Доступность менеджеров -->
+                <item>
+                    <name>Ceph Managers Up</name>
+                    <type>0</type>
+                    <key>ceph.mgr.up</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <status>0</status>
+                    <value_type>3</value_type>
+                    <units></units>
+                    <delta>0</delta>
+                    <description>0=Active manager present, 1=No active manager</description>
+                </item>
+                <!-- Доступность OSD -->
+                <item>
+                    <name>Ceph OSDs Up</name>
+                    <type>0</type>
+                    <key>ceph.osd.up</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <status>0</status>
+                    <value_type>3</value_type>
+                    <units></units>
+                    <delta>0</delta>
+                    <description>0=All OSDs up, 1=Some OSDs down</description>
+                </item>
+                <!-- Доступность RadosGW -->
+                <item>
+                    <name>Ceph RadosGW Up</name>
+                    <type>0</type>
+                    <key>ceph.radosgw.up</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <status>0</status>
+                    <value_type>3</value_type>
+                    <units></units>
+                    <delta>0</delta>
+                    <description>0=RadosGW active, 1=RadosGW inactive</description>
+                </item>
+                <!-- Локальный статус mon -->
+                <item>
+                    <name>Local Ceph Mon Status</name>
+                    <type>0</type>
+                    <key>ceph.mon.local.status</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <status>0</status>
+                    <value_type>3</value_type>
+                    <units></units>
+                    <delta>0</delta>
+                    <description>0=Mon service running, 1=Mon service stopped</description>
+                </item>
+                <!-- Локальный статус mgr -->
+                <item>
+                    <name>Local Ceph Mgr Status</name>
+                    <type>0</type>
+                    <key>ceph.mgr.local.status</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <status>0</status>
+                    <value_type>3</value_type>
+                    <units></units>
+                    <delta>0</delta>
+                    <description>0=Mgr service running, 1=Mgr service stopped</description>
+                </item>
+            </items>
+        </template>
+
+        <!-- Шаблон для серверов RadosGW -->
+        <template>
+            <name>Ceph RadosGW Template</name>
+            <groups>
+                <group>
+                    <name>Templates</name>
+                </group>
+            </groups>
+            <items>
+                <!-- Статус RadosGW -->
+                <item>
+                    <name>RadosGW Status</name>
+                    <type>0</type>
+                    <key>radosgw.status</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <status>0</status>
+                    <value_type>3</value_type>
+                    <units></units>
+                    <delta>0</delta>
+                    <description>0=RadosGW running, 1=RadosGW stopped</description>
+                </item>
+                <!-- Статус HAProxy -->
+                <item>
+                    <name>HAProxy Status</name>
+                    <type>0</type>
+                    <key>haproxy.status</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <status>0</status>
+                    <value_type>3</value_type>
+                    <units></units>
+                    <delta>0</delta>
+                    <description>0=HAProxy running, 1=HAProxy stopped</description>
+                </item>
+                <!-- Статус Keepalived -->
+                <item>
+                    <name>Keepalived Status</name>
+                    <type>0</type>
+                    <key>keepalived.status</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <status>0</status>
+                    <value_type>3</value_type>
+                    <units></units>
+                    <delta>0</delta>
+                    <description>0=Keepalived running, 1=Keepalived stopped</description>
+                </item>
+                <!-- Проверка HTTP RadosGW -->
+                <item>
+                    <name>RadosGW HTTP Check</name>
+                    <type>0</type>
+                    <key>radosgw.http</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <status>0</status>
+                    <value_type>3</value_type>
+                    <units></units>
+                    <delta>0</delta>
+                    <description>0=HTTP 200 OK, 1=HTTP error</description>
+                </item>
+                <!-- Количество соединений HAProxy -->
+                <item>
+                    <name>HAProxy Connections</name>
+                    <type>0</type>
+                    <key>haproxy.connections</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <status>0</status>
+                    <value_type>3</value_type>
+                    <units>connections</units>
+                    <delta>0</delta>
+                    <description>Number of active HAProxy connections</description>
+                </item>
+                <!-- Статус VIP Keepalived -->
+                <item>
+                    <name>Keepalived VIP Status</name>
+                    <type>0</type>
+                    <key>keepalived.vip.status</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <status>0</status>
+                    <value_type>3</value_type>
+                    <units></units>
+                    <delta>0</delta>
+                    <description>1=MASTER, 0=BACKUP</description>
+                </item>
+            </items>
+        </template>
+    </templates>
+</zabbix_export>

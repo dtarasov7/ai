@@ -1,0 +1,10 @@
+#!/bin/bash
+# Проверяет, активен ли указанный systemd-сервис
+# Аргумент $1: имя сервиса (например, ceph-mon@mon1)
+SERVICE=$1
+STATUS=$(systemctl is-active "$SERVICE" 2>/dev/null)
+if [ "$STATUS" = "active" ]; then
+    echo 1  # Сервис запущен
+else
+    echo 0  # Сервис не запущен
+fi

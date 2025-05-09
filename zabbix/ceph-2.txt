@@ -1,0 +1,367 @@
+Для минимального мониторинга работоспособности кластера Ceph 17.2.7 с использованием только Zabbix Agent (версия 1) можно настроить Zabbix Agent на каждом сервере кластера, чтобы собирать метрики о состоянии кластера и доступности сервисов. Это достигается с помощью пользовательских параметров (UserParameters), которые выполняют скрипты для проверки состояния Ceph-компонентов и сервисов. Ниже приведены ключевые моменты и подробное руководство по настройке.
+
+### Ключевые моменты
+- **Zabbix Agent (версия 1)** позволяет мониторить Ceph через пользовательские скрипты, вызывающие команды Ceph и проверяющие состояние сервисов.
+- Для кластера из 5 серверов mon (с mgr), 4 серверов RadosGW (с haproxy и keepalived) и 6 серверов OSD потребуется установить Zabbix Agent на каждом сервере.
+- Мониторинг включает:
+  - Общий статус кластера (HEALTH_OK, HEALTH_WARN, HEALTH_ERR).
+  - Доступность сервисов mon, mgr, radosgw, OSD и haproxy (запущены и работают без ошибок).
+  - Проверку HTTPS-ответов RadosGW на порту 8443.
+- Скрипты будут размещены на соответствующих серверах, а Zabbix Server настроен для сбора метрик и оповещений.
+
+### Настройка мониторинга
+
+#### Общая структура кластера
+- **5 серверов mon**: Каждый также имеет сервис mgr.
+- **4 сервера RadosGW**: Отвечают на HTTPS (порт 8443), с haproxy (порт 443) и keepalived для управления VIP.
+- **6 серверов OSD**: На каждом несколько OSD-сервисов.
+
+Zabbix Agent будет установлен на каждом из 15 серверов (5 mon + 4 RadosGW + 6 OSD). Один из mon-серверов будет собирать общий статус кластера, остальные — локальные метрики сервисов.
+
+#### Скрипты для серверов
+На каждом сервере создаются скрипты для проверки состояния сервисов и, где необходимо, дополнительных метрик. Все скрипты размещаются в `/usr/local/bin/` и должны быть исполняемыми (`chmod +x`).
+
+##### Общий скрипт для проверки systemd-сервисов
+Этот скрипт используется на всех серверах для проверки состояния systemd-сервисов (mon, mgr, radosgw, haproxy, OSD).
+
+```x-sh
+#!/bin/bash
+# Проверяет, активен ли указанный systemd-сервис
+# Аргумент $1: имя сервиса (например, ceph-mon@mon1)
+SERVICE=$1
+STATUS=$(systemctl is-active "$SERVICE" 2>/dev/null)
+if [ "$STATUS" = "active" ]; then
+    echo 1  # Сервис запущен
+else
+    echo 0  # Сервис не запущен
+fi
+```
+
+##### Скрипт для проверки общего состояния кластера (на одном mon-сервере)
+Этот скрипт собирает статус кластера из команды `ceph -s`.
+
+```x-sh
+#!/bin/bash
+# Проверяет общее состояние кластера Ceph
+HEALTH=$(ceph -s | grep "health:" | awk '{print $2}')
+case $HEALTH in
+    HEALTH_OK)
+        echo 0  # Кластер в порядке
+        ;;
+    HEALTH_WARN)
+        echo 1  # Предупреждение
+        ;;
+    HEALTH_ERR)
+        echo 2  # Ошибка
+        ;;
+    *)
+        echo 3  # Неизвестное состояние
+        ;;
+esac
+```
+
+##### Скрипт для проверки HTTPS-ответов RadosGW (на RadosGW-серверах)
+Этот скрипт проверяет, отвечает ли RadosGW на HTTPS-запросы на порту 8443.
+
+```x-sh
+#!/bin/bash
+# Проверяет доступность RadosGW по HTTPS на порту 8443
+STATUS=$(curl -k -s -o /dev/null -w "%{http_code}" https://localhost:8443 2>/dev/null)
+if [ "$STATUS" -eq 200 ] || [ "$STATUS" -eq 403 ]; then
+    echo 1  # RadosGW отвечает
+else
+    echo 0  # RadosGW не отвечает
+fi
+```
+
+##### Скрипт для подсчета активных OSD-сервисов (на OSD-серверах)
+Этот скрипт подсчитывает количество активных OSD-сервисов на сервере.
+
+```x-sh
+#!/bin/bash
+# Подсчитывает количество активных OSD-сервисов на сервере
+OSD_SERVICES=$(systemctl list-units --type=service --all | grep ceph-osd@ | awk '{print $1}')
+ACTIVE_COUNT=0
+for SERVICE in $OSD_SERVICES; do
+    STATUS=$(systemctl is-active "$SERVICE" 2>/dev/null)
+    if [ "$STATUS" = "active" ]; then
+        ((ACTIVE_COUNT++))
+    fi
+done
+echo $ACTIVE_COUNT
+```
+
+#### Конфигурация Zabbix Agent
+Zabbix Agent должен быть установлен на каждом из 15 серверов. Конфигурационные файлы (`/etc/zabbix/zabbix_agentd.conf`) настраиваются следующим образом.
+
+##### На mon-серверах (все 5)
+Добавьте в `/etc/zabbix/zabbix_agentd.conf`:
+```
+UserParameter=ceph.mon.status,/usr/local/bin/check_systemd_service.sh ceph-mon@$(hostname)
+UserParameter=ceph.mgr.status,/usr/local/bin/check_systemd_service.sh ceph-mgr@$(hostname)
+```
+
+##### На одном mon-сервере (например, mon1)
+Добавьте дополнительно:
+```
+UserParameter=ceph.cluster.health,/usr/local/bin/ceph_cluster_health.sh
+```
+
+##### На RadosGW-серверах (все 4)
+Добавьте в `/etc/zabbix/zabbix_agentd.conf`:
+```
+UserParameter=ceph.radosgw.status,/usr/local/bin/check_systemd_service.sh ceph-radosgw@rgw.$(hostname)
+UserParameter=ceph.radosgw.https,/usr/local/bin/check_radosgw_https.sh
+UserParameter=haproxy.status,/usr/local/bin/check_systemd_service.sh haproxy
+```
+
+##### На OSD-серверах (все 6)
+Добавьте в `/etc/zabbix/zabbix_agentd.conf`:
+```
+UserParameter=ceph.osd.active_count,/usr/local/bin/check_osd_services.sh
+```
+
+После внесения изменений перезапустите Zabbix Agent на каждом сервере:
+```bash
+sudo systemctl restart zabbix-agent
+```
+
+#### Настройки Zabbix Server
+На Zabbix Server необходимо создать хосты для каждого сервера и виртуальный хост для кластера, а также настроить элементы данных и триггеры.
+
+##### Создание хостов
+- **Для каждого сервера** (5 mon, 4 RadosGW, 6 OSD):
+  - Создайте хост в Zabbix с именем, соответствующим серверу (например, `mon1`, `rgw1`, `osd1`).
+  - Укажите интерфейс Zabbix Agent с IP-адресом сервера и портом (по умолчанию 10050).
+- **Для кластера**:
+  - Создайте виртуальный хост, например, `Ceph Cluster`, и свяжите его с одним mon-сервером (например, `mon1`) для сбора метрик кластера.
+
+##### Элементы данных (Items)
+Создайте следующие элементы данных для каждого хоста:
+
+**Для mon-серверов** (на каждом из 5):
+| Имя элемента | Ключ | Тип | Тип информации |
+|--------------|------|-----|----------------|
+| Ceph Mon Status | `ceph.mon.status` | Zabbix Agent | Numeric (unsigned) |
+| Ceph Mgr Status | `ceph.mgr.status` | Zabbix Agent | Numeric (unsigned) |
+
+**Для одного mon-сервера (mon1)**:
+| Имя элемента | Ключ | Тип | Тип информации |
+|--------------|------|-----|----------------|
+| Ceph Cluster Health | `ceph.cluster.health` | Zabbix Agent | Numeric (unsigned) |
+
+**Для RadosGW-серверов** (на каждом из 4):
+| Имя элемента | Ключ | Тип | Тип информации |
+|--------------|------|-----|----------------|
+| Ceph RadosGW Status | `ceph.radosgw.status` | Zabbix Agent | Numeric (unsigned) |
+| Ceph RadosGW HTTPS | `ceph.radosgw.https` | Zabbix Agent | Numeric (unsigned) |
+| HAProxy Status | `haproxy.status` | Zabbix Agent | Numeric (unsigned) |
+
+**Для OSD-серверов** (на каждом из 6):
+| Имя элемента | Ключ | Тип | Тип информации |
+|--------------|------|-----|----------------|
+| Ceph OSD Active Count | `ceph.osd.active_count` | Zabbix Agent | Numeric (unsigned) |
+
+##### Триггеры
+Настройте триггеры для оповещений о проблемах:
+
+**Для сервисов (mon, mgr, radosgw, haproxy)**:
+- Триггер: `{<Host>:ceph.<service>.status.last()}=0`
+  - Пример: `{mon1:ceph.mon.status.last()}=0` (сервис mon не запущен).
+  - Уровень: Error.
+
+**Для RadosGW HTTPS**:
+- Триггер: `{<Host>:ceph.radosgw.https.last()}=0`
+  - Пример: `{rgw1:ceph.radosgw.https.last()}=0` (RadosGW не отвечает на HTTPS).
+  - Уровень: Error.
+
+**Для состояния кластера**:
+- Триггер: `{Ceph Cluster:ceph.cluster.health.last()}=1`
+  - Условие: HEALTH_WARN.
+  - Уровень: Warning.
+- Триггер: `{Ceph Cluster:ceph.cluster.health.last()}=2`
+  - Условие: HEALTH_ERR.
+  - Уровень: Error.
+
+**Для OSD-серверов**:
+- Триггер: `{<Host>:ceph.osd.active_count.last()}<N`
+  - Замените `N` на ожидаемое количество OSD на сервере (например, 2, если на сервере 2 OSD).
+  - Пример: `{osd1:ceph.osd.active_count.last()}<2`.
+  - Уровень: Error.
+
+---
+
+### Подробное руководство по мониторингу Ceph 17.2.7 с Zabbix Agent
+
+#### Введение
+Мониторинг кластера Ceph 17.2.7 с использованием только Zabbix Agent (версия 1) возможен, несмотря на отсутствие поддержки встроенного Ceph-плагина, который доступен в Zabbix Agent 2. Кластер состоит из 5 серверов mon (с mgr), 4 серверов RadosGW (с haproxy на порту 443 и keepalived для VIP, отвечающих на HTTPS на порту 8443) и 6 серверов OSD (с несколькими OSD-сервисами на каждом). Задача — обеспечить минимальный мониторинг, включающий:
+- Общий статус кластера (HEALTH_OK, HEALTH_WARN, HEALTH_ERR).
+- Доступность сервисов mon, mgr, radosgw, OSD и haproxy (запущены и работают без ошибок).
+- Проверку HTTPS-ответов RadosGW на порту 8443.
+
+Для этого используется подход с пользовательскими параметрами (UserParameters) в Zabbix Agent, которые выполняют скрипты для проверки состояния сервисов и кластера. Скрипты размещаются на соответствующих серверах, а Zabbix Server собирает метрики и отправляет оповещения при проблемах.
+
+#### Архитектура кластера
+- **5 серверов mon**: Каждый сервер выполняет роли mon и mgr. Один из них (например, mon1) дополнительно собирает общий статус кластера.
+- **4 сервера RadosGW**: Каждый сервер имеет сервисы radosgw, haproxy и keepalived. RadosGW отвечает на HTTPS-запросы на порту 8443, haproxy балансирует на порту 443.
+- **6 серверов OSD**: Каждый сервер имеет несколько OSD-сервисов (например, `ceph-osd@0`, `ceph-osd@1`).
+
+Zabbix Agent устанавливается на каждом из 15 серверов для локального мониторинга сервисов. Один mon-сервер собирает метрики кластера.
+
+#### Требования к мониторингу
+| Метрика | Описание | Источник |
+|---------|----------|---------|
+| Общий статус кластера | HEALTH_OK (0), HEALTH_WARN (1), HEALTH_ERR (2), Unknown (3) | `ceph -s` на одном mon-сервере |
+| Доступность mon | Сервис `ceph-mon@<hostname>` активен (1) или неактивен (0) | `systemctl is-active` на каждом mon-сервере |
+| Доступность mgr | Сервис `ceph-mgr@<hostname>` активен (1) или неактивен (0) | `
+
+systemctl is-active` на каждом mon-сервере |
+| Доступность radosgw | Сервис `ceph-radosgw@rgw.<hostname>` активен (1) или неактивен (0) | `systemctl is-active` на каждом RadosGW-сервере |
+| RadosGW HTTPS | Ответ на HTTPS (порт 8443): 200/403 (1) или ошибка (0) | `curl` на каждом RadosGW-сервере |
+| Доступность haproxy | Сервис `haproxy` активен (1) или неактивен (0) | `systemctl is-active` на каждом RadosGW-сервере |
+| Доступность OSD | Количество активных сервисов `ceph-osd@<id>` | `systemctl list-units` на каждом OSD-сервере |
+
+#### Установка Zabbix Agent
+1. Установите Zabbix Agent (версия 1) на каждом из 15 серверов:
+   - Для Ubuntu:
+     ```bash
+     wget [invalid url, do not cite]
+     sudo dpkg -i zabbix-release_6.0-4+ubuntu20.04_all.deb
+     sudo apt update
+     sudo apt install zabbix-agent
+     ```
+   - Для CentOS/RHEL:
+     ```bash
+     sudo rpm -Uvh [invalid url, do not cite]
+     sudo yum clean all
+     sudo yum install zabbix-agent
+     ```
+2. Настройте `/etc/zabbix/zabbix_agentd.conf` на каждом сервере:
+   ```
+   Server=<zabbix-server-ip>
+   ServerActive=<zabbix-server-ip>
+   Hostname=<server-name>  # Например, mon1, rgw1, osd1
+   ```
+3. Включите и запустите Zabbix Agent:
+   ```bash
+   sudo systemctl enable zabbix-agent
+   sudo systemctl start zabbix-agent
+   ```
+
+#### Размещение скриптов
+1. **На всех серверах**:
+   - Скопируйте `check_systemd_service.sh` в `/usr/local/bin/`:
+     ```bash
+     sudo cp check_systemd_service.sh /usr/local/bin/
+     sudo chmod +x /usr/local/bin/check_systemd_service.sh
+     ```
+2. **На одном mon-сервере (например, mon1)**:
+   - Скопируйте `ceph_cluster_health.sh`:
+     ```bash
+     sudo cp ceph_cluster_health.sh /usr/local/bin/
+     sudo chmod +x /usr/local/bin/ceph_cluster_health.sh
+     ```
+3. **На RadosGW-серверах**:
+   - Скопируйте `check_radosgw_https.sh`:
+     ```bash
+     sudo cp check_radosgw_https.sh /usr/local/bin/
+     sudo chmod +x /usr/local/bin/check_radosgw_https.sh
+     ```
+4. **На OSD-серверах**:
+   - Скопируйте `check_osd_services.sh`:
+     ```bash
+     sudo cp check_osd_services.sh /usr/local/bin/
+     sudo chmod +x /usr/local/bin/check_osd_services.sh
+     ```
+
+#### Конфигурация Zabbix Agent
+Добавьте UserParameters в `/etc/zabbix/zabbix_agentd.conf` на каждом сервере и перезапустите агент:
+```bash
+sudo systemctl restart zabbix-agent
+```
+
+#### Настройка Zabbix Server
+1. **Создание хостов**:
+   - Создайте 15 хостов в Zabbix для каждого сервера (например, `mon1`–`mon5`, `rgw1`–`rgw4`, `osd1`–`osd6`).
+   - Для каждого хоста укажите интерфейс Zabbix Agent (IP-адрес сервера, порт 10050).
+   - Создайте виртуальный хост `Ceph Cluster` для метрик кластера, связав его с `mon1`.
+
+2. **Элементы данных**:
+   - **Mon-серверы**:
+     - Для каждого из 5 серверов:
+       - `ceph.mon.status`: Ключ `ceph.mon.status`, тип Numeric (unsigned).
+       - `ceph.mgr.status`: Ключ `ceph.mgr.status`, тип Numeric (unsigned).
+     - Для `mon1`:
+       - `ceph.cluster.health`: Ключ `ceph.cluster.health`, тип Numeric (unsigned).
+   - **RadosGW-серверы**:
+     - Для каждого из 4 серверов:
+       - `ceph.radosgw.status`: Ключ `ceph.radosgw.status`, тип Numeric (unsigned).
+       - `ceph.radosgw.https`: Ключ `ceph.radosgw.https`, тип Numeric (unsigned).
+       - `haproxy.status`: Ключ `haproxy.status`, тип Numeric (unsigned).
+   - **OSD-серверы**:
+     - Для каждого из 6 серверов:
+       - `ceph.osd.active_count`: Ключ `ceph.osd.active_count`, тип Numeric (unsigned).
+
+3. **Триггеры**:
+   - **Для сервисов**:
+     - `{<Host>:ceph.mon.status.last()}=0`: Сервис mon не запущен (Error).
+     - `{<Host>:ceph.mgr.status.last()}=0`: Сервис mgr не запущен (Error).
+     - `{<Host>:ceph.radosgw.status.last()}=0`: Сервис radosgw не запущен (Error).
+     - `{<Host>:haproxy.status.last()}=0`: Сервис haproxy не запущен (Error).
+   - **Для RadosGW HTTPS**:
+     - `{<Host>:ceph.radosgw.https.last()}=0`: RadosGW не отвечает на HTTPS (Error).
+   - **Для состояния кластера**:
+     - `{Ceph Cluster:ceph.cluster.health.last()}=1`: HEALTH_WARN (Warning).
+     - `{Ceph Cluster:ceph.cluster.health.last()}=2`: HEALTH_ERR (Error).
+   - **Для OSD**:
+     - `{<Host>:ceph.osd.active_count.last()}<N`: Меньше ожидаемого числа OSD (Error).
+       - Замените `N` на количество OSD на сервере (например, 2 для `osd1`).
+
+4. **Шаблон (опционально)**:
+   - Создайте шаблон `Ceph Minimal Monitoring` в Zabbix, включающий все элементы данных и триггеры.
+   - Привяжите шаблон к хостам для упрощения управления.
+
+#### Проверка работоспособности
+1. Убедитесь, что скрипты возвращают ожидаемые значения:
+   - На mon-сервере:
+     ```bash
+     /usr/local/bin/check_systemd_service.sh ceph-mon@$(hostname)
+     /usr/local/bin/ceph_cluster_health.sh  # Только на mon1
+     ```
+   - На RadosGW-сервере:
+     ```bash
+     /usr/local/bin/check_systemd_service.sh ceph-radosgw@rgw.$(hostname)
+     /usr/local/bin/check_radosgw_https.sh
+     /usr/local/bin/check_systemd_service.sh haproxy
+     ```
+   - На OSD-сервере:
+     ```bash
+     /usr/local/bin/check_osd_services.sh
+     ```
+2. Проверьте данные в Zabbix:
+   - Перейдите в **Monitoring > Latest Data** и убедитесь, что метрики собираются.
+3. Проверьте триггеры:
+   - Остановите сервис (например, `sudo systemctl stop ceph-mon@$(hostname)`) и убедитесь, что триггер срабатывает.
+
+#### Ограничения
+- **Ограниченный набор метрик**: Подход предоставляет только базовый мониторинг (состояние кластера и сервисов), без глубоких метрик, таких как производительность OSD или статистика пулов.
+- **Зависимость от формата вывода**: Скрипты парсят вывод `ceph -s`, который может измениться в будущих версиях Ceph.
+- **Ручная настройка**: Требуется установка и настройка скриптов на каждом сервере.
+- **OSD-мониторинг**: Подсчет активных OSD не проверяет их состояние в кластере (например, `up` или `down`), только активность сервисов.
+
+#### Рекомендации
+- **Тестирование**: Протестируйте скрипты в тестовой среде, чтобы убедиться, что они корректно парсят вывод и возвращают ожидаемые значения.
+- **Безопасность**: Убедитесь, что скрипты выполняются от имени пользователя с минимальными правами (например, с доступом через `cephx`).
+- **Расширение**: Для более глубокого мониторинга рассмотрите установку Zabbix Agent 2 в будущем, так как он поддерживает встроенный Ceph-плагин ([Zabbix Ceph Plugin]([invalid url, do not cite])).
+- **Шаблон**: Создание шаблона упростит масштабирование мониторинга на другие кластеры.
+
+#### Таблица скриптов и их размещения
+| Скрипт | Серверы | Назначение |
+|--------|---------|------------|
+| `check_systemd_service.sh` | Все (mon, RadosGW, OSD) | Проверка состояния systemd-сервисов (mon, mgr, radosgw, haproxy) |
+| `ceph_cluster_health.sh` | Один mon-сервер (mon1) | Проверка общего состояния кластера |
+| `check_radosgw_https.sh` | RadosGW-серверы | Проверка HTTPS-ответов RadosGW на порту 8443 |
+| `check_osd_services.sh` | OSD-серверы | Подсчет активных OSD-сервисов |
+
+#### Заключение
+Настройка мониторинга Ceph 17.2.7 с использованием Zabbix Agent через UserParameters позволяет эффективно отслеживать состояние кластера и доступность сервисов. Скрипты, размещенные на соответствующих серверах, собирают метрики о состоянии кластера, mon, mgr, radosgw, haproxy и OSD. Zabbix Server обрабатывает эти метрики и отправляет оповещения при проблемах. Этот подход минималистичен, но покрывает все указанные требования без необходимости использования Zabbix Agent 2 или `zabbix_sender`. Для дальнейшего расширения мониторинга рекомендуется рассмотреть переход на Zabbix Agent 2 или использование других инструментов, таких как Prometheus с Ceph-exporter.

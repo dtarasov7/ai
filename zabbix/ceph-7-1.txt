@@ -1,0 +1,389 @@
+### Ответ на запрос
+
+**Ключевые моменты:**
+- Для создания триггера, который проверяет метрику `ceph.health` одновременно на двух серверах мониторов (`ceph-mon1` и `ceph-mon2`), и учитывает случай, когда один из серверов вообще не отвечает, мы используем логическое И (`and`) в выражении триггера Zabbix.
+- Скорее всего, триггер должен срабатывать, если оба сервера сообщают о проблеме (`HEALTH_WARN` или `HEALTH_ERR`, т.е. `ceph.health > 0`) или если один из серверов не отвечает, а другой сообщает о проблеме.
+- В Zabbix, если сервер не отвечает (нет данных), значение `last(0)` будет недоступно, и это можно обработать с помощью функции `nodata()`.
+
+**Решение**  
+Мы создадим триггер, который срабатывает, если:
+- Оба сервера (`ceph-mon1` и `ceph-mon2`) сообщают `ceph.health > 0` (кластер не в состоянии `HEALTH_OK`).
+- Или один сервер не отвечает (нет данных в течение, например, 5 минут), а другой сообщает `ceph.health > 0`.
+
+**Выражение триггера**  
+В Zabbix выражение будет выглядеть так:
+```
+({ceph-mon1:ceph.health.last(0)}>0 and {ceph-mon2:ceph.health.last(0)}>0) or
+({ceph-mon1:ceph.health.nodata(5m)}=1 and {ceph-mon2:ceph.health.last(0)}>0) or
+({ceph-mon2:ceph.health.nodata(5m)}=1 and {ceph-mon1:ceph.health.last(0)}>0)
+```
+
+**Объяснение**:
+- `{ceph-mon1:ceph.health.last(0)}>0 and {ceph-mon2:ceph.health.last(0)}>0`: Оба сервера сообщают о проблеме (`HEALTH_WARN` или `HEALTH_ERR`).
+- `{ceph-mon1:ceph.health.nodata(5m)}=1 and {ceph-mon2:ceph.health.last(0)}>0`: `ceph-mon1` не отвечает (нет данных 5 минут), а `ceph-mon2` сообщает о проблеме.
+- `{ceph-mon2:ceph.health.nodata(5m)}=1 and {ceph-mon1:ceph.health.last(0)}>0`: `ceph-mon2` не отвечает, а `ceph-mon1` сообщает о проблеме.
+- `nodata(5m)` проверяет отсутствие данных в течение 5 минут, что указывает на недоступность сервера.
+- Используется `or` для объединения условий, чтобы триггер срабатывал в любом из этих случаев.
+
+**Добавление триггера в Zabbix**  
+1. В интерфейсе Zabbix перейдите в **Configuration** > **Hosts** > выберите хост (например, `ceph-mon1`).
+2. Перейдите на вкладку **Triggers** > **Create trigger**.
+3. Настройте:
+   - **Name**: Например, `Ceph Cluster Health Issue on mon1 and mon2`.
+   - **Expression**: Вставьте выражение:
+     ```
+     ({ceph-mon1:ceph.health.last(0)}>0 and {ceph-mon2:ceph.health.last(0)}>0) or
+     ({ceph-mon1:ceph.health.nodata(5m)}=1 and {ceph-mon2:ceph.health.last(0)}>0) or
+     ({ceph-mon2:ceph.health.nodata(5m)}=1 and {ceph-mon1:ceph.health.last(0)}>0)
+     ```
+   - **Severity**: Установите уровень, например, `High`.
+   - **Description**: Например, `Ceph cluster is not HEALTH_OK on both mon1 and mon2, or one is unreachable and the other reports an issue.`
+4. Сохраните триггер.
+
+**Интеграция в шаблон**  
+Чтобы включить этот триггер в XML-шаблон Zabbix, мы добавим его в раздел `<triggers>` шаблона `Ceph Mon Template`. Триггер будет применяться к хостам, связанным с этим шаблоном. Поскольку триггер ссылается на два хоста (`ceph-mon1` и `ceph-mon2`), мы будем использовать макросы `{HOST.HOST}` для текущего хоста и добавим ссылки на другой хост через точное имя (`ceph-mon2:ceph.health`).
+
+**Обновленный XML-шаблон**  
+Ниже приведен обновленный XML-шаблон, включающий триггер для проверки `ceph.health` на `ceph-mon1` и `ceph-mon2`. Триггер добавлен в `Ceph Mon Template`. Остальные части шаблона (для RadosGW и OSD) остаются без изменений, но включены для полноты.
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<zabbix_export>
+    <version>5.0</version>
+    <date>2025-05-08T18:30:00Z</date>
+    <groups>
+        <group>
+            <name>Templates</name>
+        </group>
+    </groups>
+    <templates>
+        <!-- Шаблон для серверов mon -->
+        <template>
+            <name>Ceph Mon Template</name>
+            <groups>
+                <group>
+                    <name>Templates</name>
+                </group>
+            </groups>
+            <items>
+                <item>
+                    <name>Ceph Cluster Health</name>
+                    <type>0</type>
+                    <key>ceph.health</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <value_type>3</value_type>
+                    <description>0=HEALTH_OK, 1=HEALTH_WARN, 2=HEALTH_ERR</description>
+                </item>
+                <item>
+                    <name>Ceph Monitors Up</name>
+                    <type>0</type>
+                    <key>ceph.mon.up</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <value_type>3</value_type>
+                    <description>0=All monitors up, 1=Some monitors down</description>
+                </item>
+                <item>
+                    <name>Ceph Managers Up</name>
+                    <type>0</type>
+                    <key>ceph.mgr.up</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <value_type>3</value_type>
+                    <description>0=Active manager present, 1=No active manager</description>
+                </item>
+                <item>
+                    <name>Ceph OSDs Up</name>
+                    <type>0</type>
+                    <key>ceph.osd.up</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <value_type>3</value_type>
+                    <description>0=All OSDs up, 1=Some OSDs down</description>
+                </item>
+                <item>
+                    <name>Ceph RadosGW Up</name>
+                    <type>0</type>
+                    <key>ceph.radosgw.up</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <value_type>3</value_type>
+                    <description>0=RadosGW active, 1=RadosGW inactive</description>
+                </item>
+                <item>
+                    <name>Local Ceph Mon Status</name>
+                    <type>0</type>
+                    <key>ceph.mon.local.status</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <value_type>3</value_type>
+                    <description>0=Mon service running, 1=Mon service stopped</description>
+                </item>
+                <item>
+                    <name>Local Ceph Mgr Status</name>
+                    <type>0</type>
+                    <key>ceph.mgr.local.status</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <value_type>3</value_type>
+                    <description>0=Mgr service running, 1=Mgr service stopped</description>
+                </item>
+                <item>
+                    <name>Ceph Pool Status</name>
+                    <type>0</type>
+                    <key>ceph.pool.status</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <value_type>3</value_type>
+                    <description>0=No recovery/degraded/misplaced, 1=Issues detected</description>
+                </item>
+                <item>
+                    <name>Ceph IOPS</name>
+                    <type>0</type>
+                    <key>ceph.iops</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <value_type>3</value_type>
+                    <units>ops/s</units>
+                    <description>Cluster IOPS</description>
+                </item>
+                <item>
+                    <name>Ceph Throughput</name>
+                    <type>0</type>
+                    <key>ceph.throughput</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <value_type>3</value_type>
+                    <units>bytes/s</units>
+                    <description>Cluster throughput</description>
+                </item>
+                <item>
+                    <name>Ceph Latency</name>
+                    <type>0</type>
+                    <key>ceph.latency</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <value_type>3</value_type>
+                    <units>ms</units>
+                    <description>Apply latency in milliseconds</description>
+                </item>
+                <item>
+                    <name>Network Interface Status</name>
+                    <type>0</type>
+                    <key>net.interface.status</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <value_type>3</value_type>
+                    <description>1=Interface up, 0=Interface down</description>
+                </item>
+            </items>
+            <triggers>
+                <trigger>
+                    <name>Ceph Cluster Health Issue on mon1 and mon2</name>
+                    <expression>
+                        ({ceph-mon1:ceph.health.last(0)}&gt;0 and {ceph-mon2:ceph.health.last(0)}&gt;0) or
+                        ({ceph-mon1:ceph.health.nodata(5m)}=1 and {ceph-mon2:ceph.health.last(0)}&gt;0) or
+                        ({ceph-mon2:ceph.health.nodata(5m)}=1 and {ceph-mon1:ceph.health.last(0)}&gt;0)
+                    </expression>
+                    <priority>4</priority>
+                    <description>Ceph cluster is not HEALTH_OK on both mon1 and mon2, or one is unreachable and the other reports an issue.</description>
+                    <status>0</status>
+                </trigger>
+            </triggers>
+        </template>
+
+        <!-- Шаблон для серверов RadosGW -->
+        <template>
+            <name>Ceph RadosGW Template</name>
+            <groups>
+                <group>
+                    <name>Templates</name>
+                </group>
+            </groups>
+            <items>
+                <item>
+                    <name>RadosGW Status</name>
+                    <type>0</type>
+                    <key>radosgw.status</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <value_type>3</value_type>
+                    <description>0=RadosGW running, 1=RadosGW stopped</description>
+                </item>
+                <item>
+                    <name>HAProxy Status</name>
+                    <type>0</type>
+                    <key>haproxy.status</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <value_type>3</value_type>
+                    <description>0=HAProxy running, 1=HAProxy stopped</description>
+                </item>
+                <item>
+                    <name>Keepalived Status</name>
+                    <type>0</type>
+                    <key>keepalived.status</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <value_type>3</value_type>
+                    <description>0=Keepalived running, 1=Keepalived stopped</description>
+                </item>
+                <item>
+                    <name>RadosGW HTTP Check</name>
+                    <type>0</type>
+                    <key>radosgw.http</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <value_type>3</value_type>
+                    <description>0=HTTP 200 OK, 1=HTTP error</description>
+                </item>
+                <item>
+                    <name>HAProxy Connections</name>
+                    <type>0</type>
+                    <key>haproxy.connections</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <value_type>3</value_type>
+                    <units>connections</units>
+                    <description>Number of active HAProxy connections</description>
+                </item>
+                <item>
+                    <name>Keepalived VIP Status</name>
+                    <type>0</type>
+                    <key>keepalived.vip.status</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <value_type>3</value_type>
+                    <description>1=MASTER, 0=BACKUP</description>
+                </item>
+                <item>
+                    <name>Network Interface Status</name>
+                    <type>0</type>
+                    <key>net.interface.status</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <value_type>3</value_type>
+                    <description>1=Interface up, 0=Interface down</description>
+                </item>
+            </items>
+        </template>
+
+        <!-- Шаблон для серверов OSD -->
+        <template>
+            <name>Ceph OSD Template</name>
+            <groups>
+                <group>
+                    <name>Templates</name>
+                </group>
+            </groups>
+            <items>
+                <item>
+                    <name>OSD 0 Status</name>
+                    <type>0</type>
+                    <key>osd.status.0</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <value_type>3</value_type>
+                    <description>0=OSD running, 1=OSD stopped</description>
+                </item>
+                <item>
+                    <name>OSD 0 Disk Free</name>
+                    <type>0</type>
+                    <key>osd.disk.free.0</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <value_type>3</value_type>
+                    <units>bytes</units>
+                    <description>Free disk space for OSD 0</description>
+                </item>
+                <item>
+                    <name>Network Interface Status</name>
+                    <type>0</type>
+                    <key>net.interface.status</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <value_type>3</value_type>
+                    <description>1=Interface up, 0=Interface down</description>
+                </item>
+            </items>
+        </template>
+    </templates>
+</zabbix_export>
+```
+
+### Подробный отчет
+
+#### Введение
+Для мониторинга Ceph кластера версии 17.2.7 с использованием Zabbix Agent 1 был обновлен XML-шаблон, чтобы включить триггер, проверяющий метрику `ceph.health` одновременно на двух серверах мониторов (`ceph-mon1` и `ceph-mon2`). Триггер учитывает случай, когда один из серверов не отвечает, и срабатывает, если оба сервера сообщают о проблеме или один не отвечает, а другой сообщает о проблеме. Остальная часть решения (скрипты, UserParameters, шаблоны для mon, RadosGW и OSD) остается без изменений, но включена для полноты.
+
+#### Архитектура триггера
+Триггер добавлен в шаблон `Ceph Mon Template` и использует следующее выражение:
+```
+({ceph-mon1:ceph.health.last(0)}>0 and {ceph-mon2:ceph.health.last(0)}>0) or
+({ceph-mon1:ceph.health.nodata(5m)}=1 and {ceph-mon2:ceph.health.last(0)}>0) or
+({ceph-mon2:ceph.health.nodata(5m)}=1 and {ceph-mon1:ceph.health.last(0)}>0)
+```
+
+- **Условия**:
+  - Оба сервера сообщают `ceph.health > 0` (кластер в состоянии `HEALTH_WARN` или `HEALTH_ERR`).
+  - `ceph-mon1` не отвечает (`nodata(5m)`), а `ceph-mon2` сообщает `ceph.health > 0`.
+  - `ceph-mon2` не отвечает (`nodata(5m)`), а `ceph-mon1` сообщает `ceph.health > 0`.
+- **Параметры**:
+  - `nodata(5m)`: Проверяет отсутствие данных в течение 5 минут.
+  - `priority=4`: Уровень `High` для серьезной проблемы.
+  - Триггер добавлен в шаблон, чтобы автоматически применяться к хостам mon.
+
+#### Ограничения и соображения
+- **Фиксированные имена хостов**: Триггер использует точные имена `ceph-mon1` и `ceph-mon2`. Если имена хостов в вашей системе отличаются, замените их в выражении триггера перед импортом XML.
+- **Масштабируемость**: Триггер проверяет только два сервера. Для кластера с 5 mon можно создать аналогичные триггеры для других пар (например, mon1 и mon3) или использовать более сложную логику, например, проверку большинства серверов (`min`/`max` функций).
+- **nodata(5m)**: Время 5 минут выбрано как разумный баланс. Для более быстрого реагирования можно уменьшить до 2–3 минут, но это может привести к ложным срабатываниям при кратковременных сбоях сети.
+- **Zabbix Agent 1**: Пассивные проверки требуют регулярного опроса, что может задержать обнаружение `nodata`.
+
+#### Альтернативный подход
+Если вы хотите, чтобы триггер учитывал все 5 серверов mon и срабатывал, например, когда большинство (3 из 5) сообщают `ceph.health > 0` или не отвечают, можно использовать функцию `count`:
+```
+{ceph-mon1:ceph.health.last(0)}>0 + {ceph-mon2:ceph.health.last(0)}>0 + {ceph-mon3:ceph.health.last(0)}>0 +
+{ceph-mon4:ceph.health.last(0)}>0 + {ceph-mon5:ceph.health.last(0)}>0 +
+{ceph-mon1:ceph.health.nodata(5m)} + {ceph-mon2:ceph.health.nodata(5m)} +
+{ceph-mon3:ceph.health.nodata(5m)} + {ceph-mon4:ceph.health.nodata(5m)} +
+{ceph-mon5:ceph.health.nodata(5m)} >= 3
+```
+Это выражение подсчитывает количество серверов с проблемами или недоступных и срабатывает, если их 3 или больше. Однако оно сложнее и требует настройки для всех 5 хостов.
+
+#### Как использовать
+1. Сохраните XML в файл, например, `ceph_templates_with_trigger.xml`.
+2. Импортируйте в Zabbix: **Configuration** > **Templates** > **Import**.
+3. Привяжите `Ceph Mon Template` к хостам `ceph-mon1`–`ceph-mon5`, `Ceph RadosGW Template` к `radosgw1`–`radosgw4`, `Ceph OSD Template` к `osd1`–`osd6`.
+4. Убедитесь, что UserParameters настроены в `/etc/zabbix/zabbix_agentd.conf`, как указано ранее.
+5. Проверьте срабатывание триггера в **Monitoring** > **Triggers**.
+
+#### Заключение
+Добавленный триггер позволяет надежно отслеживать состояние кластера Ceph, проверяя `ceph.health` на `ceph-mon1` и `ceph-mon2`, и учитывает случай, когда один из серверов не отвечает. XML-шаблон включает этот триггер и сохраняет все метрики для mon, RadosGW и OSD, обеспечивая полный мониторинг кластера.
+
+### Key Citations
+- [Zabbix Trigger Expressions](https://www.zabbix.com/documentation/current/en/manual/config/triggers/expression)
+- [Ceph Monitoring with Zabbix](https://www.zabbix.com/integrations/ceph)
+- [Zabbix User Parameters](https://www.zabbix.com/documentation/current/en/manual/config/items/userparameters)

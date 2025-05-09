@@ -1,0 +1,350 @@
+### Ответ на запрос
+
+**Ключевые моменты:**
+- Для мониторинга Ceph 17.2.7 с Zabbix Agent 1 можно создать XML-шаблон Zabbix, включающий элементы данных для всех указанных метрик.
+- Вероятно, два шаблона — один для серверов мониторов (mon) и один для серверов RadosGW — обеспечат точное соответствие UserParameters на каждом типе хоста.
+- Шаблоны включают дополнительные метрики, такие как статистика HAProxy и статус VIP Keepalived, как было рекомендовано ранее.
+- XML-шаблон совместим с Zabbix 5.0 и выше, но может потребовать проверки на вашей версии Zabbix.
+
+**Обзор решения**  
+Для мониторинга Ceph кластера с использованием Zabbix Agent 1 мы подготовили XML-шаблон, который включает два шаблона: **Ceph Mon Template** для серверов мониторов (mon1–mon5) и **Ceph RadosGW Template** для серверов RadosGW (radosgw1–radosgw4). Эти шаблоны содержат элементы данных, соответствующие UserParameters, определенным в конфигурации Zabbix Agent 1, для сбора метрик, таких как статус кластера, доступность служб mon, mgr, RadosGW, OSD, HAProxy, Keepalived, а также дополнительные метрики, такие как количество соединений HAProxy и статус VIP.
+
+**Как использовать шаблон**  
+1. Сохраните предоставленный XML-код в файл, например, `ceph_templates.xml`.  
+2. Импортируйте файл в Zabbix через интерфейс: **Configuration** > **Templates** > **Import**.  
+3. Привяжите **Ceph Mon Template** к хостам mon1–mon5 и **Ceph RadosGW Template** к хостам radosgw1–radosgw4.  
+4. Убедитесь, что UserParameters настроены в `/etc/zabbix/zabbix_agentd.conf` на каждом сервере, как указано ранее.
+
+**Дополнительные шаги**  
+После импорта вы можете добавить триггеры для оповещений (например, если `ceph.health` не равно 0) или создать дашборды для визуализации данных. Для мониторинга VIP можно настроить отдельный хост с проверкой `net.tcp.service`.
+
+---
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<zabbix_export>
+    <version>5.0</version>
+    <date>2025-05-08T17:52:00Z</date>
+    <groups>
+        <group>
+            <name>Templates</name>
+        </group>
+    </groups>
+    <templates>
+        <!-- Шаблон для серверов мониторов (mon) -->
+        <template>
+            <name>Ceph Mon Template</name>
+            <groups>
+                <group>
+                    <name>Templates</name>
+                </group>
+            </groups>
+            <items>
+                <!-- Общий статус кластера -->
+                <item>
+                    <name>Ceph Cluster Health</name>
+                    <type>0</type>
+                    <key>ceph.health</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <status>0</status>
+                    <value_type>3</value_type>
+                    <units></units>
+                    <delta>0</delta>
+                    <description>0=HEALTH_OK, 1=HEALTH_WARN, 2=HEALTH_ERR</description>
+                </item>
+                <!-- Доступность мониторов -->
+                <item>
+                    <name>Ceph Monitors Up</name>
+                    <type>0</type>
+                    <key>ceph.mon.up</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <status>0</status>
+                    <value_type>3</value_type>
+                    <units></units>
+                    <delta>0</delta>
+                    <description>0=All monitors up, 1=Some monitors down</description>
+                </item>
+                <!-- Доступность менеджеров -->
+                <item>
+                    <name>Ceph Managers Up</name>
+                    <type>0</type>
+                    <key>ceph.mgr.up</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <status>0</status>
+                    <value_type>3</value_type>
+                    <units></units>
+                    <delta>0</delta>
+                    <description>0=Active manager present, 1=No active manager</description>
+                </item>
+                <!-- Доступность OSD -->
+                <item>
+                    <name>Ceph OSDs Up</name>
+                    <type>0</type>
+                    <key>ceph.osd.up</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <status>0</status>
+                    <value_type>3</value_type>
+                    <units></units>
+                    <delta>0</delta>
+                    <description>0=All OSDs up, 1=Some OSDs down</description>
+                </item>
+                <!-- Доступность RadosGW -->
+                <item>
+                    <name>Ceph RadosGW Up</name>
+                    <type>0</type>
+                    <key>ceph.radosgw.up</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <status>0</status>
+                    <value_type>3</value_type>
+                    <units></units>
+                    <delta>0</delta>
+                    <description>0=RadosGW active, 1=RadosGW inactive</description>
+                </item>
+                <!-- Локальный статус mon -->
+                <item>
+                    <name>Local Ceph Mon Status</name>
+                    <type>0</type>
+                    <key>ceph.mon.local.status</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <status>0</status>
+                    <value_type>3</value_type>
+                    <units></units>
+                    <delta>0</delta>
+                    <description>0=Mon service running, 1=Mon service stopped</description>
+                </item>
+                <!-- Локальный статус mgr -->
+                <item>
+                    <name>Local Ceph Mgr Status</name>
+                    <type>0</type>
+                    <key>ceph.mgr.local.status</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <status>0</status>
+                    <value_type>3</value_type>
+                    <units></units>
+                    <delta>0</delta>
+                    <description>0=Mgr service running, 1=Mgr service stopped</description>
+                </item>
+            </items>
+        </template>
+
+        <!-- Шаблон для серверов RadosGW -->
+        <template>
+            <name>Ceph RadosGW Template</name>
+            <groups>
+                <group>
+                    <name>Templates</name>
+                </group>
+            </groups>
+            <items>
+                <!-- Статус RadosGW -->
+                <item>
+                    <name>RadosGW Status</name>
+                    <type>0</type>
+                    <key>radosgw.status</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <status>0</status>
+                    <value_type>3</value_type>
+                    <units></units>
+                    <delta>0</delta>
+                    <description>0=RadosGW running, 1=RadosGW stopped</description>
+                </item>
+                <!-- Статус HAProxy -->
+                <item>
+                    <name>HAProxy Status</name>
+                    <type>0</type>
+                    <key>haproxy.status</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <status>0</status>
+                    <value_type>3</value_type>
+                    <units></units>
+                    <delta>0</delta>
+                    <description>0=HAProxy running, 1=HAProxy stopped</description>
+                </item>
+                <!-- Статус Keepalived -->
+                <item>
+                    <name>Keepalived Status</name>
+                    <type>0</type>
+                    <key>keepalived.status</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <status>0</status>
+                    <value_type>3</value_type>
+                    <units></units>
+                    <delta>0</delta>
+                    <description>0=Keepalived running, 1=Keepalived stopped</description>
+                </item>
+                <!-- Проверка HTTP RadosGW -->
+                <item>
+                    <name>RadosGW HTTP Check</name>
+                    <type>0</type>
+                    <key>radosgw.http</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <status>0</status>
+                    <value_type>3</value_type>
+                    <units></units>
+                    <delta>0</delta>
+                    <description>0=HTTP 200 OK, 1=HTTP error</description>
+                </item>
+                <!-- Количество соединений HAProxy -->
+                <item>
+                    <name>HAProxy Connections</name>
+                    <type>0</type>
+                    <key>haproxy.connections</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <status>0</status>
+                    <value_type>3</value_type>
+                    <units>connections</units>
+                    <delta>0</delta>
+                    <description>Number of active HAProxy connections</description>
+                </item>
+                <!-- Статус VIP Keepalived -->
+                <item>
+                    <name>Keepalived VIP Status</name>
+                    <type>0</type>
+                    <key>keepalived.vip.status</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <status>0</status>
+                    <value_type>3</value_type>
+                    <units></units>
+                    <delta>0</delta>
+                    <description>1=MASTER, 0=BACKUP</description>
+                </item>
+            </items>
+        </template>
+    </templates>
+</zabbix_export>
+```
+
+### Подробный отчет
+
+#### Введение
+Для мониторинга Ceph кластера версии 17.2.7 с использованием Zabbix Agent 1 и UserParameters был разработан XML-шаблон Zabbix, который включает два шаблона: **Ceph Mon Template** для серверов мониторов (mon1–mon5) и **Ceph RadosGW Template** для серверов RadosGW (radosgw1–radosgw4). Эти шаблоны охватывают все метрики, указанные в запросе, включая общий статус кластера, доступность служб mon, mgr, RadosGW, OSD, HAProxy и Keepalived, а также дополнительные метрики, такие как количество соединений HAProxy и статус VIP Keepalived. Шаблоны совместимы с Zabbix версии 5.0 и выше, но могут потребовать проверки на вашей версии Zabbix.
+
+#### Архитектура шаблонов
+Шаблоны разработаны для соответствия конфигурации Zabbix Agent 1, где UserParameters определены в файле `/etc/zabbix/zabbix_agentd.conf` на каждом сервере. Для обеспечения точного мониторинга используются два отдельных шаблона:
+
+- **Ceph Mon Template**: Применяется к серверам mon1–mon5, которые собирают кластерные метрики (например, `ceph.health`) и локальные статусы служб mon и mgr.
+- **Ceph RadosGW Template**: Применяется к серверам radosgw1–radosgw4, которые мониторят локальные службы RadosGW, HAProxy, Keepalived и HTTP-ответы на порту 8443.
+
+##### Элементы данных
+Каждый шаблон содержит элементы данных (items), соответствующие UserParameters, определенным ранее. Все элементы используют тип `Zabbix agent` (код 0) и тип значения `Numeric (unsigned)` (код 3), так как скрипты возвращают числа (0, 1, 2 или счетчики). Интервал обновления установлен на 60 секунд, история хранится 7 дней, а тренды — 365 дней.
+
+**Ceph Mon Template**:
+| Ключ                     | Название                     | Описание                                      |
+|--------------------------|------------------------------|-----------------------------------------------|
+| ceph.health              | Ceph Cluster Health          | 0=HEALTH_OK, 1=HEALTH_WARN, 2=HEALTH_ERR     |
+| ceph.mon.up              | Ceph Monitors Up             | 0=All monitors up, 1=Some monitors down      |
+| ceph.mgr.up              | Ceph Managers Up             | 0=Active manager present, 1=No active manager|
+| ceph.osd.up              | Ceph OSDs Up                 | 0=All OSDs up, 1=Some OSDs down             |
+| ceph.radosgw.up          | Ceph RadosGW Up              | 0=RadosGW active, 1=RadosGW inactive         |
+| ceph.mon.local.status    | Local Ceph Mon Status        | 0=Mon service running, 1=Mon service stopped |
+| ceph.mgr.local.status    | Local Ceph Mgr Status        | 0=Mgr service running, 1=Mgr service stopped |
+
+**Ceph RadosGW Template**:
+| Ключ                     | Название                     | Описание                                      |
+|--------------------------|------------------------------|-----------------------------------------------|
+| radosgw.status           | RadosGW Status               | 0=RadosGW running, 1=RadosGW stopped         |
+| haproxy.status           | HAProxy Status               | 0=HAProxy running, 1=HAProxy stopped         |
+| keepalived.status        | Keepalived Status            | 0=Keepalived running, 1=Keepalived stopped   |
+| radosgw.http             | RadosGW HTTP Check           | 0=HTTP 200 OK, 1=HTTP error                  |
+| haproxy.connections      | HAProxy Connections          | Number of active HAProxy connections          |
+| keepalived.vip.status    | Keepalived VIP Status        | 1=MASTER, 0=BACKUP                           |
+
+##### Дополнительные метрики
+Шаблоны включают дополнительные метрики, рекомендованные ранее:
+- **HAProxy Connections**: Считает активные соединения через сокет HAProxy.
+- **Keepalived VIP Status**: Проверяет, является ли сервер MASTER или BACKUP.
+
+Для мониторинга VIP рекомендуется создать отдельный хост в Zabbix с элементом данных типа `Simple check` (например, `net.tcp.service[tcp,<VIP>,443]`), так как это сетевая проверка, а не UserParameter.
+
+#### Настройка и использование
+##### Импорт шаблона
+1. Сохраните XML-код в файл, например, `ceph_templates.xml`.
+2. В интерфейсе Zabbix перейдите в **Configuration** > **Templates** > **Import**.
+3. Выберите файл и импортируйте его. После этого появятся шаблоны **Ceph Mon Template** и **Ceph RadosGW Template**.
+
+##### Привязка к хостам
+- Для каждого сервера mon (mon1–mon5):
+  - Создайте хост в Zabbix с IP-адресом или DNS-именем.
+  - Привяжите шаблон **Ceph Mon Template**.
+- Для каждого сервера RadosGW (radosgw1–radosgw4):
+  - Создайте хост в Zabbix.
+  - Привяжите шаблон **Ceph RadosGW Template**.
+- Для VIP (опционально):
+  - Создайте хост, например, `ceph-vip`.
+  - Добавьте элемент данных `net.tcp.service[tcp,<VIP>,443]` с типом `Simple check`.
+
+##### Проверка конфигурации
+- Убедитесь, что Zabbix Agent 1 установлен на всех серверах, и UserParameters настроены в `/etc/zabbix/zabbix_agentd.conf`, как указано ранее.
+- Проверьте, что скрипты (например, `/usr/local/bin/ceph_monitor/ceph_health.sh`) доступны и выполняются от имени пользователя `zabbix` с использованием cephx ключей.
+- Через несколько минут данные должны появиться в разделе **Monitoring** > **Latest Data**.
+
+##### Настройка триггеров (опционально)
+Хотя триггеры не включены в шаблон, вы можете добавить их для оповещений. Примеры:
+- Для `ceph.health`: `{host:ceph.health.last(0)}>0` — срабатывает, если кластер не в состоянии HEALTH_OK.
+- Для `radosgw.http`: `{host:radosgw.http.last(0)}=1` — срабатывает, если RadosGW не отвечает по HTTPS.
+- Для `keepalived.vip.status`: `{host:keepalived.vip.status.last(0)}=0` — срабатывает, если сервер не является MASTER (может потребовать настройки для каждого сервера).
+
+#### Дополнительные рекомендации
+##### Мониторинг OSD серверов
+Статус OSD мониторится через кластерные команды (`ceph.osd.up`) с серверов mon, поэтому установка Zabbix Agent 1 на OSD серверах необязательна. Однако для мониторинга использования дисков можно установить агента и добавить элементы данных, такие как `vfs.fs.size[/var/lib/ceph/osd,free]`.
+
+##### Мониторинг пулов Ceph
+Для более глубокого мониторинга можно добавить UserParameter для команды `ceph osd pool stats`, чтобы отслеживать здоровье пулов. Пример:
+```ini
+UserParameter=ceph.pool.status,/usr/local/bin/ceph_monitor/ceph_pool_status.sh
+```
+
+##### Производительность Ceph
+Для мониторинга производительности (IOPS, задержки) можно использовать команду `ceph perf`. Это потребует дополнительного скрипта и UserParameter.
+
+##### Логирование
+Добавьте логирование в скрипты (например, в `/var/log/ceph_monitor.log`) для упрощения отладки.
+
+#### Ограничения и соображения
+- **Zabbix Agent 1**: Поддерживает только пассивные проверки, что требует регулярного опроса со стороны сервера Zabbix. Это может увеличить нагрузку на сервер при большом количестве хостов.
+- **Безопасность**: Убедитесь, что cephx ключи (`/etc/ceph/ceph.client.zabbix-monitor.keyring`) защищены от несанкционированного доступа.
+- **Зависимости**: Скрипты используют утилиту `jq` для парсинга JSON. Если она недоступна, замените на `awk` или `grep`, но это может осложнить обработку.
+- **Совместимость**: Шаблон разработан для Zabbix 5.0, но проверьте совместимость с вашей версией Zabbix. Для более старых версий (например, 4.0) может потребоваться изменение формата XML.
+
+#### Альтернативные подходы
+Существуют готовые шаблоны для мониторинга Ceph, например, в репозитории Ceph ([Zabbix Module Template](https://github.com/ceph/ceph/blob/master/src/pybind/mgr/zabbix/zabbix_template.xml)) или в сторонних источниках ([sorrowless/zabbix_template_ceph](https://github.com/sorrowless/zabbix_template_ceph)). Однако они ориентированы на Zabbix Agent 2 или модуль ceph-mgr с `zabbix_sender`, что не соответствует вашему подходу с UserParameters и Agent 1. Поэтому был создан кастомный шаблон, точно соответствующий вашим требованиям.
+
+#### Заключение
+Предоставленный XML-шаблон позволяет эффективно мониторить Ceph кластер с использованием Zabbix Agent 1, охватывая все указанные службы и дополнительные метрики. Для дальнейшего улучшения мониторинга рекомендуется настроить триггеры, дашборды и, при необходимости, добавить мониторинг OSD серверов или производительности Ceph.
+
+### Key Citations
+- [Ceph Manager Daemon Documentation](https://docs.ceph.com/en/latest/mgr/)
+- [Ceph Monitoring with Zabbix Integration](https://www.zabbix.com/integrations/ceph)
+- [Ceph Storage Monitoring with Zabbix](https://developers.redhat.com/blog/2020/03/23/ceph-storage-monitoring-with-zabbix)
+- [Zabbix Module for Ceph Quincy](https://docs.ceph.com/en/quincy/mgr/zabbix/)
+- [Zabbix Module for Ceph Reef](https://docs.ceph.com/en/reef/mgr/zabbix/)
+- [Zabbix Module for Ceph Nautilus](https://docs.ceph.com/en/nautilus/mgr/zabbix/)
+- [Zabbix Template for Ceph OSD Nodes](https://github.com/sorrowless/zabbix_template_ceph)
+- [Ceph Zabbix Template XML](https://github.com/ceph/ceph/blob/master/src/pybind/mgr/zabbix/zabbix_template.xml)
+- [Zabbix HTTP Template Operation](https://www.zabbix.com/documentation/current/en/manual/config/templates_out_of_the_box/http)

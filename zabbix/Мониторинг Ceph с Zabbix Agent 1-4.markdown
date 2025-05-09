@@ -1,0 +1,358 @@
+# Мониторинг Ceph 17.2.7 с Zabbix Agent 1 с использованием UserParameters
+
+## Введение
+Для мониторинга Ceph кластера версии 17.2.7 с использованием Zabbix Agent 1 и UserParameters необходимо создать скрипты, которые выполняют команды Ceph и проверяют статус служб, а затем интегрировать их в Zabbix через UserParameters. В данном решении мы рассмотрим настройку мониторинга для кластера, состоящего из:
+- 5 серверов мониторов (mon), на каждом из которых также работает менеджер (mgr).
+- 4 серверов RadosGW, отвечающих по HTTPS на порту 8443, с установленными HAProxy (порт 443) и Keepalived для управления VIP.
+- 6 серверов OSD.
+
+Мы скорректируем предыдущее решение, установив Zabbix Agent 1 на все 5 серверов mon для обеспечения избыточности, добавим локальный мониторинг служб mon и mgr на каждом сервере, настроим cephx ключи для безопасного выполнения команд Ceph, и учтем дополнительные рекомендации, такие как мониторинг VIP Keepalived, статистики HAProxy и использования дисков OSD.
+
+## Архитектура мониторинга
+### Подход
+- **Zabbix Agent 1** будет установлен:
+  - На всех 5 серверах мониторов (mon1, mon2, mon3, mon4, mon5) для сбора кластерных метрик (общий статус кластера, доступность mon, mgr, OSD, RadosGW) и локальных статусов служб (ceph-mon, ceph-mgr).
+  - На каждом из 4 серверов RadosGW для мониторинга локальных служб: RadosGW, HAProxy, Keepalived и ответа RadosGW по HTTPS на порту 8443.
+  - Установка на OSD серверах необязательна, так как статус OSD можно мониторить через кластерные команды с mon серверов, но может быть полезна для локальных метрик (например, использования дисков).
+- **UserParameters** будут определены в файле конфигурации Zabbix Agent 1 (`/etc/zabbix/zabbix_agentd.conf`) для вызова скриптов, возвращающих статус служб.
+- **Zabbix сервер** будет настроен для сбора данных, создания элементов данных и триггеров для оповещения о проблемах.
+
+### Предположения
+- Команды Ceph доступны на всех серверах mon, и Zabbix Agent имеет соответствующие права через cephx ключи.
+- На серверах RadosGW службы RadosGW, HAProxy и Keepalived управляются через systemd.
+- Утилита `jq` установлена для парсинга JSON-выводов Ceph команд. Если `jq` недоступна, можно использовать `awk` или `grep`.
+- Сертификаты HTTPS на RadosGW могут быть самоподписанными, поэтому для проверки порта 8443 используется флаг `--insecure` в `curl`.
+
+## Настройка cephx ключей для Zabbix Agent
+Для безопасного выполнения команд Ceph от имени Zabbix Agent необходимо создать специального пользователя Ceph и предоставить ему минимальные права.
+
+### Шаги настройки
+1. **Создание пользователя Ceph для мониторинга**:
+   ```bash
+   ceph auth get-or-create client.zabbix-monitor mon 'allow r' osd 'allow r' -o /etc/ceph/ceph.client.zabbix-monitor.keyring
+   ```
+   - Права `mon 'allow r'` позволяют читать данные мониторов, а `osd 'allow r'` — данные OSD. Для других команд (например, `ceph mgr stat`) могут потребоваться дополнительные права, такие как `mgr 'allow r'`.
+
+2. **Настройка прав доступа к ключу**:
+   Убедитесь, что файл ключа доступен для чтения пользователем `zabbix`:
+   ```bash
+   chown zabbix:zabbix /etc/ceph/ceph.client.zabbix-monitor.keyring
+   chmod 640 /etc/ceph/ceph.client.zabbix-monitor.keyring
+   ```
+
+3. **Использование ключа в скриптах**:
+   В скриптах, выполняемых Zabbix Agent, используйте опции `--id` и `--keyring`:
+   ```bash
+   ceph --id zabbix-monitor --keyring /etc/ceph/ceph.client.zabbix-monitor.keyring status
+   ```
+
+4. **Проверка**:
+   Убедитесь, что скрипты работают под пользователем `zabbix`:
+   ```bash
+   sudo -u zabbix /usr/local/bin/ceph_monitor/ceph_health.sh
+   ```
+
+## Скрипты и конфигурация
+
+### A. Сервера мониторов (mon1, mon2, mon3, mon4, mon5)
+Каждый сервер mon используется для сбора кластерных метрик и проверки локальных служб ceph-mon и ceph-mgr.
+
+#### Скрипты
+Создайте директорию для скриптов на каждом сервере mon:
+```bash
+mkdir -p /usr/local/bin/ceph_monitor
+```
+
+Добавьте следующие скрипты:
+
+1. **ceph_health.sh** — Проверка общего статуса кластера:
+```bash
+#!/bin/bash
+health=$(ceph --id zabbix-monitor --keyring /etc/ceph/ceph.client.zabbix-monitor.keyring status | grep "health:" | awk '{print $2}')
+case $health in
+  HEALTH_OK) echo 0 ;;
+  HEALTH_WARN) echo 1 ;;
+  *) echo 2 ;;
+esac
+```
+
+2. **ceph_mon_up.sh** — Проверка доступности всех мониторов:
+```bash
+#!/bin/bash
+total_mons=$(ceph --id zabbix-monitor --keyring /etc/ceph/ceph.client.zabbix-monitor.keyring mon dump --format json | jq '.monmap.mons | length')
+up_mons=$(ceph --id zabbix-monitor --keyring /etc/ceph/ceph.client.zabbix-monitor.keyring mon dump --format json | jq '.size')
+if [ $total_mons -eq $up_mons ]; then
+  echo 0
+else
+  echo 1
+fi
+```
+
+3. **ceph_mgr_up.sh** — Проверка наличия активного менеджера:
+```bash
+#!/bin/bash
+mgr_status=$(ceph --id zabbix-monitor --keyring /etc/ceph/ceph.client.zabbix-monitor.keyring mgr stat | grep "active" | wc -l)
+if [ $mgr_status -gt 0 ]; then
+  echo 0
+else
+  echo 1
+fi
+```
+
+4. **ceph_osd_up.sh** — Проверка, что все OSD активны и включены:
+```bash
+#!/bin/bash
+osd_stat=$(ceph --id zabbix-monitor --keyring /etc/ceph/ceph.client.zabbix-monitor.keyring osd stat | grep "osds:" | awk -F'/' '{print $1}' | awk '{print $1}')
+up_osds=$(ceph --id zabbix-monitor --keyring /etc/ceph/ceph.client.zabbix-monitor.keyring osd stat | grep "up" | awk '{print $3}')
+if [ $osd_stat -eq $up_osds ]; then
+  echo 0
+else
+  echo 1
+fi
+```
+
+5. **ceph_radosgw_up.sh** — Проверка активности всех RadosGW демонов:
+```bash
+#!/bin/bash
+rgw_status=$(ceph --id zabbix-monitor --keyring /etc/ceph/ceph.client.zabbix-monitor.keyring status | grep "rgw" | awk '{print $2}')
+if [ "$rgw_status" == "active" ]; then
+  echo 0
+else
+  echo 1
+fi
+```
+
+6. **ceph_mon_local_status.sh** — Проверка локальной службы ceph-mon:
+```bash
+#!/bin/bash
+status=$(systemctl is-active ceph-mon@$(hostname))
+if [ "$status" == "active" ]; then
+  echo 0
+else
+  echo 1
+fi
+```
+
+7. **ceph_mgr_local_status.sh** — Проверка локальной службы ceph-mgr:
+```bash
+#!/bin/bash
+status=$(systemctl is-active ceph-mgr@$(hostname))
+if [ "$status" == "active" ]; then
+  echo 0
+else
+  echo 1
+fi
+```
+
+Сделайте скрипты исполняемыми:
+```bash
+chmod +x /usr/local/bin/ceph_monitor/*
+```
+
+#### Конфигурация Zabbix Agent 1
+Отредактируйте `/etc/zabbix/zabbix_agentd.conf` на каждом сервере mon и добавьте:
+```ini
+UserParameter=ceph.health,/usr/local/bin/ceph_monitor/ceph_health.sh
+UserParameter=ceph.mon.up,/usr/local/bin/ceph_monitor/ceph_mon_up.sh
+UserParameter=ceph.mgr.up,/usr/local/bin/ceph_monitor/ceph_mgr_up.sh
+UserParameter=ceph.osd.up,/usr/local/bin/ceph_monitor/ceph_osd_up.sh
+UserParameter=ceph.radosgw.up,/usr/local/bin/ceph_monitor/ceph_radosgw_up.sh
+UserParameter=ceph.mon.local.status,/usr/local/bin/ceph_monitor/ceph_mon_local_status.sh
+UserParameter=ceph.mgr.local.status,/usr/local/bin/ceph_monitor/ceph_mgr_local_status.sh
+```
+
+Перезапустите Zabbix Agent:
+```bash
+systemctl restart zabbix-agent
+```
+
+### B. Сервера RadosGW
+Каждый из четырех серверов RadosGW мониторит локальные службы: RadosGW, HAProxy, Keepalived и ответ по HTTPS на порту 8443.
+
+#### Скрипты
+Создайте директорию для скриптов:
+```bash
+mkdir -p /usr/local/bin/radosgw_monitor
+```
+
+Добавьте следующие скрипты:
+
+1. **radosgw_status.sh** — Проверка статуса службы RadosGW:
+```bash
+#!/bin/bash
+status=$(systemctl is-active radosgw)
+if [ "$status" == "active" ]; then
+  echo 0
+else
+  echo 1
+fi
+```
+
+2. **haproxy_status.sh** — Проверка статуса HAProxy:
+```bash
+#!/bin/bash
+status=$(systemctl is-active haproxy)
+if [ "$status" == "active" ]; then
+  echo 0
+else
+  echo 1
+fi
+```
+
+3. **keepalived_status.sh** — Проверка статуса Keepalived:
+```bash
+#!/bin/bash
+status=$(systemctl is-active keepalived)
+if [ "$status" == "active" ]; then
+  echo 0
+else
+  echo 1
+fi
+```
+
+4. **radosgw_http_check.sh** — Проверка ответа RadosGW по HTTPS на порту 8443:
+```bash
+#!/bin/bash
+response=$(curl -s -o /dev/null -w "%{http_code}" https://localhost:8443 --insecure)
+if [ "$response" == "200" ]; then
+  echo 0
+else
+  echo 1
+fi
+```
+
+5. **haproxy_connections.sh** — Проверка количества активных соединений HAProxy:
+```bash
+#!/bin/bash
+echo "show stat" | socat /var/run/haproxy.sock - | grep "svname" | awk -F',' '{print $10}'
+```
+
+6. **keepalived_vip_status.sh** — Проверка состояния VIP (MASTER или BACKUP):
+```bash
+#!/bin/bash
+state=$(ip addr show | grep "<VIP_ADDRESS>" | wc -l)
+if [ $state -gt 0 ]; then
+  echo 1  # MASTER
+else
+  echo 0  # BACKUP
+fi
+```
+Замените `<VIP_ADDRESS>` на фактический VIP-адрес.
+
+Сделайте скрипты исполняемыми:
+```bash
+chmod +x /usr/local/bin/radosgw_monitor/*
+```
+
+#### Конфигурация Zabbix Agent 1
+Отредактируйте `/etc/zabbix/zabbix_agentd.conf` на каждом сервере RadosGW и добавьте:
+```ini
+UserParameter=radosgw.status,/usr/local/bin/radosgw_monitor/radosgw_status.sh
+UserParameter=haproxy.status,/usr/local/bin/radosgw_monitor/haproxy_status.sh
+UserParameter=keepalived.status,/usr/local/bin/radosgw_monitor/keepalived_status.sh
+UserParameter=radosgw.http,/usr/local/bin/radosgw_monitor/radosgw_http_check.sh
+UserParameter=haproxy.connections,/usr/local/bin/radosgw_monitor/haproxy_connections.sh
+UserParameter=keepalived.vip.status,/usr/local/bin/radosgw_monitor/keepalived_vip_status.sh
+```
+
+Перезапустите Zabbix Agent:
+```bash
+systemctl restart zabbix-agent
+```
+
+### C. Сервера OSD (опционально)
+Статус OSD можно мониторить через кластерные команды с mon серверов (например, `ceph osd stat`), поэтому установка Zabbix Agent 1 на OSD серверах не обязательна. Однако, если требуется мониторинг локальных процессов OSD или использования дисков, можно установить агент и добавить скрипты.
+
+#### Пример скрипта
+**osd_status.sh** — Проверка статуса конкретного OSD (например, osd.0):
+```bash
+#!/bin/bash
+status=$(systemctl is-active ceph-osd@0)
+if [ "$status" == "active" ]; then
+  echo 0
+else
+  echo 1
+fi
+```
+
+#### Конфигурация Zabbix Agent 1
+Добавьте в `/etc/zabbix/zabbix_agentd.conf`:
+```ini
+UserParameter=osd.status,/usr/local/bin/osd_monitor/osd_status.sh
+UserParameter=vfs.fs.size[/var/lib/ceph/osd,free],df -h /var/lib/ceph/osd | grep -v Filesystem | awk '{print $4}'
+```
+
+## Настройка Zabbix сервера
+### Создание хостов
+- Создайте хосты для каждого сервера mon (например, "ceph-mon1", "ceph-mon2", ..., "ceph-mon5").
+- Создайте хосты для каждого сервера RadosGW (например, "radosgw1", "radosgw2", "radosgw3", "radosgw4").
+- Если используются OSD сервера, создайте хосты для них (например, "osd1", ..., "osd6").
+- Создайте хост для мониторинга VIP (например, "ceph-vip").
+
+### Добавление элементов данных
+- **Для каждого хоста mon**:
+  | Ключ                    | Тип          | Интервал обновления |
+  |-------------------------|--------------|---------------------|
+  | ceph.health             | Zabbix agent | 1 минута           |
+  | ceph.mon.up             | Zabbix agent | 1 минута           |
+  | ceph.mgr.up             | Zabbix agent | 1 минута           |
+  | ceph.osd.up             | Zabbix agent | 1 минута           |
+  | ceph.radosgw.up         | Zabbix agent | 1 минута           |
+  | ceph.mon.local.status   | Zabbix agent | 1 минута           |
+  | ceph.mgr.local.status   | Zabbix agent | 1 минута           |
+
+- **Для каждого хоста RadosGW**:
+  | Ключ                    | Тип          | Интервал обновления |
+  |-------------------------|--------------|---------------------|
+  | radosgw.status          | Zabbix agent | 1 минута           |
+  | haproxy.status          | Zabbix agent | 1 минута           |
+  | keepalived.status       | Zabbix agent | 1 минута           |
+  | radosgw.http            | Zabbix agent | 1 минута           |
+  | haproxy.connections     | Zabbix agent | 1 минута           |
+  | keepalived.vip.status   | Zabbix agent | 1 минута           |
+
+- **Для хоста VIP**:
+  | Ключ                    | Тип          | Интервал обновления |
+  |-------------------------|--------------|---------------------|
+  | net.tcp.service[tcp,<VIP>,443] | Simple check | 1 минута           |
+
+### Настройка триггеров
+- Примеры триггеров:
+  - Для `ceph.health`: `{ceph-mon1:ceph.health.last(0)}>0` — Проблема, если статус кластера не HEALTH_OK.
+  - Для `ceph.mon.local.status`: `{ceph-mon1:ceph.mon.local.status.last(0)}=1` — Проблема, если локальная служба mon не работает.
+  - Для `radosgw.status`: `{radosgw1:radosgw.status.last(0)}=1` — Проблема, если RadosGW не работает.
+  - Для `net.tcp.service[tcp,<VIP>,443]`: `{ceph-vip:net.tcp.service[tcp,<VIP>,443].last(0)}=0` — Проблема, если VIP недоступен.
+
+## Дополнительные метрики и рекомендации
+### Упущенные аспекты
+1. **Мониторинг VIP Keepalived**:
+   - Проверка доступности VIP через `net.tcp.service` или скрипт `keepalived_vip_status.sh`.
+2. **Статистика HAProxy**:
+   - Сбор метрик, таких как количество соединений, время ответа, через `haproxy_connections.sh`.
+3. **Использование дисков на OSD**:
+   - Мониторинг свободного места на дисках OSD через `vfs.fs.size` или `ceph df`.
+4. **Сетевая связность**:
+   - Проверка сетевых интерфейсов или задержек между узлами.
+5. **Производительность Ceph**:
+   - Мониторинг IOPS, пропускной способности, задержек через `ceph perf`.
+
+### Дополнительные рекомендации
+1. **Статус пулов Ceph**:
+   - Мониторинг здоровья пулов с помощью `ceph osd pool stats`.
+   - Пример UserParameter:
+     ```ini
+     UserParameter=ceph.pool.status,/usr/local/bin/ceph_pool_status.sh
+     ```
+2. **Здоровье RadosGW API**:
+   - Если доступна команда `radosgw-admin health`, использовать ее для проверки состояния RadosGW.
+3. **Логирование**:
+   - Добавьте логирование в скрипты для отладки (например, в `/var/log/ceph_monitor.log`).
+
+## Ограничения и соображения
+- **Безопасность**: Убедитесь, что ключ `/etc/ceph/ceph.client.zabbix-monitor.keyring` защищен от несанкционированного доступа.
+- **Зависимости**: Утилита `jq` используется для парсинга JSON. Если она недоступна, замените на `awk` или `grep`.
+- **Масштабируемость**: Для больших кластеров оптимизируйте интервалы опроса, чтобы избежать перегрузки Zabbix сервера.
+- **Ограничения Zabbix Agent 1**: Поддерживает только пассивные проверки, что требует регулярного опроса со стороны сервера.
+
+## Заключение
+Скорректированное решение устанавливает Zabbix Agent 1 на все 5 серверов mon для обеспечения избыточности, добавляет локальный мониторинг служб mon и mgr, настраивает cephx ключи для безопасного выполнения команд Ceph, и включает дополнительные метрики, такие как VIP Keepalived и статистика HAProxy. Это обеспечивает надежный и полный мониторинг Ceph кластера с учетом всех требований и ограничений Zabbix Agent 1.

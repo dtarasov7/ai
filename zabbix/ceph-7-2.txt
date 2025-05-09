@@ -1,0 +1,474 @@
+### Ответ на запрос
+
+**Ключевые моменты:**
+- Для создания триггера, который отслеживает доступность четырех серверов RadosGW (`radosgw1`, `radosgw2`, `radosgw3`, `radosgw4`) и выдает `Error` при недоступности 1–3 серверов, а `Critical` при недоступности всех четырех, мы будем использовать метрику `radosgw.http` (0=HTTP 200 OK, 1=HTTP error).
+- Недоступность сервера определяется как `radosgw.http=1` (ошибка HTTP) или отсутствие данных (`nodata(5m)=1`), что указывает на сбой сервера или агента Zabbix.
+- В Zabbix невозможно задать один триггер с разными уровнями серьезности (`Error` и `Critical`) в зависимости от условий, поэтому мы создадим два отдельных триггера:
+  - Триггер `Error` срабатывает, если 1–3 сервера недоступны.
+  - Триггер `Critical` срабатывает, если все 4 сервера недоступны.
+- Триггеры будут добавлены в шаблон `Ceph RadosGW Template` для автоматического применения ко всем RadosGW хостам.
+
+**Логика триггеров**  
+- **Error триггер**:
+  - Срабатывает, если количество недоступных серверов (где `radosgw.http=1` или `nodata(5m)=1`) находится в диапазоне от 1 до 3.
+  - Условие: `(count of unavailable servers >= 1 and count of unavailable servers <= 3)`.
+- **Critical триггер**:
+  - Срабатывает, если все 4 сервера недоступны.
+  - Условие: `count of unavailable servers = 4`.
+
+**Выражения триггеров**  
+Для подсчета недоступных серверов мы суммируем случаи, когда `radosgw.http=1` или `nodata(5m)=1` для каждого хоста. Выражения будут использовать точные имена хостов (`radosgw1`, `radosgw2`, `radosgw3`, `radosgw4`).
+
+- **Error триггер**:
+  ```
+  (
+    ({radosgw1:radosgw.http.last(0)}=1 or {radosgw1:radosgw.http.nodata(5m)}=1) +
+    ({radosgw2:radosgw.http.last(0)}=1 or {radosgw2:radosgw.http.nodata(5m)}=1) +
+    ({radosgw3:radosgw.http.last(0)}=1 or {radosgw3:radosgw.http.nodata(5m)}=1) +
+    ({radosgw4:radosgw.http.last(0)}=1 or {radosgw4:radosgw.http.nodata(5m)}=1)
+  ) >= 1 and
+  (
+    ({radosgw1:radosgw.http.last(0)}=1 or {radosgw1:radosgw.http.nodata(5m)}=1) +
+    ({radosgw2:radosgw.http.last(0)}=1 or {radosgw2:radosgw.http.nodata(5m)}=1) +
+    ({radosgw3:radosgw.http.last(0)}=1 or {radosgw3:radosgw.http.nodata(5m)}=1) +
+    ({radosgw4:radosgw.http.last(0)}=1 or {radosgw4:radosgw.http.nodata(5m)}=1)
+  ) <= 3
+  ```
+
+- **Critical триггер**:
+  ```
+  (
+    ({radosgw1:radosgw.http.last(0)}=1 or {radosgw1:radosgw.http.nodata(5m)}=1) +
+    ({radosgw2:radosgw.http.last(0)}=1 or {radosgw2:radosgw.http.nodata(5m)}=1) +
+    ({radosgw3:radosgw.http.last(0)}=1 or {radosgw3:radosgw.http.nodata(5m)}=1) +
+    ({radosgw4:radosgw.http.last(0)}=1 or {radosgw4:radosgw.http.nodata(5m)}=1)
+  ) = 4
+  ```
+
+**Добавление триггеров в шаблон**  
+Триггеры добавляются в раздел `<triggers>` шаблона `Ceph RadosGW Template`. Поскольку триггеры ссылаются на конкретные имена хостов, они будут работать только для хостов с именами `radosgw1`, `radosgw2`, `radosgw3`, `radosgw4`. Если имена хостов в вашей системе отличаются, замените их в XML перед импортом.
+
+**Обновленный XML-шаблон**  
+Ниже приведен обновленный XML-шаблон, включающий два новых триггера в `Ceph RadosGW Template`. Остальные шаблоны (`Ceph Mon Template` и `Ceph OSD Template`) и их элементы данных остаются без изменений, но включены для полноты. Триггер для `ceph-mon1` и `ceph-mon2` из предыдущего ответа также сохранен в `Ceph Mon Template`.
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<zabbix_export>
+    <version>5.0</version>
+    <date>2025-05-08T19:00:00Z</date>
+    <groups>
+        <group>
+            <name>Templates</name>
+        </group>
+    </groups>
+    <templates>
+        <!-- Шаблон для серверов mon -->
+        <template>
+            <name>Ceph Mon Template</name>
+            <groups>
+                <group>
+                    <name>Templates</name>
+                </group>
+            </groups>
+            <items>
+                <item>
+                    <name>Ceph Cluster Health</name>
+                    <type>0</type>
+                    <key>ceph.health</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <value_type>3</value_type>
+                    <description>0=HEALTH_OK, 1=HEALTH_WARN, 2=HEALTH_ERR</description>
+                </item>
+                <item>
+                    <name>Ceph Monitors Up</name>
+                    <type>0</type>
+                    <key>ceph.mon.up</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <value_type>3</value_type>
+                    <description>0=All monitors up, 1=Some monitors down</description>
+                </item>
+                <item>
+                    <name>Ceph Managers Up</name>
+                    <type>0</type>
+                    <key>ceph.mgr.up</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <value_type>3</value_type>
+                    <description>0=Active manager present, 1=No active manager</description>
+                </item>
+                <item>
+                    <name>Ceph OSDs Up</name>
+                    <type>0</type>
+                    <key>ceph.osd.up</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <value_type>3</value_type>
+                    <description>0=All OSDs up, 1=Some OSDs down</description>
+                </item>
+                <item>
+                    <name>Ceph RadosGW Up</name>
+                    <type>0</type>
+                    <key>ceph.radosgw.up</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <value_type>3</value_type>
+                    <description>0=RadosGW active, 1=RadosGW inactive</description>
+                </item>
+                <item>
+                    <name>Local Ceph Mon Status</name>
+                    <type>0</type>
+                    <key>ceph.mon.local.status</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <value_type>3</value_type>
+                    <description>0=Mon service running, 1=Mon service stopped</description>
+                </item>
+                <item>
+                    <name>Local Ceph Mgr Status</name>
+                    <type>0</type>
+                    <key>ceph.mgr.local.status</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <value_type>3</value_type>
+                    <description>0=Mgr service running, 1=Mgr service stopped</description>
+                </item>
+                <item>
+                    <name>Ceph Pool Status</name>
+                    <type>0</type>
+                    <key>ceph.pool.status</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <value_type>3</value_type>
+                    <description>0=No recovery/degraded/misplaced, 1=Issues detected</description>
+                </item>
+                <item>
+                    <name>Ceph IOPS</name>
+                    <type>0</type>
+                    <key>ceph.iops</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <value_type>3</value_type>
+                    <units>ops/s</units>
+                    <description>Cluster IOPS</description>
+                </item>
+                <item>
+                    <name>Ceph Throughput</name>
+                    <type>0</type>
+                    <key>ceph.throughput</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <value_type>3</value_type>
+                    <units>bytes/s</units>
+                    <description>Cluster throughput</description>
+                </item>
+                <item>
+                    <name>Ceph Latency</name>
+                    <type>0</type>
+                    <key>ceph.latency</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <value_type>3</value_type>
+                    <units>ms</units>
+                    <description>Apply latency in milliseconds</description>
+                </item>
+                <item>
+                    <name>Network Interface Status</name>
+                    <type>0</type>
+                    <key>net.interface.status</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <value_type>3</value_type>
+                    <description>1=Interface up, 0=Interface down</description>
+                </item>
+            </items>
+            <triggers>
+                <trigger>
+                    <name>Ceph Cluster Health Issue on mon1 and mon2</name>
+                    <expression>
+                        ({ceph-mon1:ceph.health.last(0)}>0 and {ceph-mon2:ceph.health.last(0)}>0) or
+                        ({ceph-mon1:ceph.health.nodata(5m)}=1 and {ceph-mon2:ceph.health.last(0)}>0) or
+                        ({ceph-mon2:ceph.health.nodata(5m)}=1 and {ceph-mon1:ceph.health.last(0)}>0)
+                    </expression>
+                    <priority>4</priority>
+                    <description>Ceph cluster is not HEALTH_OK on both mon1 and mon2, or one is unreachable and the other reports an issue.</description>
+                    <status>0</status>
+                </trigger>
+            </triggers>
+        </template>
+
+        <!-- Шаблон для серверов RadosGW -->
+        <template>
+            <name>Ceph RadosGW Template</name>
+            <groups>
+                <group>
+                    <name>Templates</name>
+                </group>
+            </groups>
+            <items>
+                <item>
+                    <name>RadosGW Status</name>
+                    <type>0</type>
+                    <key>radosgw.status</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <value_type>3</value_type>
+                    <description>0=RadosGW running, 1=RadosGW stopped</description>
+                </item>
+                <item>
+                    <name>HAProxy Status</name>
+                    <type>0</type>
+                    <key>haproxy.status</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <value_type>3</value_type>
+                    <description>0=HAProxy running, 1=HAProxy stopped</description>
+                </item>
+                <item>
+                    <name>Keepalived Status</name>
+                    <type>0</type>
+                    <key>keepalived.status</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <value_type>3</value_type>
+                    <description>0=Keepalived running, 1=Keepalived stopped</description>
+                </item>
+                <item>
+                    <name>RadosGW HTTP Check</name>
+                    <type>0</type>
+                    <key>radosgw.http</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <value_type>3</value_type>
+                    <description>0=HTTP 200 OK, 1=HTTP error</description>
+                </item>
+                <item>
+                    <name>HAProxy Connections</name>
+                    <type>0</type>
+                    <key>haproxy.connections</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <value_type>3</value_type>
+                    <units>connections</units>
+                    <description>Number of active HAProxy connections</description>
+                </item>
+                <item>
+                    <name>Keepalived VIP Status</name>
+                    <type>0</type>
+                    <key>keepalived.vip.status</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <value_type>3</value_type>
+                    <description>1=MASTER, 0=BACKUP</description>
+                </item>
+                <item>
+                    <name>Network Interface Status</name>
+                    <type>0</type>
+                    <key>net.interface.status</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <value_type>3</value_type>
+                    <description>1=Interface up, 0=Interface down</description>
+                </item>
+            </items>
+            <triggers>
+                <trigger>
+                    <name>RadosGW Partial Failure (1-3 servers unavailable)</name>
+                    <expression>
+                        (
+                            ({radosgw1:radosgw.http.last(0)}=1 or {radosgw1:radosgw.http.nodata(5m)}=1) +
+                            ({radosgw2:radosgw.http.last(0)}=1 or {radosgw2:radosgw.http.nodata(5m)}=1) +
+                            ({radosgw3:radosgw.http.last(0)}=1 or {radosgw3:radosgw.http.nodata(5m)}=1) +
+                            ({radosgw4:radosgw.http.last(0)}=1 or {radosgw4:radosgw.http.nodata(5m)}=1)
+                        ) >= 1 and
+                        (
+                            ({radosgw1:radosgw.http.last(0)}=1 or {radosgw1:radosgw.http.nodata(5m)}=1) +
+                            ({radosgw2:radosgw.http.last(0)}=1 or {radosgw2:radosgw.http.nodata(5m)}=1) +
+                            ({radosgw3:radosgw.http.last(0)}=1 or {radosgw3:radosgw.http.nodata(5m)}=1) +
+                            ({radosgw4:radosgw.http.last(0)}=1 or {radosgw4:radosgw.http.nodata(5m)}=1)
+                        ) <= 3
+                    </expression>
+                    <priority>3</priority>
+                    <description>1 to 3 RadosGW servers are unavailable (HTTP error or no data).</description>
+                    <status>0</status>
+                </trigger>
+                <trigger>
+                    <name>RadosGW Total Failure (All 4 servers unavailable)</name>
+                    <expression>
+                        (
+                            ({radosgw1:radosgw.http.last(0)}=1 or {radosgw1:radosgw.http.nodata(5m)}=1) +
+                            ({radosgw2:radosgw.http.last(0)}=1 or {radosgw2:radosgw.http.nodata(5m)}=1) +
+                            ({radosgw3:radosgw.http.last(0)}=1 or {radosgw3:radosgw.http.nodata(5m)}=1) +
+                            ({radosgw4:radosgw.http.last(0)}=1 or {radosgw4:radosgw.http.nodata(5m)}=1)
+                        ) = 4
+                    </expression>
+                    <priority>5</priority>
+                    <description>All 4 RadosGW servers are unavailable (HTTP error or no data).</description>
+                    <status>0</status>
+                </trigger>
+            </triggers>
+        </template>
+
+        <!-- Шаблон для серверов OSD -->
+        <template>
+            <name>Ceph OSD Template</name>
+            <groups>
+                <group>
+                    <name>Templates</name>
+                </group>
+            </groups>
+            <items>
+                <item>
+                    <name>OSD 0 Status</name>
+                    <type>0</type>
+                    <key>osd.status.0</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <value_type>3</value_type>
+                    <description>0=OSD running, 1=OSD stopped</description>
+                </item>
+                <item>
+                    <name>OSD 0 Disk Free</name>
+                    <type>0</type>
+                    <key>osd.disk.free.0</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <value_type>3</value_type>
+                    <units>bytes</units>
+                    <description>Free disk space for OSD 0</description>
+                </item>
+                <item>
+                    <name>Network Interface Status</name>
+                    <type>0</type>
+                    <key>net.interface.status</key>
+                    <delay>60</delay>
+                    <history>7</history>
+                    <trends>365</trends>
+                    <value_type>3</value_type>
+                    <description>1=Interface up, 0=Interface down</description>
+                </item>
+            </items>
+        </template>
+    </templates>
+</zabbix_export>
+```
+
+### Подробный отчет
+
+#### Введение
+Для мониторинга Ceph кластера версии 17.2.7 с использованием Zabbix Agent 1 был обновлен XML-шаблон, чтобы добавить два триггера в `Ceph RadosGW Template`. Эти триггеры отслеживают доступность четырех серверов RadosGW (`radosgw1`–`radosgw4`):
+- **Error** (уровень `Average`, priority=3): Срабатывает, если 1–3 сервера недоступны (`radosgw.http=1` или `nodata(5m)=1`).
+- **Critical** (уровень `Critical`, priority=5): Срабатывает, если все 4 сервера недоступны.
+
+Триггеры используют метрику `radosgw.http`, которая проверяет ответ HTTPS на порту 8443 (0=HTTP 200 OK, 1=HTTP error). Недоступность сервера также учитывает отсутствие данных (`nodata(5m)`), что указывает на сбой сервера или агента Zabbix.
+
+#### Архитектура триггеров
+##### Error триггер
+- **Название**: `RadosGW Partial Failure (1-3 servers unavailable)`
+- **Выражение**:
+  ```
+  (
+    ({radosgw1:radosgw.http.last(0)}=1 or {radosgw1:radosgw.http.nodata(5m)}=1) +
+    ({radosgw2:radosgw.http.last(0)}=1 or {radosgw2:radosgw.http.nodata(5m)}=1) +
+    ({radosgw3:radosgw.http.last(0)}=1 or {radosgw3:radosgw.http.nodata(5m)}=1) +
+    ({radosgw4:radosgw.http.last(0)}=1 or {radosgw4:radosgw.http.nodata(5m)}=1)
+  ) >= 1 and
+  (
+    ({radosgw1:radosgw.http.last(0)}=1 or {radosgw1:radosgw.http.nodata(5m)}=1) +
+    ({radosgw2:radosgw.http.last(0)}=1 or {radosgw2:radosgw.http.nodata(5m)}=1) +
+    ({radosgw3:radosgw.http.last(0)}=1 or {radosgw3:radosgw.http.nodata(5m)}=1) +
+    ({radosgw4:radosgw.http.last(0)}=1 or {radosgw4:radosgw.http.nodata(5m)}=1)
+  ) <= 3
+  ```
+- **Приоритет**: `Average` (3)
+- **Описание**: Срабатывает, когда 1–3 сервера RadosGW недоступны (ошибка HTTP или отсутствие данных).
+
+##### Critical триггер
+- **Название**: `RadosGW Total Failure (All 4 servers unavailable)`
+- **Выражение**:
+  ```
+  (
+    ({radosgw1:radosgw.http.last(0)}=1 or {radosgw1:radosgw.http.nodata(5m)}=1) +
+    ({radosgw2:radosgw.http.last(0)}=1 or {radosgw2:radosgw.http.nodata(5m)}=1) +
+    ({radosgw3:radosgw.http.last(0)}=1 or {radosgw3:radosgw.http.nodata(5m)}=1) +
+    ({radosgw4:radosgw.http.last(0)}=1 or {radosgw4:radosgw.http.nodata(5m)}=1)
+  ) = 4
+  ```
+- **Приоритет**: `Critical` (5)
+- **Описание**: Срабатывает, когда все 4 сервера RadosGW недоступны.
+
+#### Как использовать
+1. **Сохранение шаблона**:
+   - Сохраните XML-код в файл, например, `ceph_templates_with_rgw_triggers.xml`.
+2. **Импорт в Zabbix**:
+   - Перейдите в **Configuration** > **Templates** > **Import**.
+   - Выберите файл и импортируйте.
+3. **Привязка шаблонов**:
+   - Привяжите `Ceph Mon Template` к хостам `ceph-mon1`–`ceph-mon5`.
+   - Привяжите `Ceph RadosGW Template` к хостам `radosgw1`–`radosgw4`.
+   - Привяжите `Ceph OSD Template` к хостам `osd1`–`osd6`.
+4. **Проверка конфигурации**:
+   - Убедитесь, что UserParameters настроены в `/etc/zabbix/zabbix_agentd.conf` на каждом сервере, как указано ранее (например, `radosgw.http` для скрипта проверки HTTPS).
+   - Проверьте, что имена хостов в Zabbix точно соответствуют `radosgw1`, `radosgw2`, `radosgw3`, `radosgw4`. Если имена отличаются, отредактируйте триггеры в XML перед импортом.
+5. **Мониторинг**:
+   - Через несколько минут данные появятся в **Monitoring** > **Latest Data**.
+   - Проверьте срабатывание триггеров в **Monitoring** > **Triggers**.
+
+#### Ограничения и соображения
+- **Фиксированные имена хостов**: Триггеры используют точные имена `radosgw1`–`radosgw4`. Если ваши хосты названы иначе (например, `rgw1`), замените имена в выражениях триггеров перед импортом XML.
+- **nodata(5m)**: Время 5 минут выбрано для избежания ложных срабатываний. Для более быстрого реагирования можно уменьшить до 2–3 минут, но это увеличивает риск ложных срабатываний при кратковременных сбоях.
+- **Один триггер на уровень серьезности**: Zabbix не позволяет одному триггеру иметь разные уровни серьезности (`Error` и `Critical`), поэтому используются два триггера. Это стандартный подход для подобных сценариев.
+- **Zabbix Agent 1**: Пассивные проверки могут задерживать обнаружение `nodata`, так как зависят от интервала опроса (60 секунд в шаблоне).
+- **Перекрытие триггеров**: Когда все 4 сервера недоступны, сработает только `Critical` триггер, так как условие `Error` триггера (количество недоступных серверов <= 3) не выполняется.
+
+#### Альтернативный подход
+Если вы хотите более гибкое решение, можно создать один триггер, который собирает данные о недоступных серверах в отдельный элемент данных (например, с помощью скрипта, суммирующего статусы `radosgw.http`), и использовать его для определения уровня серьезности. Однако это потребует дополнительного скрипта и настройки, что выходит за рамки текущего подхода с Zabbix Agent 1 и UserParameters.
+
+**Пример скрипта для подсчета недоступных серверов**:
+```bash
+#!/bin/bash
+unavailable=0
+for host in radosgw1 radosgw2 radosgw3 radosgw4; do
+  status=$(curl -s -o /dev/null -w "%{http_code}" https://$host:8443 --insecure)
+  [ "$status" != "200" ] && ((unavailable++))
+done
+echo $unavailable
+```
+Этот скрипт можно добавить как UserParameter, но он требует, чтобы Zabbix Agent имел доступ ко всем серверам RadosGW, что может быть неудобно в текущей архитектуре.
+
+#### Дополнительные рекомендации
+- **Тестирование триггеров**: Проверьте триггеры, временно отключив один или несколько серверов RadosGW (например, остановите службу `radosgw` или Zabbix Agent) и убедитесь, что `Error` и `Critical` срабатывают корректно.
+- **Уведомления**: Настройте действия в Zabbix (**Configuration** > **Actions**) для отправки уведомлений (например, по email или в мессенджер) при срабатывании триггеров.
+- **Дашборды**: Создайте дашборд в Zabbix для визуализации статуса RadosGW серверов (например, график с `radosgw.http` для каждого хоста).
+- **Имена хостов**: Если имена хостов в будущем изменятся, используйте макросы Zabbix (например, `{HOST.NAME}`) и настройте пользовательские макросы для указания парного хоста, чтобы сделать триггеры более универсальными.
+
+#### Заключение
+Добавленные триггеры в `Ceph RadosGW Template` обеспечивают мониторинг доступности серверов RadosGW с учетом двух уровней серьезности: `Error` при недоступности 1–3 серверов и `Critical` при недоступности всех четырех. XML-шаблон включает эти триггеры и сохраняет все предыдущие метрики для mon, RadosGW и OSD, обеспечивая полный мониторинг Ceph кластера. Перед импортом убедитесь, что имена хостов в вашей системе соответствуют указанным в триггерах, или отредактируйте XML.
+
+### Key Citations
+- [Zabbix Trigger Expressions](https://www.zabbix.com/documentation/current/en/manual/config/triggers/expression)
+- [Zabbix Trigger Functions](https://www.zabbix.com/documentation/current/en/manual/config/triggers/trigger_functions)
+- [Ceph Monitoring with Zabbix](https://www.zabbix.com/integrations/ceph)
+- [Zabbix User Parameters](https://www.zabbix.com/documentation/current/en/manual/config/items/userparameters)

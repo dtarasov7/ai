@@ -1,0 +1,154 @@
+Да, вы абсолютно правильно понимаете: Ceph-плагин для Zabbix Agent 2 написан на языке программирования Go (Golang), и для его использования необходимо собрать Zabbix Agent 2 с включением этого плагина. Давайте разберем это подробно и подтвержу ваши предположения на основе доступной информации, включая контекст из поисковых результатов.
+
+---
+
+### Подтверждение вашего понимания
+
+1. **Ceph-плагин написан на Go**:
+   - Согласно документации Zabbix и информации из поисковых результатов, плагины для Zabbix Agent 2, включая Ceph-плагин, разрабатываются на Go. Это связано с тем, что Zabbix Agent 2 сам по себе написан на Go (с некоторыми частями кода на C, унаследованными от первого агента) и поддерживает плагины, написанные исключительно на Go.[](https://blog.zabbix.com/developing-plugins-for-zabbix-agent-2/9682/)[](https://www.zabbix.com/documentation/current/en/manual/extensions/plugins)
+   - Ceph-плагин, описанный в документации Zabbix, является внешним плагином, расположенным в директории `go/plugins/ceph` в исходном коде Zabbix, и реализует интерфейсы для взаимодействия с RESTful API Ceph.[](https://fossies.org/linux/zabbix/src/go/plugins/ceph/README.md)
+
+2. **Необходимость сборки Zabbix Agent 2 с плагином**:
+   - Ceph-плагин не поставляется в стандартной сборке Zabbix Agent 2, устанавливаемой через пакетные менеджеры (например, `apt` или `dnf`). Чтобы использовать этот плагин, нужно собрать Zabbix Agent 2 из исходных кодов с включением Ceph-плагина.[](https://www.zabbix.com/integrations/ceph)[](https://www.zabbix.com/forum/zabbix-suggestions-and-feedback/410059-discussion-thread-for-official-zabbix-template-ceph/page2)
+   - Это связано с тем, что плагин требует интеграции с исходным кодом агента, и сборка позволяет включить его в бинарный файл Zabbix Agent 2.
+
+---
+
+### Подробное объяснение процесса
+
+#### 1. **Почему Ceph-плагин требует сборки?**
+   - Ceph-плагин взаимодействует с Ceph через RESTful API, предоставляемый модулем `ceph-mgr`. Для этого плагин использует HTTP-запросы к API Ceph, чтобы собирать метрики, такие как состояние кластера (`ceph.status`), использование хранилища (`ceph.df.details`), статистика OSD (`ceph.osd.stats`) и другие.[](https://fossies.org/linux/zabbix/src/go/plugins/ceph/README.md)
+   - Плагин не является автономным исполняемым файлом, а должен быть зарегистрирован в Zabbix Agent 2 через функцию `plugin.RegisterMetrics` и интегрирован в процесс агента.[](https://blog.zabbix.com/developing-plugins-for-zabbix-agent-2/9682/)[](https://www.zabbix.com/documentation/current/en/devel/plugins/how_to)
+   - Стандартные пакеты Zabbix Agent 2 (например, установленные через `apt install zabbix-agent2`) могут не включать Ceph-плагин, так как он не является частью стандартного набора плагинов. Поэтому требуется кастомная сборка.
+
+#### 2. **Процесс сборки Zabbix Agent 2 с Ceph-плагином**
+
+Для сборки Zabbix Agent 2 с Ceph-плагином необходимо выполнить следующие шаги. Я опишу процесс для Linux (например, Ubuntu или CentOS), так как это наиболее распространенная платформа для Ceph и Zabbix.
+
+##### Шаг 1: Подготовка окружения
+Убедитесь, что у вас установлены необходимые инструменты для сборки:
+```bash
+sudo apt update
+sudo apt install -y git golang build-essential
+```
+- `git`: для клонирования репозитория Zabbix.
+- `golang`: компилятор Go (рекомендуется версия, совместимая с Zabbix, например, Go 1.16 или выше).
+- `build-essential`: для сборки C-компонентов Zabbix Agent 2.
+
+##### Шаг 2: Клонирование исходного кода Zabbix
+Скачайте исходный код Zabbix из официального репозитория. Выберите версию, совместимую с вашим окружением (например, 6.4 или 7.0, так как Ceph-плагин поддерживается в этих версиях).[](https://www.zabbix.com/integrations/ceph)
+```bash
+git clone https://git.zabbix.com/scm/zbx/zabbix.git
+cd zabbix
+git checkout release/6.4  # или release/7.0, в зависимости от версии
+```
+
+##### Шаг 3: Проверка Ceph-плагина
+Ceph-плагин находится в директории `src/go/plugins/ceph`. Убедитесь, что он присутствует:
+```bash
+ls src/go/plugins/ceph
+```
+Вы увидите файлы, такие как `README.md`, `ceph.go` и другие, которые содержат код плагина.[](https://fossies.org/linux/zabbix/src/go/plugins/ceph/README.md)
+
+##### Шаг 4: Инициализация зависимостей
+Инициализируйте Go-модули и загрузите зависимости:
+```bash
+cd src/go
+go mod init zabbix
+go mod tidy
+```
+Это загрузит необходимые пакеты, включая `git.zabbix.com/ap/plugin-support/plugin`, который используется для работы плагинов.[](https://stackoverflow.com/questions/75696538/zabbix-agent-2-throws-an-error-when-it-tries-to-process-the-test-plugin-from-the)
+
+##### Шаг 5: Сборка Zabbix Agent 2
+Скомпилируйте Zabbix Agent 2 с включением всех плагинов, включая Ceph:
+```bash
+go build -o zabbix_agent2 ./cmd/zabbix_agent2
+```
+После сборки бинарный файл `zabbix_agent2` будет создан в текущей директории.
+
+##### Шаг 6: Установка и настройка
+- Скопируйте скомпилированный бинарник в нужное место, например:
+  ```bash
+  sudo cp zabbix_agent2 /usr/sbin/zabbix_agent2
+  ```
+- Убедитесь, что конфигурационный файл `/etc/zabbix/zabbix_agent2.conf` существует и настроен. Добавьте путь к конфигурации Ceph-плагина, если требуется:
+  ```bash
+  echo 'Include=/etc/zabbix/zabbix_agent2.d/plugins.d/' > /etc/zabbix/zabbix_agent2.conf
+  ```
+- Создайте конфигурационный файл для Ceph-плагина, например `/etc/zabbix/zabbix_agent2.d/plugins.d/ceph.conf`:
+  ```
+  Plugins.Ceph.ConnString=https://<ceph-mgr>:8003
+  Plugins.Ceph.User=zabbix-monitor
+  Plugins.Ceph.ApiKey=<your-api-key>
+  Plugins.Ceph.InsecureSkipVerify=false
+  Plugins.Ceph.Timeout=5
+  ```
+  Замените `<ceph-mgr>` и `<your-api-key>` на актуальные значения, полученные через команду `ceph restful create-key zabbix-monitor`.[](https://fossies.org/linux/zabbix/src/go/plugins/ceph/README.md)[](https://docs.ceph.com/en/quincy/mgr/zabbix/)
+
+##### Шаг 7: Запуск и тестирование
+Запустите Zabbix Agent 2:
+```bash
+sudo systemctl restart zabbix-agent2
+```
+Проверьте доступность Ceph-плагина с помощью `zabbix_get`:
+```bash
+zabbix_get -s 127.0.0.1 -k ceph.ping["https://<ceph-mgr>:8003","zabbix-monitor","<your-api-key>"]
+```
+Если всё настроено правильно, команда вернет `1` (успех).[](https://www.zabbix.com/integrations/ceph)
+
+#### 3. **Конфигурация Ceph RESTful API**
+Для работы Ceph-плагина необходимо, чтобы RESTful API Ceph был активен:
+- Включите RESTful-модуль в Ceph:
+  ```bash
+  ceph mgr module enable restful
+  ```
+- Создайте пользователя и API-ключ:
+  ```bash
+  ceph restful create-key zabbix-monitor
+  ```
+- Убедитесь, что менеджер Ceph (`ceph-mgr`) имеет достаточные права:
+  ```bash
+  ceph auth caps mgr.<your-mgr-instance> mon 'allow *' osd 'allow *' mds 'allow *'
+  ```
+  Это необходимо, так как плагин выполняет команды, такие как `pg dump`, которые требуют расширенных прав.[](https://fossies.org/linux/zabbix/src/go/plugins/ceph/README.md)[](https://www.zabbix.com/forum/zabbix-suggestions-and-feedback/410059-discussion-thread-for-official-zabbix-template-ceph/page2)
+
+#### 4. **Шаблон Zabbix**
+После сборки и настройки агента добавьте официальный шаблон Ceph для Zabbix:
+- Импортируйте шаблон `Ceph by Zabbix Agent 2` из репозитория Zabbix: `https://git.zabbix.com/projects/ZBX/repos/zabbix/browse/templates/app/ceph_agent2`.[](https://www.zabbix.com/integrations/ceph)
+- Настройте макросы на хосте в Zabbix:
+  - `{$CEPH.CONNSTRING}`: `https://<ceph-mgr>:8003`
+  - `{$CEPH.USER}`: `zabbix-monitor`
+  - `{$CEPH.API.KEY}`: ваш API-ключ
+- Привяжите шаблон к хосту, представляющему ваш Ceph-кластер.
+
+---
+
+### Ответы на возможные вопросы
+
+1. **Можно ли использовать Ceph-плагин без сборки?**
+   - Нет, Ceph-плагин не включен в стандартные бинарники Zabbix Agent 2, распространяемые через пакеты. Сборка необходима, чтобы включить плагин в агент.[](https://www.zabbix.com/forum/zabbix-suggestions-and-feedback/410059-discussion-thread-for-official-zabbix-template-ceph/page2)
+
+2. **Совместимость с вашей версией Ceph (17.2.7)**:
+   - Ceph 17.2.7 (Quincy) поддерживает RESTful API, необходимый для работы плагина. Убедитесь, что модуль `restful` включен и менеджер имеет нужные права.[](https://fossies.org/linux/zabbix/src/go/plugins/ceph/README.md)
+
+3. **Почему именно Go?**
+   - Go используется для Zabbix Agent 2 и его плагинов из-за высокой производительности, удобной работы с concurrency и упрощенной разработки по сравнению с C-модулями.[](https://blog.zabbix.com/developing-plugins-for-zabbix-agent-2/9682/)[](https://medium.com/%40zhuravlev.vitaly/writing-watcher-zabbix-agent2-mqtt-plugin-in-go-e00067ea1990)
+
+4. **Что делать, если плагин не работает?**
+   - Проверьте логи Zabbix Agent 2 (`/var/log/zabbix/zabbix_agent2.log`) с повышенным уровнем отладки:
+     ```bash
+     echo 'LogType=file' >> /etc/zabbix/zabbix_agent2.conf
+     echo 'LogFile=/var/log/zabbix/zabbix_agent2.log' >> /etc/zabbix/zabbix_agent2.conf
+     echo 'DebugLevel=4' >> /etc/zabbix/zabbix_agent2.conf
+     sudo systemctl restart zabbix-agent2
+     ```
+   - Убедитесь, что RESTful API Ceph доступен (`curl https://<ceph-mgr>:8003`) и права настроены правильно.[](https://fossies.org/linux/zabbix/src/go/plugins/ceph/README.md)[](https://www.zabbix.com/forum/zabbix-suggestions-and-feedback/410059-discussion-thread-for-official-zabbix-template-ceph/page2)
+
+---
+
+### Заключение
+Вы правильно понимаете: Ceph-плагин для Zabbix Agent 2 написан на Go, и для его использования нужно собрать Zabbix Agent 2 из исходников с включением этого плагина. Процесс включает клонирование репозитория Zabbix, инициализацию зависимостей, сборку бинарника и настройку конфигурации. Также требуется активировать RESTful API в Ceph и настроить шаблон в Zabbix. Если у вас есть дополнительные вопросы или нужна помощь с конкретным шагом (например, устранение ошибок сборки или настройка API), дайте знать, и я помогу!
+
+**Источники**:
+- Документация Zabbix о плагинах и Ceph:[](https://fossies.org/linux/zabbix/src/go/plugins/ceph/README.md)[](https://www.zabbix.com/integrations/ceph)[](https://www.zabbix.com/documentation/current/en/manual/extensions/plugins)
+- Информация о сборке и Go:[](https://blog.zabbix.com/developing-plugins-for-zabbix-agent-2/9682/)[](https://stackoverflow.com/questions/75696538/zabbix-agent-2-throws-an-error-when-it-tries-to-process-the-test-plugin-from-the)[](https://medium.com/%40zhuravlev.vitaly/writing-watcher-zabbix-agent2-mqtt-plugin-in-go-e00067ea1990)
