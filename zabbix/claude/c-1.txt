@@ -1,0 +1,160 @@
+# Мониторинг кластера Ceph с помощью Zabbix Agent 1
+
+Приветствую! Я помогу настроить мониторинг вашего кластера Ceph через Zabbix Agent 1.
+
+## Анализ вашей архитектуры
+
+У вас есть кластер Ceph 17.2.7 со следующими компонентами:
+- 6 серверов OSD
+- 4 сервера RGW (RadosGW)
+- 3 сервера MON+MGR
+- HAProxy и Keepalived для обеспечения высокой доступности
+
+Zabbix Agent 1 установлен на всех серверах, но `zabbix_sender` отсутствует и не может быть установлен.
+
+## Настройки Zabbix Agent на серверах
+
+На каждом сервере кластера нужно внести следующие изменения в конфигурацию `/etc/zabbix/zabbix_agentd.conf`:
+
+```
+# Основные настройки
+Server=<IP Zabbix сервера>
+ServerActive=<IP Zabbix сервера>
+Hostname=<имя сервера>
+
+# Разрешить удаленные команды (для выполнения скриптов проверки)
+EnableRemoteCommands=1
+UnsafeUserParameters=1
+
+# Пользовательские параметры для мониторинга Ceph
+# Проверка статуса кластера
+UserParameter=ceph.cluster.status,sudo ceph health | head -1
+UserParameter=ceph.cluster.health_detail,sudo ceph health detail | grep -v "^$"
+
+# Проверка MON сервисов
+UserParameter=ceph.mon.status,systemctl is-active ceph-mon@$(hostname -s) | grep -q "^active" && echo 1 || echo 0
+UserParameter=ceph.mon.enabled,systemctl is-enabled ceph-mon@$(hostname -s) | grep -q "^enabled" && echo 1 || echo 0
+UserParameter=ceph.mon.details,sudo ceph mon stat
+
+# Проверка MGR сервисов
+UserParameter=ceph.mgr.status,systemctl is-active ceph-mgr@$(hostname -s) | grep -q "^active" && echo 1 || echo 0
+UserParameter=ceph.mgr.enabled,systemctl is-enabled ceph-mgr@$(hostname -s) | grep -q "^enabled" && echo 1 || echo 0
+UserParameter=ceph.mgr.details,sudo ceph mgr stat
+
+# Проверка OSD сервисов
+UserParameter=ceph.osd.status[*],systemctl is-active ceph-osd@$1 | grep -q "^active" && echo 1 || echo 0
+UserParameter=ceph.osd.enabled[*],systemctl is-enabled ceph-osd@$1 | grep -q "^enabled" && echo 1 || echo 0
+UserParameter=ceph.osd.list,ls /var/lib/ceph/osd/ | sed 's/ceph-//'
+UserParameter=ceph.osd.details,sudo ceph osd stat
+
+# Проверка RGW сервисов
+UserParameter=ceph.rgw.status,systemctl is-active ceph-radosgw@rgw.$(hostname -s) | grep -q "^active" && echo 1 || echo 0
+UserParameter=ceph.rgw.enabled,systemctl is-enabled ceph-radosgw@rgw.$(hostname -s) | grep -q "^enabled" && echo 1 || echo 0
+UserParameter=ceph.rgw.http_check,curl -k -s -o /dev/null -w "%{http_code}" https://localhost:8443
+
+# Проверка HAProxy
+UserParameter=haproxy.status,systemctl is-active haproxy | grep -q "^active" && echo 1 || echo 0
+UserParameter=haproxy.enabled,systemctl is-enabled haproxy | grep -q "^enabled" && echo 1 || echo 0
+
+# Проверка Keepalived
+UserParameter=keepalived.status,systemctl is-active keepalived | grep -q "^active" && echo 1 || echo 0
+UserParameter=keepalived.enabled,systemctl is-enabled keepalived | grep -q "^enabled" && echo 1 || echo 0
+```
+
+## Настройка прав для Zabbix Agent
+
+Так как мы используем команды с sudo, нужно настроить доступ пользователя zabbix к командам ceph без пароля:
+
+Создайте файл `/etc/sudoers.d/zabbix`:
+```
+zabbix ALL=(ALL) NOPASSWD: /usr/bin/ceph health
+zabbix ALL=(ALL) NOPASSWD: /usr/bin/ceph health detail
+zabbix ALL=(ALL) NOPASSWD: /usr/bin/ceph mon stat
+zabbix ALL=(ALL) NOPASSWD: /usr/bin/ceph mgr stat
+zabbix ALL=(ALL) NOPASSWD: /usr/bin/ceph osd stat
+```
+
+## Шаблон для Zabbix сервера
+
+## Дополнительные метрики, которые стоит мониторить
+
+Проанализировав вашу задачу, вот что еще рекомендую мониторить в кластере Ceph:
+
+1. **Состояние пулов данных и их использование**:
+   ```
+   UserParameter=ceph.pools.list,sudo ceph osd pool ls
+   UserParameter=ceph.pool.stats[*],sudo ceph osd pool stats $1
+   ```
+
+2. **Занятое место и доступность дискового пространства**:
+   ```
+   UserParameter=ceph.df,sudo ceph df | grep -v "^$"
+   ```
+
+3. **Состояние механизма размещения данных (CRUSH map)**:
+   ```
+   UserParameter=ceph.crushmap.version,sudo ceph osd crush dump | grep "version" | awk '{print $2}'
+   ```
+
+4. **Статистика работы и времени отклика OSD**:
+   ```
+   UserParameter=ceph.osd.perf,sudo ceph osd perf
+   ```
+
+5. **Мониторинг PG (Placement Groups)**:
+   ```
+   UserParameter=ceph.pg.stats,sudo ceph pg stat | head -1
+   UserParameter=ceph.pg.dump,sudo ceph pg dump_stuck unclean
+   ```
+
+6. **Мониторинг сетевых соединений** между узлами кластера:
+   ```
+   UserParameter=ceph.connections,sudo netstat -an | grep -c 6789
+   ```
+
+7. **Состояние quorum для MON**:
+   ```
+   UserParameter=ceph.mon.quorum,sudo ceph quorum_status -f json-pretty | grep -c "quorum"
+   ```
+
+8. **Мониторинг виртуальных IP-адресов** (для Keepalived):
+   ```
+   UserParameter=keepalived.vip.status,ip a | grep -c <ваш VIP-адрес>
+   ```
+
+## Настройка на Zabbix сервере
+
+1. Импортируйте шаблон через веб-интерфейс Zabbix:
+   - Перейдите в "Configuration" > "Templates"
+   - Нажмите "Import" и загрузите файл шаблона
+
+2. Создайте группы хостов для узлов Ceph:
+   - Группа "Ceph MON+MGR Nodes"
+   - Группа "Ceph OSD Nodes"
+   - Группа "Ceph RGW Nodes"
+
+3. Добавьте хосты в соответствующие группы и привяжите шаблон "Template Ceph Cluster Monitoring"
+
+4. Настройте права пользователя Zabbix Server для выполнения удаленных команд:
+   - В административном интерфейсе Zabbix: "Administration" > "Users" > выберите пользователя
+   - Перейдите на вкладку "Permissions" и убедитесь, что у пользователя есть права на выполнение удаленных команд
+
+## Ограничения и примечания
+
+1. **Безопасность**: Из-за необходимости использования sudo для команд Ceph, важно минимизировать права, предоставляемые пользователю zabbix.
+
+2. **Производительность**: Не используйте слишком короткие интервалы обновления данных, чтобы не перегружать кластер запросами от агентов Zabbix.
+
+3. **Отсутствие zabbix_sender**: Это ограничивает возможность отправки пакетных данных, но мы решаем проблему с помощью прямых запросов через UserParameter.
+
+4. **Стандартный агент Zabbix 1**: Нет поддержки JMX и некоторых новых функций, но мы можем обойтись базовым функционалом для мониторинга состояния служб.
+
+## Что можно улучшить при снятии ограничений
+
+1. Если бы был доступен `zabbix_sender`, вы могли бы использовать скрипты, собирающие более детальную статистику в фоновом режиме.
+
+2. С Zabbix Agent 2 вы получили бы больше встроенных возможностей и лучшую производительность.
+
+3. При возможности установки дополнительного ПО, можно было бы использовать плагин Prometheus для Ceph и настроить интеграцию с Zabbix.
+
+Дайте знать, если вам нужны дополнительные детали по какому-либо из разделов!

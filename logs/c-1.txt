@@ -1,0 +1,139 @@
+# Фильтрация логов RadosGW с использованием rgw_ops_log_socket_path
+
+Да, ваш подход с использованием `rgw_ops_log_socket_path` является рабочим и эффективным решением для фильтрации "мусорных" логов от проверок доступности HAProxy. Этот метод позволит вам отфильтровать нежелательные записи логов и сохранить только значимую информацию.
+
+## Как это работает
+
+1. **rgw_ops_log_socket_path** - это параметр конфигурации RadosGW, который перенаправляет операционные логи в Unix-сокет вместо стандартных файлов логов.
+
+2. Отдельный процесс может подключиться к этому сокету и получать логи в реальном времени.
+
+3. Вы можете фильтровать входящие данные перед их записью в постоянный лог-файл.
+
+## Настройка RadosGW
+
+Добавьте в файл конфигурации Ceph (`ceph.conf`) в секцию [client.rgw.*] следующие параметры:
+
+```ini
+[client.rgw.default]
+# ... существующие настройки ...
+rgw_ops_log_socket_path = /var/run/ceph/rgw_ops.sock
+rgw_enable_ops_log = true
+```
+
+После изменения конфигурации перезапустите сервисы RadosGW:
+
+```bash
+sudo systemctl restart ceph-radosgw@rgw.$(hostname -s)
+```
+
+## Создание скрипта-фильтра логов
+
+Создайте скрипт Python, который будет читать логи из сокета, фильтровать их и записывать в файл:
+
+## Создание systemd сервиса для автозапуска фильтра
+
+Создайте systemd юнит для запуска и поддержки скрипта в рабочем состоянии:
+
+```bash
+sudo tee /etc/systemd/system/rgw-log-filter.service > /dev/null <<'EOF'
+[Unit]
+Description=RadosGW Log Filter Service
+After=ceph-radosgw@rgw.target
+Requires=ceph-radosgw@rgw.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/local/bin/rgw_log_filter.py --socket /var/run/ceph/rgw_ops.sock --output /var/log/ceph/rgw_filtered.log
+Restart=on-failure
+RestartSec=10
+User=ceph
+Group=ceph
+
+[Install]
+WantedBy=multi-user.target
+EOF
+```
+
+## Установка и запуск
+
+1. **Установите необходимые зависимости**:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y python3-systemd python3-pip
+sudo pip3 install python-systemd
+```
+
+2. **Скопируйте скрипт в системную директорию**:
+
+```bash
+sudo cp путь/к/скрипту.py /usr/local/bin/rgw_log_filter.py
+sudo chmod +x /usr/local/bin/rgw_log_filter.py
+```
+
+3. **Создайте директорию для сокета, если она еще не существует**:
+
+```bash
+sudo mkdir -p /var/run/ceph
+sudo chown ceph:ceph /var/run/ceph
+```
+
+4. **Настройте права доступа**:
+
+```bash
+sudo chown ceph:ceph /usr/local/bin/rgw_log_filter.py
+```
+
+5. **Запустите и настройте автозапуск сервиса**:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable rgw-log-filter
+sudo systemctl start rgw-log-filter
+```
+
+## Преимущества этого подхода
+
+1. **Эффективность**: Логи фильтруются до того, как они записываются на диск, что экономит место.
+
+2. **Гибкость**: Вы можете легко настроить фильтрацию, добавив новые правила.
+
+3. **Нет изменений в HAProxy**: Не требуется менять настройки проверок в HAProxy.
+
+4. **Централизованная фильтрация**: Один скрипт обрабатывает все логи RadosGW.
+
+## Что делает скрипт
+
+1. Подключается к Unix-сокету RadosGW.
+2. Читает поступающие логи в формате JSON.
+3. Фильтрует записи на основе правил:
+   - GET запросы к корню (/) от HAProxy
+   - Запросы с определенными User-Agent (например, содержащими "HAProxy", "health_check")
+   - Определенные коды ответа HTTP (200, 204, 401, 403, 404)
+4. Записывает только нефильтрованные логи в выходной файл.
+5. Поддерживает ротацию логов для избежания переполнения диска.
+6. Автоматически переподключается в случае проблем с соединением.
+
+## Интеграция с Zabbix
+
+Вы также можете добавить проверку работоспособности скрипта фильтрации в Zabbix:
+
+```
+UserParameter=rgw.log_filter.status,systemctl is-active rgw-log-filter | grep -q "^active" && echo 1 || echo 0
+```
+
+## Мониторинг потребления ресурсов
+
+Скрипт потребляет минимальное количество ресурсов, но если вы хотите отслеживать его потребление, добавьте в Zabbix:
+
+```
+UserParameter=rgw.log_filter.memory,ps -o rss= -p $(systemctl show -p MainPID rgw-log-filter | cut -d= -f2) 2>/dev/null || echo 0
+UserParameter=rgw.log_filter.cpu,ps -o %cpu= -p $(systemctl show -p MainPID rgw-log-filter | cut -d= -f2) 2>/dev/null || echo 0
+```
+
+## Заключение
+
+Да, ваш подход полностью рабочий и является отличным решением для фильтрации "мусорных" логов от проверок HAProxy. Представленный скрипт фильтрации предоставляет гибкий механизм для удаления ненужных записей из логов, сохраняя при этом важную информацию о реальных запросах пользователей и возможных проблемах.
+
+Если в вашей системе высокая нагрузка и большое количество проверок здоровья, этот подход значительно сократит размер логов и упростит их анализ.

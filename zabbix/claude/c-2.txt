@@ -1,0 +1,144 @@
+# Использование cephx вместо sudo для мониторинга Ceph
+
+Да, это отличная идея! Использование cephx механизма аутентификации вместо sudo значительно улучшит безопасность и упростит настройку мониторинга. Этот подход предпочтительнее, так как следует принципу минимальных привилегий.
+
+## Создание пользователя cephx для мониторинга
+
+1. **Создайте пользователя cephx с правами только на чтение**:
+
+```bash
+# На одном из MON серверов
+sudo ceph auth get-or-create client.zabbix mon 'allow r' osd 'allow r' mgr 'allow r' -o /etc/ceph/ceph.client.zabbix.keyring
+```
+
+2. **Распространите ключ на все серверы**, где запущен Zabbix Agent:
+
+```bash
+sudo ceph auth get client.zabbix -o /etc/ceph/ceph.client.zabbix.keyring
+sudo chmod 640 /etc/ceph/ceph.client.zabbix.keyring
+sudo chown zabbix:zabbix /etc/ceph/ceph.client.zabbix.keyring
+```
+
+## Настройка конфигурации Ceph для Zabbix Agent
+
+Создайте отдельный конфигурационный файл для Zabbix:
+
+```bash
+sudo tee /etc/ceph/ceph.zabbix.conf > /dev/null <<EOF
+[global]
+keyring = /etc/ceph/ceph.client.zabbix.keyring
+EOF
+
+sudo chown zabbix:zabbix /etc/ceph/ceph.zabbix.conf
+```
+
+## Обновление параметров Zabbix Agent
+
+Обновите параметры в `/etc/zabbix/zabbix_agentd.conf`, используя ключ cephx вместо sudo:
+
+```
+# Ceph Cluster Status с использованием cephx
+UserParameter=ceph.cluster.status,ceph -n client.zabbix -k /etc/ceph/ceph.client.zabbix.keyring --conf /etc/ceph/ceph.zabbix.conf health | head -1
+UserParameter=ceph.cluster.health_detail,ceph -n client.zabbix -k /etc/ceph/ceph.client.zabbix.keyring --conf /etc/ceph/ceph.zabbix.conf health detail | grep -v "^$"
+
+# MON сервисы
+UserParameter=ceph.mon.details,ceph -n client.zabbix -k /etc/ceph/ceph.client.zabbix.keyring --conf /etc/ceph/ceph.zabbix.conf mon stat
+UserParameter=ceph.mon.status,systemctl is-active ceph-mon@$(hostname -s) | grep -q "^active" && echo 1 || echo 0
+UserParameter=ceph.mon.enabled,systemctl is-enabled ceph-mon@$(hostname -s) | grep -q "^enabled" && echo 1 || echo 0
+
+# MGR сервисы
+UserParameter=ceph.mgr.details,ceph -n client.zabbix -k /etc/ceph/ceph.client.zabbix.keyring --conf /etc/ceph/ceph.zabbix.conf mgr stat
+UserParameter=ceph.mgr.status,systemctl is-active ceph-mgr@$(hostname -s) | grep -q "^active" && echo 1 || echo 0
+UserParameter=ceph.mgr.enabled,systemctl is-enabled ceph-mgr@$(hostname -s) | grep -q "^enabled" && echo 1 || echo 0
+
+# OSD сервисы
+UserParameter=ceph.osd.details,ceph -n client.zabbix -k /etc/ceph/ceph.client.zabbix.keyring --conf /etc/ceph/ceph.zabbix.conf osd stat
+UserParameter=ceph.osd.list,ls /var/lib/ceph/osd/ | sed 's/ceph-//'
+UserParameter=ceph.osd.status[*],systemctl is-active ceph-osd@$1 | grep -q "^active" && echo 1 || echo 0
+UserParameter=ceph.osd.enabled[*],systemctl is-enabled ceph-osd@$1 | grep -q "^enabled" && echo 1 || echo 0
+
+# RGW сервисы
+UserParameter=ceph.rgw.status,systemctl is-active ceph-radosgw@rgw.$(hostname -s) | grep -q "^active" && echo 1 || echo 0
+UserParameter=ceph.rgw.enabled,systemctl is-enabled ceph-radosgw@rgw.$(hostname -s) | grep -q "^enabled" && echo 1 || echo 0
+UserParameter=ceph.rgw.http_check,curl -k -s -o /dev/null -w "%{http_code}" https://localhost:8443
+
+# Дополнительные метрики с использованием cephx
+UserParameter=ceph.pools.list,ceph -n client.zabbix -k /etc/ceph/ceph.client.zabbix.keyring --conf /etc/ceph/ceph.zabbix.conf osd pool ls
+UserParameter=ceph.pool.stats[*],ceph -n client.zabbix -k /etc/ceph/ceph.client.zabbix.keyring --conf /etc/ceph/ceph.zabbix.conf osd pool stats $1
+UserParameter=ceph.df,ceph -n client.zabbix -k /etc/ceph/ceph.client.zabbix.keyring --conf /etc/ceph/ceph.zabbix.conf df | grep -v "^$"
+UserParameter=ceph.osd.perf,ceph -n client.zabbix -k /etc/ceph/ceph.client.zabbix.keyring --conf /etc/ceph/ceph.zabbix.conf osd perf
+UserParameter=ceph.pg.stats,ceph -n client.zabbix -k /etc/ceph/ceph.client.zabbix.keyring --conf /etc/ceph/ceph.zabbix.conf pg stat | head -1
+UserParameter=ceph.pg.dump,ceph -n client.zabbix -k /etc/ceph/ceph.client.zabbix.keyring --conf /etc/ceph/ceph.zabbix.conf pg dump_stuck unclean
+UserParameter=ceph.mon.quorum,ceph -n client.zabbix -k /etc/ceph/ceph.client.zabbix.keyring --conf /etc/ceph/ceph.zabbix.conf quorum_status -f json-pretty | grep -c "quorum"
+
+# HAProxy и Keepalived (для них sudo не требуется)
+UserParameter=haproxy.status,systemctl is-active haproxy | grep -q "^active" && echo 1 || echo 0
+UserParameter=haproxy.enabled,systemctl is-enabled haproxy | grep -q "^enabled" && echo 1 || echo 0
+UserParameter=keepalived.status,systemctl is-active keepalived | grep -q "^active" && echo 1 || echo 0
+UserParameter=keepalived.enabled,systemctl is-enabled keepalived | grep -q "^enabled" && echo 1 || echo 0
+```
+
+## Проверка доступа и разрешений
+
+Для проверки, что пользователь `zabbix` может выполнять команды Ceph с помощью cephx:
+
+```bash
+# Выполните от имени пользователя zabbix
+sudo -u zabbix ceph -n client.zabbix -k /etc/ceph/ceph.client.zabbix.keyring --conf /etc/ceph/ceph.zabbix.conf health
+```
+
+## Преимущества использования cephx вместо sudo
+
+1. **Повышенная безопасность**: Пользователь имеет только права на чтение в кластере Ceph, без полного доступа через sudo.
+
+2. **Упрощенное управление правами**: Не требуется настраивать файлы sudoers, что уменьшает риск ошибок конфигурации.
+
+3. **Соответствие лучшим практикам безопасности**: Следование принципу минимальных привилегий.
+
+4. **Легкость аудита**: Все действия пользователя client.zabbix записываются в логи Ceph, что упрощает отслеживание.
+
+## Шаблон для Zabbix сервера
+
+Шаблон из моего предыдущего сообщения остается действительным, только методы получения данных изменились с sudo на cephx.
+
+## Расширенный мониторинг с использованием JSON
+
+Современные версии Ceph поддерживают вывод в формате JSON, что делает обработку данных более структурированной. Можно добавить к параметрам агента:
+
+```
+UserParameter=ceph.health.json,ceph -n client.zabbix -k /etc/ceph/ceph.client.zabbix.keyring --conf /etc/ceph/ceph.zabbix.conf health -f json-pretty
+UserParameter=ceph.status.json,ceph -n client.zabbix -k /etc/ceph/ceph.client.zabbix.keyring --conf /etc/ceph/ceph.zabbix.conf status -f json-pretty
+```
+
+Это позволит Zabbix обрабатывать данные с помощью JSONPath и создавать более детальные триггеры на основе различных значений в JSON.
+
+## Рекомендации по настройке мониторинга для разных типов узлов
+
+### Для серверов MON+MGR
+
+```
+# MON+MGR специфичные проверки
+UserParameter=ceph.mon.count,ceph -n client.zabbix -k /etc/ceph/ceph.client.zabbix.keyring --conf /etc/ceph/ceph.zabbix.conf mon dump -f json-pretty | grep -c "name"
+UserParameter=ceph.mgr.active,ceph -n client.zabbix -k /etc/ceph/ceph.client.zabbix.keyring --conf /etc/ceph/ceph.zabbix.conf mgr dump -f json-pretty | grep "active_name" | awk '{print $2}' | tr -d '",:'
+UserParameter=ceph.mgr.standby.count,ceph -n client.zabbix -k /etc/ceph/ceph.client.zabbix.keyring --conf /etc/ceph/ceph.zabbix.conf mgr dump -f json-pretty | grep -c "standby"
+```
+
+### Для серверов OSD
+
+```
+# OSD специфичные проверки
+UserParameter=ceph.osd.full_ratio,ceph -n client.zabbix -k /etc/ceph/ceph.client.zabbix.keyring --conf /etc/ceph/ceph.zabbix.conf osd dump | grep -w "full_ratio" | awk '{print $2}'
+UserParameter=ceph.osd.nearfull_ratio,ceph -n client.zabbix -k /etc/ceph/ceph.client.zabbix.keyring --conf /etc/ceph/ceph.zabbix.conf osd dump | grep -w "nearfull_ratio" | awk '{print $2}'
+UserParameter=ceph.osd.tree,ceph -n client.zabbix -k /etc/ceph/ceph.client.zabbix.keyring --conf /etc/ceph/ceph.zabbix.conf osd tree -f json-pretty
+```
+
+### Для серверов RGW
+
+```
+# RGW специфичные проверки
+UserParameter=ceph.rgw.bucket.stats[*],radosgw-admin -n client.zabbix -k /etc/ceph/ceph.client.zabbix.keyring --conf /etc/ceph/ceph.zabbix.conf bucket stats --bucket=$1 -f json-pretty 2>/dev/null || echo "{}"
+```
+
+Обратите внимание, что для radosgw-admin может потребоваться отдельный пользователь cephx с соответствующими правами.
+
+Использование cephx вместо sudo - более безопасный и предпочтительный подход для мониторинга кластера Ceph через Zabbix Agent.
