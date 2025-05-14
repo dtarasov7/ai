@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<zabbix_export>
+    <version>5.0</version>
+    <date>2025-05-14T12:00:00Z</date>
+    <groups>
+        <group>
+            <name>Templates/Applications</name>
+        </group>
+    </groups>
+    <templates>
+        <template>
+            <template>Template Ceph RadosGW</template>
+            <name>Template Ceph RadosGW</name>
+            <groups>
+                <group>
+                    <name>Templates/Applications</name>
+                </group>
+            </groups>
+            <applications>
+                <application>
+                    <name>Ceph RadosGW</name>
+                </application>
+            </applications>
+            <discovery_rules>
+                <discovery_rule>
+                    <name>RadosGW VIP discovery</name>
+                    <key>radosgw.vip.discovery</key>
+                    <delay>1h</delay>
+                    <item_prototypes>
+                        <item_prototype>
+                            <name>RadosGW VIP {#VIP} status</name>
+                            <key>radosgw.vip.status[{#VIP}]</key>
+                            <delay>30s</delay>
+                            <history>7d</history>
+                            <trends>90d</trends>
+                            <value_type>UNSIGNED</value_type>
+                            <description>Checks if RadosGW service is available via VIP</description>
+                            <applications>
+                                <application>
+                                    <name>Ceph RadosGW</name>
+                                </application>
+                            </applications>
+                            <valuemap>
+                                <name>Service state</name>
+                            </valuemap>
+                            <triggers>
+                                <trigger>
+                                    <expression>{last()}=0</expression>
+                                    <name>RadosGW VIP {#VIP} service is unavailable</name>
+                                    <priority>HIGH</priority>
+                                    <description>RadosGW service is unavailable through VIP address</description>
+                                </trigger>
+                            </triggers>
+                        </item_prototype>
+                    </item_prototypes>
+                    <macros>
+                        <macro>
+                            <macro>{$VIP}</macro>
+                            <value>SET_YOUR_VIP_HERE</value>
+                            <description>VIP address for RadosGW service</description>
+                        </macro>
+                    </macros>
+                </discovery_rule>
+            </discovery_rules>
+            <items>
+                <item>
+                    <name>Local RadosGW service status</name>
+                    <key>radosgw.local.status</key>
+                    <delay>30s</delay>
+                    <history>7d</history>
+                    <trends>90d</trends>
+                    <value_type>UNSIGNED</value_type>
+                    <description>Checks if local RadosGW service is running on port 8443</description>
+                    <applications>
+                        <application>
+                            <name>Ceph RadosGW</name>
+                        </application>
+                    </applications>
+                    <valuemap>
+                        <name>Service state</name>
+                    </valuemap>
+                    <triggers>
+                        <trigger>
+                            <expression>{last()}=0</expression>
+                            <name>Local RadosGW service is down</name>
+                            <priority>HIGH</priority>
+                            <description>Local RadosGW service is not running or not available on port 8443</description>
+                        </trigger>
+                    </triggers>
+                </item>
+            </items>
+            <macros>
+                <macro>
+                    <macro>{$VIP}</macro>
+                    <value>SET_YOUR_VIP_HERE</value>
+                    <description>VIP address for RadosGW service</description>
+                </macro>
+            </macros>
+            <valuemaps>
+                <valuemap>
+                    <name>Service state</name>
+                    <mappings>
+                        <mapping>
+                            <value>0</value>
+                            <newvalue>Down</newvalue>
+                        </mapping>
+                        <mapping>
+                            <value>1</value>
+                            <newvalue>Up</newvalue>
+                        </mapping>
+                    </mappings>
+                </valuemap>
+            </valuemaps>
+        </template>
+    </templates>
+</zabbix_export>

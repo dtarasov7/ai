@@ -1,0 +1,4 @@
+# Пользовательские параметры для мониторинга Ceph RadosGW
+UserParameter=radosgw.local.status,/etc/zabbix/scripts/check_radosgw.sh
+UserParameter=radosgw.vip.status[*],/etc/zabbix/scripts/check_radosgw_vip.sh $1
+UserParameter=radosgw.vip.discovery[*],/etc/zabbix/scripts/radosgw_vip_discovery.sh $1
