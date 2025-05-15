@@ -1,0 +1,250 @@
+﻿### Ключевые моменты
+- Исследования показывают, что для мониторинга статуса каждого OSD сервиса на серверах `osd1` и `osd2` с Zabbix Agent 1 и Zabbix 6.4, нужно настроить Ceph пользователя для мониторинга.
+- Кажется вероятным, что потребуется создать скрипты для проверки статуса OSD и использовать низкоуровневое обнаружение для автоматического мониторинга.
+- Есть споры о правах доступа, но решение с копированием конфигурации в доступную директорию кажется безопасным.
+
+---
+
+### Настройка Zabbix Agent и шаблон
+
+#### Общая настройка
+Для мониторинга статуса каждого OSD сервиса на серверах `osd1` и `osd2`, где запущено несколько OSD сервисов (Ceph 17.2.7, Bluestore), следуйте этим шагам:
+
+- **Создайте пользователя Ceph для мониторинга**:
+  - Выполните на одном из серверов мониторов:
+    ```bash
+    ceph auth get-or-create client.zabbix-monitor mon 'allow r' osd 'allow r' mgr 'allow r' -o /etc/ceph/ceph.client.zabbix-monitor.keyring
+    ```
+  - Это создаст пользователя с правами на чтение данных кластера.
+
+- **Настройте доступ для Zabbix Agent**:
+  - Скопируйте файлы конфигурации в директорию, доступную для пользователя `zabbix`:
+    ```bash
+    mkdir -p /var/lib/zabbix/ceph
+    cp /etc/ceph/ceph.conf /var/lib/zabbix/ceph/
+    cp /etc/ceph/ceph.client.zabbix-monitor.keyring /var/lib/zabbix/ceph/
+    chown -R zabbix:zabbix /var/lib/zabbix/ceph
+    chmod -R 600 /var/lib/zabbix/ceph/*
+    ```
+
+- **Создайте скрипты на серверах osd1 и osd2**:
+  - Создайте директорию:
+    ```bash
+    mkdir -p /usr/local/bin/osd_monitor
+    ```
+  - Скрипт для проверки статуса OSD (`/usr/local/bin/osd_monitor/osd_status.sh`):
+    ```bash
+    #!/bin/bash
+    osd_id=$1
+    if [ ! -d /var/lib/ceph/osd/ceph-$osd_id ]; then
+      echo 2
+      exit 1
+    fi
+    status=$(ceph --conf /var/lib/zabbix/ceph/ceph.conf --keyring /var/lib/zabbix/ceph/ceph.client.zabbix-monitor.keyring osd dump --format json | jq -r ".osds[] | select(.osd == $osd_id) | .up")
+    [ "$status" == "1" ] && echo 0 || echo 1
+    ```
+  - Скрипт для обнаружения локальных OSD (`/usr/local/bin/osd_monitor/local_osds.sh`):
+    ```bash
+    #!/bin/bash
+    for dir in /var/lib/ceph/osd/ceph-*; do
+      osd_id=${dir##*/ceph-}
+      echo "{\"{#OSD_ID}\":\"$osd_id\"}"
+    done
+    ```
+  - Установите права:
+    ```bash
+    chown zabbix:zabbix /usr/local/bin/osd_monitor/*
+    chmod 755 /usr/local/bin/osd_monitor/*
+    ```
+
+- **Настройте Zabbix Agent**:
+  - В `/etc/zabbix/zabbix_agentd.conf` добавьте:
+    ```ini
+    UserParameter=osd.status[*],/usr/local/bin/osd_monitor/osd_status.sh $1
+    UserParameter=local.osds.discovery,/usr/local/bin/osd_monitor/local_osds.sh
+    ```
+  - Перезапустите агент:
+    ```bash
+    systemctl restart zabbix-agent
+    ```
+
+#### Шаблон для Zabbix 6.4
+Создайте YAML-шаблон для импорта в Zabbix 6.4:
+
+```yaml
+version: '6.4'
+date: '2025-05-15T15:25:00Z'
+groups:
+  - name: Templates
+templates:
+  - name: Ceph OSD Monitoring
+    groups:
+      - name: Templates
+    tags:
+      - tag: class:application
+      - tag: target:ceph-osd
+    items:
+      - name: Local OSDs Discovery
+        key: local.osds.discovery
+        type: 0
+        value_type: 4
+        delay: 3600
+        description: Discover local OSDs on this host
+        applications:
+          - name: Discovery
+        discovery:
+          - name: Local OSDs
+            key: {#OSD_ID}
+            type: 0
+            value_type: 3
+            description: Status of OSD {#OSD_ID}
+            applications:
+              - name: OSD Status
+      - name: OSD {#OSD_ID} Status
+        key: osd.status[{#OSD_ID}]
+        type: 0
+        value_type: 3
+        delay: 60
+        description: Status of OSD {#OSD_ID} (0=Up, 1=Down, 2=Not found)
+        applications:
+          - name: OSD Status
+    triggers:
+      - name: OSD {#OSD_ID} is down
+        expression: '{#HOST}:osd.status[{#OSD_ID}].last(0)=1'
+        priority: 2
+        description: OSD {#OSD_ID} is not running
+      - name: OSD {#OSD_ID} not found on this host
+        expression: '{#HOST}:osd.status[{#OSD_ID}].last(0)=2'
+        priority: 3
+        description: OSD {#OSD_ID} is not present on this host
+```
+
+- Импортируйте шаблон в Zabbix: **Configuration** > **Templates** > **Import**.
+- Привяжите шаблон к хостам `osd1` и `osd2`: **Configuration** > **Hosts** > [хост] > **Templates**.
+
+---
+
+### Отчет
+
+#### Введение
+Для мониторинга статуса каждого OSD сервиса на серверах `osd1` и `osd2` с Ceph 17.2.7 (Bluestore) и Zabbix Agent 1, при использовании Zabbix сервера версии 6.4, необходимо настроить доступ к данным Ceph для пользователя `zabbix`, создать скрипты для проверки статуса OSD и использовать низкоуровневое обнаружение для автоматического мониторинга. Этот отчет подробно описывает процесс настройки, включая создание шаблона в формате YAML для Zabbix 6.4, и учитывает права доступа и безопасность.
+
+#### Настройка Ceph для мониторинга
+Для выполнения команд Ceph, таких как `ceph osd dump`, пользователю `zabbix` необходим доступ к файлам конфигурации и ключей. Поскольку Zabbix Agent запускается от имени `zabbix`, который не имеет прав на чтение `/etc/ceph`, создадим пользователя Ceph для мониторинга с минимальными правами. Команда:
+```bash
+ceph auth get-or-create client.zabbix-monitor mon 'allow r' osd 'allow r' mgr 'allow r' -o /etc/ceph/ceph.client.zabbix-monitor.keyring
+```
+Предоставляет права на чтение данных мониторов, OSD и менеджеров, что достаточно для получения статуса OSD.
+
+Затем копируем файлы в директорию, доступную для `zabbix`:
+```bash
+mkdir -p /var/lib/zabbix/ceph
+cp /etc/ceph/ceph.conf /var/lib/zabbix/ceph/
+cp /etc/ceph/ceph.client.zabbix-monitor.keyring /var/lib/zabbix/ceph/
+chown -R zabbix:zabbix /var/lib/zabbix/ceph
+chmod -R 600 /var/lib/zabbix/ceph/*
+```
+Это обеспечивает безопасность, ограничивая доступ только для `zabbix`.
+
+#### Настройка Zabbix Agent
+На серверах `osd1` и `osd2` создаем скрипты для мониторинга. Скрипт `osd_status.sh` проверяет статус конкретного OSD:
+```bash
+#!/bin/bash
+osd_id=$1
+if [ ! -d /var/lib/ceph/osd/ceph-$osd_id ]; then
+  echo 2
+  exit 1
+fi
+status=$(ceph --conf /var/lib/zabbix/ceph/ceph.conf --keyring /var/lib/zabbix/ceph/ceph.client.zabbix-monitor.keyring osd dump --format json | jq -r ".osds[] | select(.osd == $osd_id) | .up")
+[ "$status" == "1" ] && echo 0 || echo 1
+```
+Скрипт возвращает 0, если OSD запущен, 1, если не запущен, и 2, если OSD не найден локально.
+
+Скрипт `local_osds.sh` обнаруживает локальные OSD:
+```bash
+#!/bin/bash
+for dir in /var/lib/ceph/osd/ceph-*; do
+  osd_id=${dir##*/ceph-}
+  echo "{\"{#OSD_ID}\":\"$osd_id\"}"
+done
+```
+Это позволяет Zabbix автоматически обнаруживать OSD на каждом хосте.
+
+Настройка UserParameters:
+```ini
+UserParameter=osd.status[*],/usr/local/bin/osd_monitor/osd_status.sh $1
+UserParameter=local.osds.discovery,/usr/local/bin/osd_monitor/local_osds.sh
+```
+После этого перезапустите Zabbix Agent:
+```bash
+systemctl restart zabbix-agent
+```
+
+#### Создание шаблона для Zabbix 6.4
+Шаблон в формате YAML для Zabbix 6.4 включает правило обнаружения и прототип элемента данных:
+```yaml
+version: '6.4'
+date: '2025-05-15T15:25:00Z'
+groups:
+  - name: Templates
+templates:
+  - name: Ceph OSD Monitoring
+    groups:
+      - name: Templates
+    tags:
+      - tag: class:application
+      - tag: target:ceph-osd
+    items:
+      - name: Local OSDs Discovery
+        key: local.osds.discovery
+        type: 0
+        value_type: 4
+        delay: 3600
+        description: Discover local OSDs on this host
+        applications:
+          - name: Discovery
+        discovery:
+          - name: Local OSDs
+            key: {#OSD_ID}
+            type: 0
+            value_type: 3
+            description: Status of OSD {#OSD_ID}
+            applications:
+              - name: OSD Status
+      - name: OSD {#OSD_ID} Status
+        key: osd.status[{#OSD_ID}]
+        type: 0
+        value_type: 3
+        delay: 60
+        description: Status of OSD {#OSD_ID} (0=Up, 1=Down, 2=Not found)
+        applications:
+          - name: OSD Status
+    triggers:
+      - name: OSD {#OSD_ID} is down
+        expression: '{#HOST}:osd.status[{#OSD_ID}].last(0)=1'
+        priority: 2
+        description: OSD {#OSD_ID} is not running
+      - name: OSD {#OSD_ID} not found on this host
+        expression: '{#HOST}:osd.status[{#OSD_ID}].last(0)=2'
+        priority: 3
+        description: OSD {#OSD_ID} is not present on this host
+```
+Импортируйте шаблон через **Configuration** > **Templates** > **Import**, затем привяжите к хостам `osd1` и `osd2`.
+
+#### Дополнительные настройки
+- **Уведомления**: Настройте действия для триггеров в **Configuration** > **Actions** > **Trigger actions**.
+- **Дашборд**: Создайте дашборд в **Monitoring** > **Dashboards** для визуализации статуса OSD.
+
+#### Таблица сравнения подходов
+| Подход                | Преимущества                          | Недостатки                          |
+|-----------------------|---------------------------------------|-------------------------------------|
+| Использование Ceph API| Безопасный, гибкий, минимальные права | Требует настройки пользователя Ceph |
+| Прямой доступ к systemd | Простота, локальный статус           | Требует root, не подходит для zabbix|
+
+#### Заключение
+Решение позволяет мониторить статус каждого OSD сервиса на `osd1` и `osd2` с использованием Zabbix Agent 1 и шаблона для Zabbix 6.4. Автоматическое обнаружение OSD упрощает настройку, а триггеры обеспечивают оповещения о проблемах. Убедитесь, что `jq` установлен и права доступа настроены правильно.
+
+#### Ключевые источники
+- [User Management Ceph Documentation](https://docs.ceph.com/en/reef/rados/operations/user-management/)
+- [Zabbix User Parameters Documentation](https://www.zabbix.com/documentation/current/manual/config/items/userparameters)
+- [Ceph OSD Operations Documentation](https://docs.ceph.com/en/reef/rados/operations/osd/)

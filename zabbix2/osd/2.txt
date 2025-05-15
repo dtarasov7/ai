@@ -1,0 +1,132 @@
+﻿### Ключевые моменты
+- Исследования показывают, что `osd.status[*]` — это UserParameter в Zabbix, который позволяет проверять статус каждого OSD в Ceph.
+- Кажется вероятным, что это используется для мониторинга статуса OSD с помощью скрипта, принимающего ID OSD как аргумент.
+- Есть споры о правах доступа, но решение с отдельным пользователем Ceph кажется безопасным.
+
+### Что означает `osd.status[*]`
+**Объяснение для начинающих**  
+`osd.status[*]` — это специальная команда в Zabbix, которая позволяет проверять, работает ли конкретный OSD (хранилище данных) в вашем Ceph кластере. Звездочка `[*]` означает, что вы можете указать номер OSD, например, `osd.status[0]` для проверки первого OSD. Zabbix агент на сервере выполнит скрипт, который посмотрит, запущен ли этот OSD, и вернет результат: 0 — работает, 1 — не работает, 2 — OSD не найден.
+
+**Как это работает**  
+- Эта команда настроена в файле Zabbix агента, обычно в `/etc/zabbix/zabbix_agentd.conf`.
+- Скрипт, например, `/usr/local/bin/osd_monitor/osd_status.sh`, принимает номер OSD и использует команду `ceph` для проверки его статуса.
+- Результат отправляется в Zabbix сервер, где отображается в интерфейсе.
+
+**Пример использования**  
+Если у вас на сервере `osd1` есть OSD с ID 0 и 1, вы можете создать в Zabbix элементы данных с ключами `osd.status[0]` и `osd.status[1]`, чтобы видеть их статус.
+
+---
+
+### Исследовательская часть
+
+#### Введение
+В контексте мониторинга Ceph кластера версии 17.2.7 с использованием Zabbix 6.4 и Zabbix Agent 1, запись `osd.status[*]` играет ключевую роль в отслеживании статуса каждого OSD (Object Storage Daemon). Этот отчет подробно описывает, что означает `osd.status[*]`, как оно работает, и как интегрируется в систему мониторинга, включая настройки агента, скрипты и шаблоны.
+
+#### Что такое `osd.status[*]`
+`osd.status[*]` — это UserParameter, определенный в конфигурации Zabbix Agent, который позволяет выполнять пользовательские команды для мониторинга. Согласно документации Zabbix ([User Parameters Documentation](https://www.zabbix.com/documentation/current/en/manual/config/items/userparameters)), UserParameters расширяют функциональность агента, позволяя запускать скрипты или команды для сбора данных, не предусмотренных стандартными проверками.
+
+Символ `[*]` указывает, что это гибкий параметр, принимающий аргумент, в данном случае ID OSD. Например, `osd.status[0]` проверит статус OSD с ID 0, `osd.status[1]` — с ID 1 и так далее. Это позволяет мониторить множество OSD на одном хосте, что особенно полезно для серверов, таких как `osd1` и `osd2`, где запущено несколько OSD сервисов.
+
+#### Технические детали
+UserParameter `osd.status[*]` обычно определяется в файле конфигурации, например:
+```ini
+UserParameter=osd.status[*],/usr/local/bin/osd_monitor/osd_status.sh $1
+```
+Здесь:
+- `osd.status[*]` — ключ, который будет использоваться в Zabbix для вызова команды.
+- `/usr/local/bin/osd_monitor/osd_status.sh` — скрипт, выполняемый агентом.
+- `$1` — аргумент, передаваемый скрипту, который представляет ID OSD.
+
+Скрипт `osd_status.sh`, например, может выглядеть так:
+```bash
+#!/bin/bash
+osd_id=$1
+if [ ! -d /var/lib/ceph/osd/ceph-$osd_id ]; then
+  echo 2  # OSD не найден
+  exit 1
+fi
+status=$(ceph --conf /var/lib/zabbix/ceph/ceph.conf --keyring /var/lib/zabbix/ceph/ceph.client.zabbix-monitor.keyring osd dump --format json | jq -r ".osds[] | select(.osd == $osd_id) | .up")
+[ "$status" == "1" ] && echo 0 || echo 1
+```
+- Скрипт проверяет, существует ли директория для указанного OSD. Если нет, возвращает `2` (OSD не найден).
+- Затем он использует команду `ceph osd dump` для получения статуса OSD и проверяет поле `.up` (1 — OSD запущен, 0 — остановлен).
+- Возвращает `0`, если OSD работает, `1`, если не работает.
+
+Этот подход позволяет Zabbix агенту собирать статус каждого OSD индивидуально, что критично для серверов с несколькими OSD, таких как `osd1` и `osd2`.
+
+#### Интеграция с шаблоном Zabbix 6.4
+Для автоматического мониторинга всех OSD на хосте используется низкоуровневое обнаружение (Low-Level Discovery, LLD). В шаблоне YAML для Zabbix 6.4 это реализуется следующим образом:
+```yaml
+items:
+  - name: Local OSDs Discovery
+    key: local.osds.discovery
+    type: 0
+    value_type: 4
+    delay: 3600
+    description: Discover local OSDs on this host
+    applications:
+      - name: Discovery
+    discovery:
+      - name: Local OSDs
+        key: {#OSD_ID}
+        type: 0
+        value_type: 3
+        description: Status of OSD {#OSD_ID}
+        applications:
+          - name: OSD Status
+  - name: OSD {#OSD_ID} Status
+    key: osd.status[{#OSD_ID}]
+    type: 0
+    value_type: 3
+    delay: 60
+    description: Status of OSD {#OSD_ID} (0=Up, 1=Down, 2=Not found)
+    applications:
+      - name: OSD Status
+triggers:
+  - name: OSD {#OSD_ID} is down
+    expression: '{#HOST}:osd.status[{#OSD_ID}].last(0)=1'
+    priority: 2
+    description: OSD {#OSD_ID} is not running
+  - name: OSD {#OSD_ID} not found on this host
+    expression: '{#HOST}:osd.status[{#OSD_ID}].last(0)=2'
+    priority: 3
+    description: OSD {#OSD_ID} is not present on this host
+```
+- Элемент `local.osds.discovery` использует скрипт, например, `local_osds.sh`, для обнаружения всех локальных OSD:
+  ```bash
+  #!/bin/bash
+  for dir in /var/lib/ceph/osd/ceph-*; do
+    osd_id=${dir##*/ceph-}
+    echo "{\"{#OSD_ID}\":\"$osd_id\"}"
+  done
+  ```
+- Это создает прототип элемента данных `osd.status[{#OSD_ID}]` для каждого обнаруженного OSD, что позволяет автоматически мониторить их статус.
+
+#### Права доступа и безопасность
+Поскольку Zabbix Agent работает от имени пользователя `zabbix`, который изначально не имеет доступа к `/etc/ceph`, необходимо настроить доступ. Рекомендуется создать отдельного пользователя Ceph (`client.zabbix-monitor`) с минимальными правами:
+```bash
+ceph auth get-or-create client.zabbix-monitor mon 'allow r' osd 'allow r' mgr 'allow r' -o /etc/ceph/ceph.client.zabbix-monitor.keyring
+```
+Затем скопируйте конфигурацию в директорию, доступную для `zabbix`:
+```bash
+mkdir -p /var/lib/zabbix/ceph
+cp /etc/ceph/ceph.conf /var/lib/zabbix/ceph/
+cp /etc/ceph/ceph.client.zabbix-monitor.keyring /var/lib/zabbix/ceph/
+chown -R zabbix:zabbix /var/lib/zabbix/ceph
+chmod -R 600 /var/lib/zabbix/ceph/*
+```
+Это обеспечивает безопасность, ограничивая доступ только для чтения и минимизируя риски.
+
+#### Таблица сравнения подходов
+| Подход                | Преимущества                          | Недостатки                          |
+|-----------------------|---------------------------------------|-------------------------------------|
+| Использование Ceph API| Безопасный, гибкий, минимальные права | Требует настройки пользователя Ceph |
+| Прямой доступ к systemd | Простота, локальный статус           | Требует root, не подходит для zabbix|
+
+#### Заключение
+`osd.status[*]` — это UserParameter в Zabbix, который позволяет мониторить статус каждого OSD в Ceph кластере, принимая ID OSD как аргумент. Это реализуется через скрипт, который проверяет статус с помощью команды `ceph`, и интегрируется с шаблоном через низкоуровневое обнаружение для автоматического мониторинга. Настройка прав доступа через отдельного пользователя Ceph обеспечивает безопасность и работоспособность.
+
+#### Ключевые источники
+- [User Management Ceph Documentation](https://docs.ceph.com/en/latest/rados/operations/user-management/)
+- [Zabbix User Parameters Documentation](https://www.zabbix.com/documentation/current/en/manual/config/items/userparameters)
+- [Ceph OSD Operations Documentation](https://docs.ceph.com/en/latest/rados/operations/osd/)
