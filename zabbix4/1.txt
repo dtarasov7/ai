@@ -1,0 +1,188 @@
+﻿Для настройки мониторинга OSD-сервисов Ceph через Zabbix agent v1 на серверах osd1 и osd2, я предлагаю следующее решение:
+
+## Подход к мониторингу
+
+Поскольку у вас Zabbix agent v1 (не v2), мы будем использовать подход с пользовательскими параметрами (UserParameters) и скриптом, который будет собирать информацию о состоянии OSD-сервисов через команды Ceph CLI.
+
+## Шаги настройки
+
+1. Сначала создадим скрипт на серверах osd1 и osd2, который будет получать информацию о статусе OSD
+
+2. Настроим UserParameters в конфигурации Zabbix agent
+
+3. Создадим шаблон для Zabbix 6.4 в формате YAML
+
+## Настройка Zabbix агента
+
+1. Создадим скрипт `/etc/zabbix/scripts/ceph_osd_status.sh`:
+
+```bash
+#!/bin/bash
+
+ACTION=$1
+OSD_ID=$2
+
+case "$ACTION" in
+    discovery)
+        # Обнаружение всех OSD на сервере
+        OSD_LIST=$(ls -1 /var/run/ceph/ceph-osd.*.asok 2>/dev/null | sed -n 's/.*ceph-osd\.\([0-9]*\)\.asok$/\1/p')
+        if [ -z "$OSD_LIST" ]; then
+            echo '{"data":[]}'
+            exit 0
+        fi
+        
+        JSON='{"data":['
+        FIRST=true
+        for OSD in $OSD_LIST; do
+            if [ "$FIRST" = true ]; then
+                FIRST=false
+            else
+                JSON="$JSON,"
+            fi
+            JSON="$JSON{\"{#OSDID}\":\"$OSD\"}"
+        done
+        JSON="$JSON]}"
+        echo "$JSON"
+        ;;
+    status)
+        # Проверка статуса конкретного OSD
+        if systemctl is-active ceph-osd@${OSD_ID} >/dev/null 2>&1; then
+            echo 1
+        else
+            echo 0
+        fi
+        ;;
+    state)
+        # Получение полного состояния OSD из ceph osd tree
+        STATE=$(ceph osd tree --format=json 2>/dev/null | jq -r ".nodes[] | select(.id == ${OSD_ID}) .status" 2>/dev/null)
+        if [ -z "$STATE" ] || [ "$STATE" = "null" ]; then
+            echo "UNKNOWN"
+        else
+            echo "$STATE"
+        fi
+        ;;
+    weight)
+        # Получение веса OSD
+        WEIGHT=$(ceph osd tree --format=json 2>/dev/null | jq -r ".nodes[] | select(.id == ${OSD_ID}) .crush_weight" 2>/dev/null)
+        if [ -z "$WEIGHT" ] || [ "$WEIGHT" = "null" ]; then
+            echo 0
+        else
+            echo "$WEIGHT"
+        fi
+        ;;
+    used_space)
+        # Получение используемого пространства OSD в байтах
+        USED=$(ceph osd df --format=json 2>/dev/null | jq -r ".nodes[] | select(.id == ${OSD_ID}) .kb_used" 2>/dev/null)
+        if [ -z "$USED" ] || [ "$USED" = "null" ]; then
+            echo 0
+        else
+            # Конвертируем KB в байты
+            echo $(($USED * 1024))
+        fi
+        ;;
+    total_space)
+        # Получение общего пространства OSD в байтах
+        TOTAL=$(ceph osd df --format=json 2>/dev/null | jq -r ".nodes[] | select(.id == ${OSD_ID}) .kb" 2>/dev/null)
+        if [ -z "$TOTAL" ] || [ "$TOTAL" = "null" ]; then
+            echo 0
+        else
+            # Конвертируем KB в байты
+            echo $(($TOTAL * 1024))
+        fi
+        ;;
+    *)
+        echo "Unknown action: $ACTION"
+        exit 1
+        ;;
+esac
+
+exit 0
+```
+
+2. Установим права на выполнение скрипта:
+```bash
+chmod +x /etc/zabbix/scripts/ceph_osd_status.sh
+```
+
+3. Убедимся, что у пользователя zabbix есть необходимые права для выполнения команд ceph. Добавим в `/etc/sudoers.d/zabbix`:
+```
+zabbix ALL=(ALL) NOPASSWD: /usr/bin/ceph
+```
+
+4. Добавим UserParameters в файл конфигурации Zabbix агента `/etc/zabbix/zabbix_agentd.conf` или в отдельный файл `/etc/zabbix/zabbix_agentd.d/ceph_osd.conf`:
+```
+# Обнаружение OSD
+UserParameter=ceph.osd.discovery,/etc/zabbix/scripts/ceph_osd_status.sh discovery
+
+# Статус OSD (запущен или нет)
+UserParameter=ceph.osd.status[*],/etc/zabbix/scripts/ceph_osd_status.sh status $1
+
+# Состояние OSD (up/down, in/out)
+UserParameter=ceph.osd.state[*],/etc/zabbix/scripts/ceph_osd_status.sh state $1
+
+# Вес OSD
+UserParameter=ceph.osd.weight[*],/etc/zabbix/scripts/ceph_osd_status.sh weight $1
+
+# Используемое пространство OSD (в байтах)
+UserParameter=ceph.osd.used_space[*],/etc/zabbix/scripts/ceph_osd_status.sh used_space $1
+
+# Общее пространство OSD (в байтах)
+UserParameter=ceph.osd.total_space[*],/etc/zabbix/scripts/ceph_osd_status.sh total_space $1
+```
+
+5. Перезапустим Zabbix агент:
+```bash
+systemctl restart zabbix-agent
+```
+
+## Шаблон Zabbix в формате YAML
+
+Теперь я создам шаблон для Zabbix 6.4 в формате YAML:
+
+## Объяснение решения
+
+### Скрипт ceph_osd_status.sh
+
+Скрипт выполняет несколько функций:
+1. **discovery** - обнаруживает все OSD на сервере путем проверки сокетов в `/var/run/ceph/`
+2. **status** - проверяет, запущен ли конкретный OSD сервис
+3. **state** - получает состояние OSD (up/down, in/out) из вывода `ceph osd tree`
+4. **weight** - получает вес OSD в кластере CRUSH
+5. **used_space** и **total_space** - получают данные об использовании дискового пространства
+ 
+### Шаблон Zabbix
+
+Шаблон включает в себя:
+1. **Правило обнаружения** для автоматического определения всех OSD на сервере
+2. **Прототипы элементов данных**:
+   - Статус OSD (запущен/не запущен)
+   - Состояние OSD (up/down, in/out)
+   - Вес OSD в кластере CRUSH
+   - Используемое и общее пространство
+   - Процент использования пространства (вычисляемый элемент данных)
+
+3. **Прототипы триггеров**:
+   - Триггер HIGH: когда OSD не запущен
+   - Триггер HIGH: когда OSD находится в состоянии DOWN
+   - Триггер AVERAGE: когда OSD находится в состоянии OUT
+   - Триггер WARNING: когда OSD заполнен более чем на 90%
+   - Триггер HIGH: когда OSD заполнен более чем на 95%
+
+4. **Прототип графика** для отображения заполнения OSD
+
+## Как применить решение
+
+1. Установите скрипт на серверы osd1 и osd2
+2. Настройте пользовательские параметры в конфигурации Zabbix агента
+3. Импортируйте шаблон в Zabbix сервер
+4. Свяжите шаблон с хостами osd1 и osd2
+5. Подождите, пока сработает обнаружение, и проверьте данные
+
+### Дополнительные настройки
+
+Для корректной работы скрипта убедитесь, что:
+1. Пользователь zabbix имеет права на выполнение команд ceph
+2. На серверах установлен JQ для парсинга JSON (используется в скрипте)
+3. Путь до сокетов OSD соответствует вашей конфигурации Ceph
+
+Вы можете легко расширить шаблон, добавив новые метрики в скрипт и соответствующие элементы данных в шаблон.
