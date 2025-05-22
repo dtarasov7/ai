@@ -1,0 +1,86 @@
+﻿Для массового применения нового шаблона t2 к большому количеству серверов в Zabbix 6.4 есть несколько эффективных способов с минимальными затратами:
+
+1. **Через веб-интерфейс (для небольших групп)**:
+   - Перейдите в "Configuration" > "Hosts"
+   - Используйте фильтры для выбора нужных серверов
+   - Отметьте все необходимые серверы
+   - Выберите "Mass update" из выпадающего меню
+   - В разделе "Templates" выберите "Link new templates" и добавьте шаблон t2
+   - Примените изменения
+
+2. **Через группы хостов**:
+   - Если целевые серверы объединены в группы, привяжите шаблон t2 к группе хостов
+   - Создайте новую группу и переместите в неё нужные серверы, если требуется
+
+3. **Через API (наиболее эффективно для большого количества)**:
+   - Используйте метод `host.massadd` с параметром `templates` для привязки шаблона к многим хостам одновременно
+   - Пример скрипта на Python:
+   ```python
+   import requests
+   import json
+
+   # Параметры подключения
+   url = "http://your-zabbix-server/api_jsonrpc.php"
+   headers = {'Content-Type': 'application/json-rpc'}
+   
+   # Авторизация
+   auth_data = {
+       "jsonrpc": "2.0",
+       "method": "user.login",
+       "params": {"user": "Admin", "password": "zabbix"},
+       "id": 1
+   }
+   
+   response = requests.post(url, data=json.dumps(auth_data), headers=headers)
+   auth_token = json.loads(response.text)['result']
+   
+   # Получение ID шаблона t2
+   template_data = {
+       "jsonrpc": "2.0",
+       "method": "template.get",
+       "params": {"filter": {"host": ["t2"]}},
+       "auth": auth_token,
+       "id": 2
+   }
+   
+   response = requests.post(url, data=json.dumps(template_data), headers=headers)
+   template_id = json.loads(response.text)['result'][0]['templateid']
+   
+   # Получение ID хостов (например, по группе)
+   host_data = {
+       "jsonrpc": "2.0",
+       "method": "host.get",
+       "params": {"groupids": ["your_group_id"]},
+       "auth": auth_token,
+       "id": 3
+   }
+   
+   response = requests.post(url, data=json.dumps(host_data), headers=headers)
+   hosts = json.loads(response.text)['result']
+   host_ids = [host['hostid'] for host in hosts]
+   
+   # Массовое добавление шаблона
+   massadd_data = {
+       "jsonrpc": "2.0",
+       "method": "host.massadd",
+       "params": {
+           "hosts": [{"hostid": host_id} for host_id in host_ids],
+           "templates": [{"templateid": template_id}]
+       },
+       "auth": auth_token,
+       "id": 4
+   }
+   
+   response = requests.post(url, data=json.dumps(massadd_data), headers=headers)
+   print(json.loads(response.text))
+   ```
+
+4. **Через конфигурационные файлы**:
+   - Экспортируйте конфигурацию хостов через "Configuration" > "Export"
+   - Добавьте шаблон t2 в XML-файл конфигурации для всех хостов
+   - Импортируйте обновленную конфигурацию обратно
+
+5. **Использование шаблонов-родителей**:
+   - Если у вас уже есть шаблон, привязанный ко всем этим хостам, добавьте t2 как зависимый от этого шаблона
+
+Рекомендация для большого количества серверов: способ с API обычно наиболее эффективен, так как позволяет автоматизировать процесс и избежать ручных операций.
