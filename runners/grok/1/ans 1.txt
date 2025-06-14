@@ -1,0 +1,124 @@
+﻿Ключевые моменты:
+
+Развернуто несколько GitLab Runner'ов в кластере Kubernetes, каждый работает на выделенных узлах с меткой runner=true для соответствия требованиям информационной безопасности.
+Каждый Runner использует Kubernetes executor, создавая поды для выполнения задач CI/CD в пространстве имен gitlab-runners.
+Runner'ы настроены для обработки до 20 параллельных заданий, обеспечивая высокую производительность.
+Для кэширования используется внешний S3-сервис, где каждый Runner имеет отдельное хранилище (bucket), обеспечивая мультитенантность.
+Kaniko применяется в пайплайнах CI/CD для многоэтапной сборки контейнеров Node.js, Java и .NET.
+Конфигурации и манифесты предоставлены для развертывания решения, включая безопасное хранение токенов и ключей S3.
+Архитектура решения
+
+Архитектура включает несколько GitLab Runner'ов, развернутых в кластере Kubernetes, для выполнения CI/CD задач, связанных с многоэтапной сборкой контейнеров с использованием Kaniko. Каждый Runner работает на фиксированных узлах кластера, помеченных как runner=true, чтобы соответствовать требованиям информационной безопасности. Runner'ы используют Kubernetes executor, создавая поды для выполнения заданий в пространстве имен gitlab-runners. Для обеспечения мультитенантности каждый Runner обслуживает разные пайплайны (например, для разных проектов) и использует отдельный S3 bucket для кэширования, изолируя кэш между Runner'ами. Kaniko применяется в .gitlab-ci.yml для сборки контейнеров, а внешний S3-сервис используется для хранения кэша.
+
+Конфигурация GitLab Runner
+
+Каждый Runner имеет файл конфигурации config.toml, который определяет его взаимодействие с GitLab и настройку кэширования. Конфигурация включает:
+
+URL GitLab и токен Runner'а.
+Использование Kubernetes executor с указанием пространства имен и сервисного аккаунта.
+Настройку S3-кэша с уникальным bucket для каждого Runner'а.
+Ограничение на 20 параллельных заданий.
+Манифесты Kubernetes
+
+Для развертывания Runner'ов используются следующие манифесты:
+
+Пространство имен gitlab-runners.
+Сервисный аккаунт и RBAC-правила для управления подами.
+ConfigMap для хранения config.toml.
+Secret для безопасного хранения токенов и ключей S3.
+Deployment для каждого Runner'а с nodeSelector для фиксированных узлов.
+GitLab Runner Kubernetes Deployment
+yaml
+Показать в строке
+Подробное описание решения
+
+Архитектура решения
+
+Решение включает развертывание нескольких GitLab Runner'ов в кластере Kubernetes для выполнения CI/CD задач, связанных с многоэтапной сборкой контейнеров для приложений Node.js, Java и .NET с использованием Kaniko. GitLab сервер находится вне кластера, а S3-сервис, также внешний, используется для хранения кэша. Каждый Runner настроен для работы на фиксированных узлах кластера, помеченных меткой runner=true, чтобы соответствовать требованиям информационной безопасности. Это достигается с помощью nodeSelector в манифестах Deployment.
+
+Каждый Runner использует Kubernetes executor, который создает отдельные поды в пространстве имен gitlab-runners для выполнения заданий CI/CD. Для обеспечения мультитенантности Runner'ы регистрируются с уникальными токенами и могут быть помечены тегами в GitLab, чтобы обслуживать разные проекты или пайплайны. Например, Runner для Node.js проектов может иметь тег nodejs, а для Java — java. Это позволяет направлять задания к соответствующим Runner'ам через настройки в .gitlab-ci.yml.
+
+Для кэширования каждый Runner настроен на использование отдельного S3 bucket (например, runner-1-cache, runner-2-cache), что гарантирует изоляцию кэша между Runner'ами, даже если они обслуживают один и тот же проект. Это важно для мультитенантности, так как предотвращает пересечение кэшей между разными пайплайнами. S3-сервис доступен по адресу, например, s3.example.com, и Runner'ы используют ключи доступа, хранящиеся в Kubernetes Secrets, для безопасного взаимодействия с ним.
+
+Kaniko используется в пайплайнах CI/CD для сборки контейнеров. В .gitlab-ci.yml задание сборки может выглядеть следующим образом:
+
+yaml
+
+
+build:
+  image: gcr.io/kaniko-project/executor:debug
+  script:
+    - /kaniko/executor --context $CI_PROJECT_DIR --dockerfile $CI_PROJECT_DIR/Dockerfile --destination $CI_REGISTRY_IMAGE:$CI_COMMIT_TAG
+Это позволяет выполнять многоэтапную сборку контейнеров без необходимости использования Docker daemon, что повышает безопасность и производительность в кластере Kubernetes.
+
+Конфигурация GitLab Runner
+
+Конфигурация каждого Runner'а определяется файлом config.toml, который хранится в ConfigMap и монтируется в под Runner'а. Основные параметры включают:
+
+concurrent: Установлено в 20, чтобы каждый Runner мог обрабатывать до 20 параллельных заданий.
+url: URL GitLab сервера (например, https://gitlab.example.com).
+token: Уникальный токен Runner'а, полученный при регистрации, хранится в Secret.
+executor: Установлен в kubernetes для создания подов в кластере.
+namespace: Пространство имен gitlab-runners для подов заданий.
+service_account: Сервисный аккаунт gitlab-runner с необходимыми RBAC-правами.
+cache: Настроен на использование S3 с уникальным bucket для каждого Runner'а.
+Пример config.toml для Runner 1:
+
+toml
+
+
+concurrent = 20
+[[runners]]
+  name = "runner-1"
+  url = "https://gitlab.example.com"
+  token = "$RUNNER_TOKEN"
+  executor = "kubernetes"
+  [runners.kubernetes]
+    namespace = "gitlab-runners"
+    service_account = "gitlab-runner"
+  [runners.cache]
+    Type = "s3"
+    [runners.cache.s3]
+      ServerAddress = "s3.example.com"
+      AccessKey = "$S3_ACCESS_KEY"
+      SecretKey = "$S3_SECRET_KEY"
+      BucketName = "runner-1-cache"
+      Insecure = false
+Для других Runner'ов создаются аналогичные конфигурации с уникальными именами, токенами и bucket'ами (например, runner-2-cache).
+
+Манифесты Kubernetes
+
+Для развертывания решения используются следующие манифесты:
+
+Пространство имен (gitlab-runners) создается для изоляции ресурсов Runner'ов.
+Сервисный аккаунт (gitlab-runner) используется Runner'ами для взаимодействия с Kubernetes API.
+Роль и привязка роли предоставляют необходимые разрешения для управления подами, логами, выполнения команд и доступа к секретам и ConfigMap'ам.
+ConfigMap для каждого Runner'а хранит config.toml.
+Secret для каждого Runner'а содержит чувствительные данные: токен Runner'а и ключи S3.
+Deployment для каждого Runner'а определяет под с nodeSelector для запуска на узлах с меткой runner=true.
+Таблица манифестов
+
+
+Ресурс	Название	Описание
+Namespace	gitlab-runners	Пространство имен для всех ресурсов Runner'ов.
+ServiceAccount	gitlab-runner	Сервисный аккаунт для взаимодействия с Kubernetes API.
+Role	gitlab-runner-role	Правила RBAC для управления подами, логами, секретами и ConfigMap'ами.
+RoleBinding	gitlab-runner-binding	Привязывает роль к сервисному аккаунту.
+ConfigMap	gitlab-runner-N-config	Хранит config.toml для Runner'а N.
+Secret	gitlab-runner-N-secrets	Хранит токен и ключи S3 для Runner'а N.
+Deployment	gitlab-runner-N	Развертывает под Runner'а N на узлах с меткой runner=true.
+Дополнительные замечания
+
+Метки узлов: Убедитесь, что рабочие узлы помечены меткой runner=true с помощью команды kubectl label nodes <node-name> runner=true.
+Доступ к S3: S3-сервис должен быть доступен из кластера. Настройте сетевые политики или брандмауэр, если необходимо.
+Регистрация Runner'ов: Токены Runner'ов должны быть получены заранее через интерфейс GitLab (Settings > CI/CD > Runners) или API. Замените token-for-runner-1 на реальный токен.
+Kaniko в пайплайнах: Kaniko используется в .gitlab-ci.yml для сборки контейнеров. Убедитесь, что в пайплайне указаны учетные данные для реестра контейнеров (например, через переменные CI/CD).
+Масштабируемость: Убедитесь, что кластер имеет достаточно ресурсов для запуска до 20 подов на Runner, учитывая общее количество Runner'ов.
+Ключевые источники
+
+[Kubernetes executor | GitLab Docs](https://docs.git
+lab.com/runner/executors/kubernetes/)
+
+Caching in GitLab CI/CD | GitLab Docs
+Kaniko custom builds | GitLab Forum
+Build docker image with kaniko in GitLab pipeline

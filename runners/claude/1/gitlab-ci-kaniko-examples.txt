@@ -1,0 +1,269 @@
+# ==========================================
+# Пример .gitlab-ci.yml для Node.js проекта
+# ==========================================
+variables:
+  DOCKER_REGISTRY: "registry.company.com"
+  DOCKER_REPOSITORY: "$DOCKER_REGISTRY/tenant-a/nodejs-app"
+  KANIKO_CACHE_REPO: "$DOCKER_REGISTRY/tenant-a/cache"
+  S3_ENDPOINT: "s3.company.com"
+  S3_BUCKET: "tenant-a-cache"
+
+stages:
+  - build
+  - test
+  - package
+
+.kaniko_build_template: &kaniko_build
+  stage: package
+  image:
+    name: gcr.io/kaniko-project/executor:v1.9.0-debug
+    entrypoint: [""]
+  before_script:
+    - echo "{\"auths\":{\"$DOCKER_REGISTRY\":{\"auth\":\"$(printf \"%s:%s\" \"$DOCKER_USERNAME\" \"$DOCKER_PASSWORD\" | base64 | tr -d '\n')\"}}}" > /kaniko/.docker/config.json
+  script:
+    - |
+      /kaniko/executor \
+        --context $CI_PROJECT_DIR \
+        --dockerfile $CI_PROJECT_DIR/Dockerfile \
+        --destination $DOCKER_REPOSITORY:$CI_COMMIT_SHA \
+        --destination $DOCKER_REPOSITORY:latest \
+        --cache=true \
+        --cache-repo=$KANIKO_CACHE_REPO \
+        --cache-ttl=24h \
+        --build-arg BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
+        --build-arg VCS_REF=$CI_COMMIT_SHA \
+        --build-arg VERSION=$CI_COMMIT_REF_NAME \
+        --snapshot-mode=redo \
+        --use-new-run \
+        --push-retry 3
+
+# Node.js сборка
+nodejs_build:
+  stage: build
+  image: node:18-alpine
+  tags:
+    - tenant-a
+    - nodejs
+  cache:
+    key: "$CI_COMMIT_REF_SLUG-nodejs"
+    paths:
+      - node_modules/
+      - .npm/
+  script:
+    - npm ci --cache .npm --prefer-offline
+    - npm run build
+  artifacts:
+    paths:
+      - dist/
+    expire_in: 1 hour
+
+# Node.js тесты
+nodejs_test:
+  stage: test
+  image: node:18-alpine
+  tags:
+    - tenant-a
+    - nodejs
+  dependencies:
+    - nodejs_build
+  script:
+    - npm ci --cache .npm --prefer-offline
+    - npm run test:unit
+    - npm run test:integration
+  coverage: '/All files[^|]*\|[^|]*\s+([\d\.]+)/'
+  artifacts:
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage/cobertura-coverage.xml
+      junit: junit.xml
+
+# Kaniko сборка для Node.js
+nodejs_package:
+  <<: *kaniko_build
+  tags:
+    - tenant-a
+    - kaniko
+  dependencies:
+    - nodejs_build
+  variables:
+    DOCKERFILE_PATH: "Dockerfile.nodejs"
+  only:
+    - main
+    - develop
+    - tags
+
+---
+# ==========================================
+# Пример .gitlab-ci.yml для Java проекта
+# ==========================================
+variables:
+  MAVEN_OPTS: "-Dmaven.repo.local=$CI_PROJECT_DIR/.m2/repository"
+  DOCKER_REGISTRY: "registry.company.com"
+  DOCKER_REPOSITORY: "$DOCKER_REGISTRY/tenant-b/java-app"
+  KANIKO_CACHE_REPO: "$DOCKER_REGISTRY/tenant-b/cache"
+
+stages:
+  - build
+  - test
+  - package
+
+# Java сборка с Maven
+java_build:
+  stage: build
+  image: maven:3.8.6-openjdk-11-slim
+  tags:
+    - tenant-b
+    - java
+  cache:
+    key: "$CI_COMMIT_REF_SLUG-maven"
+    paths:
+      - .m2/repository/
+  script:
+    - mvn clean compile -B
+  artifacts:
+    paths:
+      - target/
+    expire_in: 1 hour
+
+# Java тесты
+java_test:
+  stage: test
+  image: maven:3.8.6-openjdk-11-slim
+  tags:
+    - tenant-b
+    - java
+  dependencies:
+    - java_build
+  script:
+    - mvn test -B
+    - mvn jacoco:report
+  artifacts:
+    reports:
+      junit: target/surefire-reports/TEST-*.xml
+      coverage_report:
+        coverage_format: cobertura
+        path: target/site/jacoco/jacoco.xml
+    paths:
+      - target/
+
+# Kaniko сборка для Java
+java_package:
+  stage: package
+  image:
+    name: gcr.io/kaniko-project/executor:v1.9.0-debug
+    entrypoint: [""]
+  tags:
+    - tenant-b
+    - kaniko
+  dependencies:
+    - java_build
+  before_script:
+    - echo "{\"auths\":{\"$DOCKER_REGISTRY\":{\"auth\":\"$(printf \"%s:%s\" \"$DOCKER_USERNAME\" \"$DOCKER_PASSWORD\" | base64 | tr -d '\n')\"}}}" > /kaniko/.docker/config.json
+  script:
+    - |
+      /kaniko/executor \
+        --context $CI_PROJECT_DIR \
+        --dockerfile $CI_PROJECT_DIR/Dockerfile.java \
+        --destination $DOCKER_REPOSITORY:$CI_COMMIT_SHA \
+        --destination $DOCKER_REPOSITORY:latest \
+        --cache=true \
+        --cache-repo=$KANIKO_CACHE_REPO \
+        --cache-ttl=24h \
+        --build-arg JAR_FILE=target/*.jar \
+        --build-arg BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
+        --build-arg VCS_REF=$CI_COMMIT_SHA \
+        --snapshot-mode=redo \
+        --use-new-run \
+        --push-retry 3
+  only:
+    - main
+    - develop
+    - tags
+
+---
+# ==========================================
+# Пример .gitlab-ci.yml для .NET проекта
+# ==========================================
+variables:
+  DOCKER_REGISTRY: "registry.company.com"
+  DOCKER_REPOSITORY: "$DOCKER_REGISTRY/tenant-a/dotnet-app"
+  KANIKO_CACHE_REPO: "$DOCKER_REGISTRY/tenant-a/cache"
+  DOTNET_VERSION: "6.0"
+
+stages:
+  - build
+  - test
+  - package
+
+# .NET сборка
+dotnet_build:
+  stage: build
+  image: mcr.microsoft.com/dotnet/sdk:6.0
+  tags:
+    - tenant-a
+    - dotnet
+  cache:
+    key: "$CI_COMMIT_REF_SLUG-dotnet"
+    paths:
+      - ~/.nuget/packages/
+  script:
+    - dotnet restore
+    - dotnet build --configuration Release --no-restore
+  artifacts:
+    paths:
+      - bin/
+      - obj/
+    expire_in: 1 hour
+
+# .NET тесты
+dotnet_test:
+  stage: test
+  image: mcr.microsoft.com/dotnet/sdk:6.0
+  tags:
+    - tenant-a
+    - dotnet
+  dependencies:
+    - dotnet_build
+  script:
+    - dotnet test --configuration Release --no-build --logger "junit;LogFilePath=test-results.xml" --collect:"XPlat Code Coverage"
+  artifacts:
+    reports:
+      junit: "**/test-results.xml"
+      coverage_report:
+        coverage_format: cobertura
+        path: "**/coverage.cobertura.xml"
+
+# Kaniko сборка для .NET
+dotnet_package:
+  stage: package
+  image:
+    name: gcr.io/kaniko-project/executor:v1.9.0-debug
+    entrypoint: [""]
+  tags:
+    - tenant-a
+    - kaniko
+  dependencies:
+    - dotnet_build
+  before_script:
+    - echo "{\"auths\":{\"$DOCKER_REGISTRY\":{\"auth\":\"$(printf \"%s:%s\" \"$DOCKER_USERNAME\" \"$DOCKER_PASSWORD\" | base64 | tr -d '\n')\"}}}" > /kaniko/.docker/config.json
+  script:
+    - |
+      /kaniko/executor \
+        --context $CI_PROJECT_DIR \
+        --dockerfile $CI_PROJECT_DIR/Dockerfile.dotnet \
+        --destination $DOCKER_REPOSITORY:$CI_COMMIT_SHA \
+        --destination $DOCKER_REPOSITORY:latest \
+        --cache=true \
+        --cache-repo=$KANIKO_CACHE_REPO \
+        --cache-ttl=24h \
+        --build-arg DOTNET_VERSION=$DOTNET_VERSION \
+        --build-arg BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
+        --build-arg VCS_REF=$CI_COMMIT_SHA \
+        --snapshot-mode=redo \
+        --use-new-run \
+        --push-retry 3
+  only:
+    - main
+    - develop
+    - tags

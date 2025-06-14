@@ -1,0 +1,504 @@
+# ==========================================
+# 1. Namespaces для изоляции тенантов
+# ==========================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gitlab-runner-tenant-a
+  labels:
+    tenant: tenant-a
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gitlab-runner-tenant-b
+  labels:
+    tenant: tenant-b
+
+---
+# ==========================================
+# 2. ServiceAccounts и RBAC
+# ==========================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: gitlab-runner
+  namespace: gitlab-runner-tenant-a
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: gitlab-runner
+  namespace: gitlab-runner-tenant-b
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: gitlab-runner
+rules:
+- apiGroups: [""]
+  resources: ["pods", "pods/exec", "pods/log"]
+  verbs: ["get", "list", "watch", "create", "delete"]
+- apiGroups: [""]
+  resources: ["configmaps", "secrets"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["create", "patch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: gitlab-runner
+  namespace: gitlab-runner-tenant-a
+subjects:
+- kind: ServiceAccount
+  name: gitlab-runner
+  namespace: gitlab-runner-tenant-a
+roleRef:
+  kind: ClusterRole
+  name: gitlab-runner
+  apiGroup: rbac.authorization.k8s.io
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: gitlab-runner
+  namespace: gitlab-runner-tenant-b
+subjects:
+- kind: ServiceAccount
+  name: gitlab-runner
+  namespace: gitlab-runner-tenant-b
+roleRef:
+  kind: ClusterRole
+  name: gitlab-runner
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# ==========================================
+# 3. Secrets для GitLab registration tokens
+# ==========================================
+apiVersion: v1
+kind: Secret
+metadata:
+  name: gitlab-runner-secret
+  namespace: gitlab-runner-tenant-a
+type: Opaque
+data:
+  runner-registration-token: <BASE64_ENCODED_TOKEN_TENANT_A>
+  runner-token: ""
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: gitlab-runner-secret
+  namespace: gitlab-runner-tenant-b
+type: Opaque
+data:
+  runner-registration-token: <BASE64_ENCODED_TOKEN_TENANT_B>
+  runner-token: ""
+
+---
+# ==========================================
+# 4. ConfigMaps для конфигурации Runners
+# ==========================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gitlab-runner-config
+  namespace: gitlab-runner-tenant-a
+data:
+  config.toml: |
+    concurrent = 20
+    check_interval = 10
+    log_level = "info"
+    
+    [session_server]
+      session_timeout = 1800
+
+    [[runners]]
+      name = "tenant-a-k8s-runner"
+      url = "https://gitlab.company.com/"
+      token = "__REPLACED_BY_INIT_CONTAINER__"
+      executor = "kubernetes"
+      tags = ["tenant-a", "kaniko", "nodejs", "java", "dotnet"]
+      
+      [runners.kubernetes]
+        namespace = "gitlab-runner-tenant-a"
+        image = "alpine:latest"
+        privileged = false
+        cpu_limit = "2"
+        memory_limit = "4Gi"
+        ephemeral_storage_limit = "20Gi"
+        cpu_request = "100m"
+        memory_request = "128Mi"
+        ephemeral_storage_request = "1Gi"
+        service_account = "gitlab-runner"
+        
+        # Привязка к конкретному узлу
+        node_selector = "kubernetes.io/hostname=worker-node-1"
+        
+        # Volumes для кеша
+        [[runners.kubernetes.volumes.empty_dir]]
+          name = "docker-cache"
+          mount_path = "/cache"
+        
+        [[runners.kubernetes.volumes.secret]]
+          name = "kaniko-secret"
+          mount_path = "/kaniko/.docker"
+          
+        # Настройки для Kaniko builds
+        [runners.kubernetes.pod_annotations]
+          "cluster-autoscaler.kubernetes.io/safe-to-evict" = "false"
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gitlab-runner-config
+  namespace: gitlab-runner-tenant-b
+data:
+  config.toml: |
+    concurrent = 20
+    check_interval = 10
+    log_level = "info"
+    
+    [session_server]
+      session_timeout = 1800
+
+    [[runners]]
+      name = "tenant-b-k8s-runner"
+      url = "https://gitlab.company.com/"
+      token = "__REPLACED_BY_INIT_CONTAINER__"
+      executor = "kubernetes"
+      tags = ["tenant-b", "kaniko", "nodejs", "java", "dotnet"]
+      
+      [runners.kubernetes]
+        namespace = "gitlab-runner-tenant-b"
+        image = "alpine:latest"
+        privileged = false
+        cpu_limit = "2"
+        memory_limit = "4Gi"
+        ephemeral_storage_limit = "20Gi"
+        cpu_request = "100m"
+        memory_request = "128Mi"
+        ephemeral_storage_request = "1Gi"
+        service_account = "gitlab-runner"
+        
+        # Привязка к конкретному узлу
+        node_selector = "kubernetes.io/hostname=worker-node-2"
+        
+        # Volumes для кеша
+        [[runners.kubernetes.volumes.empty_dir]]
+          name = "docker-cache"
+          mount_path = "/cache"
+        
+        [[runners.kubernetes.volumes.secret]]
+          name = "kaniko-secret"
+          mount_path = "/kaniko/.docker"
+          
+        # Настройки для Kaniko builds
+        [runners.kubernetes.pod_annotations]
+          "cluster-autoscaler.kubernetes.io/safe-to-evict" = "false"
+
+---
+# ==========================================
+# 5. Secrets для Docker Registry (Kaniko)
+# ==========================================
+apiVersion: v1
+kind: Secret
+metadata:
+  name: kaniko-secret
+  namespace: gitlab-runner-tenant-a
+type: kubernetes.io/dockerconfigjson
+data:
+  config.json: |
+    {
+      "auths": {
+        "registry.company.com": {
+          "username": "tenant-a-user",
+          "password": "tenant-a-password",
+          "auth": "<BASE64_ENCODED_AUTH>"
+        }
+      }
+    }
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: kaniko-secret
+  namespace: gitlab-runner-tenant-b
+type: kubernetes.io/dockerconfigjson
+data:
+  config.json: |
+    {
+      "auths": {
+        "registry.company.com": {
+          "username": "tenant-b-user",
+          "password": "tenant-b-password",
+          "auth": "<BASE64_ENCODED_AUTH>"
+        }
+      }
+    }
+
+---
+# ==========================================
+# 6. Deployments для GitLab Runners
+# ==========================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gitlab-runner
+  namespace: gitlab-runner-tenant-a
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gitlab-runner
+      tenant: tenant-a
+  template:
+    metadata:
+      labels:
+        app: gitlab-runner
+        tenant: tenant-a
+    spec:
+      serviceAccountName: gitlab-runner
+      nodeSelector:
+        kubernetes.io/hostname: worker-node-1
+      containers:
+      - name: gitlab-runner
+        image: gitlab/gitlab-runner:alpine
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: CI_SERVER_URL
+          value: "https://gitlab.company.com/"
+        - name: RUNNER_EXECUTOR
+          value: "kubernetes"
+        - name: REGISTER_NON_INTERACTIVE
+          value: "true"
+        - name: RUNNER_TAG_LIST
+          value: "tenant-a,kaniko,nodejs,java,dotnet"
+        ports:
+        - containerPort: 9252
+          name: metrics
+          protocol: TCP
+        volumeMounts:
+        - name: config
+          mountPath: /etc/gitlab-runner
+        - name: runner-secrets
+          mountPath: /secrets
+        resources:
+          limits:
+            cpu: "1"
+            memory: "1Gi"
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+        livenessProbe:
+          exec:
+            command:
+            - /bin/bash
+            - -c
+            - "gitlab-runner verify --delete"
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        readinessProbe:
+          exec:
+            command:
+            - /bin/bash
+            - -c
+            - "gitlab-runner verify"
+          initialDelaySeconds: 10
+          periodSeconds: 10
+      volumes:
+      - name: config
+        configMap:
+          name: gitlab-runner-config
+      - name: runner-secrets
+        secret:
+          secretName: gitlab-runner-secret
+      restartPolicy: Always
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gitlab-runner
+  namespace: gitlab-runner-tenant-b
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gitlab-runner
+      tenant: tenant-b
+  template:
+    metadata:
+      labels:
+        app: gitlab-runner
+        tenant: tenant-b
+    spec:
+      serviceAccountName: gitlab-runner
+      nodeSelector:
+        kubernetes.io/hostname: worker-node-2
+      containers:
+      - name: gitlab-runner
+        image: gitlab/gitlab-runner:alpine
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: CI_SERVER_URL
+          value: "https://gitlab.company.com/"
+        - name: RUNNER_EXECUTOR
+          value: "kubernetes"
+        - name: REGISTER_NON_INTERACTIVE
+          value: "true"
+        - name: RUNNER_TAG_LIST
+          value: "tenant-b,kaniko,nodejs,java,dotnet"
+        ports:
+        - containerPort: 9252
+          name: metrics
+          protocol: TCP
+        volumeMounts:
+        - name: config
+          mountPath: /etc/gitlab-runner
+        - name: runner-secrets
+          mountPath: /secrets
+        resources:
+          limits:
+            cpu: "1"
+            memory: "1Gi"
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+        livenessProbe:
+          exec:
+            command:
+            - /bin/bash
+            - -c
+            - "gitlab-runner verify --delete"
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        readinessProbe:
+          exec:
+            command:
+            - /bin/bash
+            - -c
+            - "gitlab-runner verify"
+          initialDelaySeconds: 10
+          periodSeconds: 10
+      volumes:
+      - name: config
+        configMap:
+          name: gitlab-runner-config
+      - name: runner-secrets
+        secret:
+          secretName: gitlab-runner-secret
+      restartPolicy: Always
+
+---
+# ==========================================
+# 7. Services для мониторинга Runners
+# ==========================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: gitlab-runner-metrics
+  namespace: gitlab-runner-tenant-a
+  labels:
+    app: gitlab-runner
+    tenant: tenant-a
+spec:
+  selector:
+    app: gitlab-runner
+    tenant: tenant-a
+  ports:
+  - port: 9252
+    targetPort: 9252
+    name: metrics
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gitlab-runner-metrics
+  namespace: gitlab-runner-tenant-b
+  labels:
+    app: gitlab-runner
+    tenant: tenant-b
+spec:
+  selector:
+    app: gitlab-runner
+    tenant: tenant-b
+  ports:
+  - port: 9252
+    targetPort: 9252
+    name: metrics
+
+---
+# ==========================================
+# 8. NetworkPolicies для изоляции
+# ==========================================
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: gitlab-runner-isolation
+  namespace: gitlab-runner-tenant-a
+spec:
+  podSelector:
+    matchLabels:
+      app: gitlab-runner
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+    ports:
+    - protocol: TCP
+      port: 9252
+  egress:
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 443  # HTTPS to GitLab
+    - protocol: TCP
+      port: 53   # DNS
+    - protocol: UDP
+      port: 53   # DNS
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: gitlab-runner-isolation
+  namespace: gitlab-runner-tenant-b
+spec:
+  podSelector:
+    matchLabels:
+      app: gitlab-runner
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+    ports:
+    - protocol: TCP
+      port: 9252
+  egress:
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 443  # HTTPS to GitLab
+    - protocol: TCP
+      port: 53   # DNS
+    - protocol: UDP
+      port: 53   # DNS

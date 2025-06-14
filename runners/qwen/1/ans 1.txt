@@ -1,0 +1,160 @@
+﻿### Архитектура решения
+
+#### Общая схема:
+1. **GitLab Runners** развернуты в Kubernetes с использованием Helm-чартов . 
+2. **Kaniko** используется для сборки контейнеров в multistage-режиме через Kubernetes-экзекьютор.
+3. **Кеширование** реализовано через внешний S3-сервис (не в Kubernetes) с раздельными путями для каждого GitLab Runner.
+4. **Мультитенантность** обеспечивается через:
+   - Разные теги для пайплайнов в GitLab.
+   - Фиксированные ноды через `nodeSelector` и `taints/tolerations`.
+   - Изолированные кэши (разные пути в S3).
+5. **Параллелизм**: каждый Runner обрабатывает до 20 задач одновременно.
+
+---
+
+### Конфигурации GitLab Runners
+
+#### Пример `values.yaml` для одного Runner (Helm):
+```yaml
+gitlabUrl: https://gitlab.example.com
+runnerRegistrationToken: "YOUR_REGISTRATION_TOKEN"
+rbac:
+  create: true
+runners:
+  config: |
+    [[runners]]
+      name = "nodejs-runner"
+      url = "https://gitlab.example.com"
+      token = "GENERATED_TOKEN"
+      executor = "kubernetes"
+      [runners.kubernetes]
+        namespace = "gitlab-runners"
+        image = "gcr.io/kaniko-project/executor:latest"
+        privileged = true
+        disable_entrypoint_overwrite = false
+        pod_annotations = ["branch={{.Branch}}", "project={{.ProjectPath}}"]
+        [runners.kubernetes.volumes]
+          persistent_volumes = []
+      [runners.cache]
+        Type = "s3"
+        Path = "cache/nodejs"
+        [runners.cache.s3]
+          ServerAddress = "s3.example.com"
+          BucketName = "gitlab-cache-bucket"
+          BucketLocation = ""
+          AccessKey = "S3_ACCESS_KEY"
+          SecretKey = "S3_SECRET_KEY"
+concurrent: 20
+```
+
+#### Пример для второго Runner (например, .NET):
+```yaml
+gitlabUrl: https://gitlab.example.com
+runnerRegistrationToken: "ANOTHER_REGISTRATION_TOKEN"
+rbac:
+  create: true
+runners:
+  config: |
+    [[runners]]
+      name = "dotnet-runner"
+      url = "https://gitlab.example.com"
+      token = "GENERATED_TOKEN_2"
+      executor = "kubernetes"
+      [runners.kubernetes]
+        namespace = "gitlab-runners"
+        image = "gcr.io/kaniko-project/executor:latest"
+        privileged = true
+        disable_entrypoint_overwrite = false
+        node_selector = {"kubernetes.io/hostname": "fixed-node-2"}  # Фиксированная нода
+        pod_annotations = ["branch={{.Branch}}", "project={{.ProjectPath}}"]
+        [runners.kubernetes.volumes]
+          persistent_volumes = []
+      [runners.cache]
+        Type = "s3"
+        Path = "cache/dotnet"
+        [runners.cache.s3]
+          ServerAddress = "s3.example.com"
+          BucketName = "gitlab-cache-bucket"
+          BucketLocation = ""
+          AccessKey = "S3_ACCESS_KEY"
+          SecretKey = "S3_SECRET_KEY"
+concurrent: 20
+```
+
+---
+
+### Манифесты Kubernetes
+
+#### 1. Namespace для Runners:
+```yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gitlab-runners
+```
+
+#### 2. Толерации и селекторы для фиксированных нод:
+```yaml
+# Пример добавления label на ноду
+kubectl label nodes fixed-node-1 gitlab-runner=nodejs
+kubectl label nodes fixed-node-2 gitlab-runner=dotnet
+
+# Пример taint для ноды
+kubectl taint nodes fixed-node-1 dedicated=nodejs:NoSchedule
+kubectl taint nodes fixed-node-2 dedicated=dotnet:NoSchedule
+```
+
+#### 3. Helm-чарт для деплоя Runner:
+```bash
+helm repo add gitlab https://charts.gitlab.io
+helm install nodejs-runner gitlab/gitlab-runner -f values.yaml --namespace gitlab-runners
+helm install dotnet-runner gitlab/gitlab-runner -f dotnet-values.yaml --namespace gitlab-runners
+```
+
+---
+
+### Дополнительные настройки
+
+1. **Изоляция нод**:
+   - В `runners.kubernetes.node_selector` указывается хостнейм или метка фиксированной ноды.
+   - В `tolerations` добавляются соответствующие значения для taint'ов нод.
+
+2. **Кеширование через S3**:
+   - Все кэши хранятся в одном бакете, но с разными путями (`cache/nodejs`, `cache/dotnet` и т.д.).
+
+3. **Параллелизм**:
+   - Параметр `concurrent: 20` в `values.yaml` разрешает 20 параллельных задач на Runner.
+
+4. **Мультитенантность**:
+   - В `.gitlab-ci.yml` пайплайны помечаются тегами:
+     ```yaml
+     job:
+       tags:
+         - nodejs-runner
+     ```
+
+---
+
+### Проверка работоспособности
+
+1. Запустите пайплайн с тегом `nodejs-runner` и проверьте, что под создается на фиксированной ноде:
+   ```bash
+   kubectl get pods -n gitlab-runners -o wide
+   ```
+
+2. Убедитесь, что кэши записываются в S3 по соответствующим путям.
+
+3. Проверьте логи Runner'а на наличие ошибок:
+   ```bash
+   kubectl logs -n gitlab-runners -l app=nodejs-runner
+   ```
+
+---
+
+### Возможные улучшения
+
+- Использование `PersistentVolumeClaim` для локального кэширования (если S3 недоступен).
+- Настройка `autoscaling` для Kubernetes-нод через Cluster Autoscaler.
+- Шифрование данных в S3 (если требуется ИБ).
+
+Дополнительные детали см. в официальной документации GitLab Runner .

@@ -1,0 +1,403 @@
+# ==========================================
+# ServiceMonitor для Prometheus Operator
+# ==========================================
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: gitlab-runners
+  namespace: monitoring
+  labels:
+    app: gitlab-runner
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: gitlab-runner
+  namespaceSelector:
+    matchNames:
+    - gitlab-runner-tenant-1
+    - gitlab-runner-tenant-2
+  endpoints:
+  - port: metrics
+    interval: 30s
+    path: /metrics
+    scheme: http
+    honorLabels: true
+    relabelings:
+    - sourceLabels: [__meta_kubernetes_namespace]
+      targetLabel: tenant
+      regex: gitlab-runner-(.+)
+      replacement: ${1}
+    - sourceLabels: [__meta_kubernetes_service_name]
+      targetLabel: service
+    - sourceLabels: [__meta_kubernetes_pod_name]
+      targetLabel: pod
+---
+# ==========================================
+# PrometheusRule для алертов GitLab Runner
+# ==========================================
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: gitlab-runner-alerts
+  namespace: monitoring
+  labels:
+    app: gitlab-runner
+    release: prometheus
+spec:
+  groups:
+  - name: gitlab-runner.rules
+    interval: 30s
+    rules:
+    # Правила записи для метрик
+    - record: gitlab:runner_jobs_running
+      expr: gitlab_runner_jobs{state="running"}
+    
+    - record: gitlab:runner_jobs_failed_rate
+      expr: rate(gitlab_runner_jobs_failed_total[5m])
+    
+    - record: gitlab:runner_job_duration_p95
+      expr: histogram_quantile(0.95, rate(gitlab_runner_job_duration_seconds_bucket[5m]))
+
+  - name: gitlab-runner.alerts
+    rules:
+    # Алерт: Runner недоступен
+    - alert: GitLabRunnerDown
+      expr: up{job=~".*gitlab-runner.*"} == 0
+      for: 2m
+      labels:
+        severity: critical
+        component: gitlab-runner
+      annotations:
+        summary: "GitLab Runner недоступен"
+        description: "GitLab Runner в namespace {{ $labels.namespace }} недоступен более 2 минут"
+    
+    # Алерт: Высокая загрузка runner
+    - alert: GitLabRunnerHighLoad
+      expr: gitlab_runner_concurrent_jobs / gitlab_runner_limit_concurrent_jobs > 0.9
+      for: 5m
+      labels:
+        severity: warning
+        component: gitlab-runner
+      annotations:
+        summary: "Высокая загрузка GitLab Runner"
+        description: "GitLab Runner {{ $labels.runner }} использует {{ $value | humanizePercentage }} от лимита параллельных заданий"
+    
+    # Алерт: Много упавших заданий
+    - alert: GitLabRunnerHighFailureRate
+      expr: gitlab:runner_jobs_failed_rate > 0.1
+      for: 10m
+      labels:
+        severity: warning
+        component: gitlab-runner
+      annotations:
+        summary: "Высокий процент упавших заданий"
+        description: "GitLab Runner {{ $labels.runner }} имеет высокий процент упавших заданий: {{ $value | humanize }} в секунду"
+    
+    # Алерт: Долгие задания
+    - alert: GitLabRunnerLongRunningJobs
+      expr: gitlab:runner_job_duration_p95 > 3600
+      for: 5m
+      labels:
+        severity: warning
+        component: gitlab-runner
+      annotations:
+        summary: "Долгие задания в GitLab Runner"
+        description: "95-й перцентиль времени выполнения заданий составляет {{ $value | humanizeDuration }} для runner {{ $labels.runner }}"
+    
+    # Алерт: Нет заданий длительное время
+    - alert: GitLabRunnerNoJobs
+      expr: increase(gitlab_runner_jobs_total[1h]) == 0
+      for: 2h
+      labels:
+        severity: info
+        component: gitlab-runner
+      annotations:
+        summary: "GitLab Runner не выполняет задания"
+        description: "GitLab Runner {{ $labels.runner }} не выполнял задания последние 2 часа"
+
+    # Алерт: Проблемы с кешем S3
+    - alert: GitLabRunnerCacheIssues
+      expr: increase(gitlab_runner_cache_operation_failed_total[10m]) > 5
+      for: 5m
+      labels:
+        severity: warning
+        component: gitlab-runner
+      annotations:
+        summary: "Проблемы с кешем GitLab Runner"
+        description: "GitLab Runner {{ $labels.runner }} имеет проблемы с кешем: {{ $value }} неудачных операций за последние 10 минут"
+---
+# ==========================================
+# Grafana Dashboard ConfigMap
+# ==========================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gitlab-runner-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  gitlab-runner-dashboard.json: |
+    {
+      "annotations": {
+        "list": [
+          {
+            "builtIn": 1,
+            "datasource": "-- Grafana --",
+            "enable": true,
+            "hide": true,
+            "iconColor": "rgba(0, 211, 255, 1)",
+            "name": "Annotations & Alerts",
+            "type": "dashboard"
+          }
+        ]
+      },
+      "editable": true,
+      "gnetId": null,
+      "graphTooltip": 0,
+      "id": null,
+      "links": [],
+      "panels": [
+        {
+          "datasource": "Prometheus",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": true,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              },
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 0
+          },
+          "id": 1,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "single"
+            }
+          },
+          "targets": [
+            {
+              "expr": "gitlab_runner_concurrent_jobs",
+              "interval": "",
+              "legendFormat": "Running Jobs - {{ $labels.runner }}",
+              "refId": "A"
+            },
+            {
+              "expr": "gitlab_runner_limit_concurrent_jobs",
+              "interval": "",
+              "legendFormat": "Limit - {{ $labels.runner }}",
+              "refId": "B"
+            }
+          ],
+          "title": "GitLab Runner Jobs",
+          "type": "timeseries"
+        },
+        {
+          "datasource": "Prometheus",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              },
+              "unit": "percent"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 0
+          },
+          "id": 2,
+          "options": {
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "showThresholdLabels": false,
+            "showThresholdMarkers": true,
+            "text": {}
+          },
+          "pluginVersion": "8.0.0",
+          "targets": [
+            {
+              "expr": "(gitlab_runner_concurrent_jobs / gitlab_runner_limit_concurrent_jobs) * 100",
+              "interval": "",
+              "legendFormat": "{{ $labels.runner }}",
+              "refId": "A"
+            }
+          ],
+          "title": "Runner Load Percentage",
+          "type": "gauge"
+        },
+        {
+          "datasource": "Prometheus",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": true,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              },
+              "unit": "ops"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 8
+          },
+          "id": 3,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "single"
+            }
+          },
+          "targets": [
+            {
+              "expr": "rate(gitlab_runner_jobs_total[5m])",
+              "interval": "",
+              "legendFormat": "Total - {{ $labels.runner }}",
+              "refId": "A"
+            },
+            {
+              "expr": "rate(gitlab_runner_jobs_failed_total[5m])",
+              "interval": "",
+              "legendFormat": "Failed - {{ $labels.runner }}",
+              "refId": "B"
+            }
+          ],
+          "title": "Job Rate",
+          "type": "timeseries"
+        },
+        {
+          "datasource": "Prometheus",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "bar

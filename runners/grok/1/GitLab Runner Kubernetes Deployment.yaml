@@ -1,0 +1,140 @@
+```yaml
+# Пространство имен
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gitlab-runners
+
+---
+# Сервисный аккаунт
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: gitlab-runner
+  namespace: gitlab-runners
+
+---
+# Роль для управления подами
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: gitlab-runner-role
+  namespace: gitlab-runners
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch", "create", "delete"]
+- apiGroups: [""]
+  resources: ["pods/log"]
+  verbs: ["get"]
+- apiGroups: [""]
+  resources: ["pods/exec"]
+  verbs: ["create"]
+- apiGroups: [""]
+  resources: ["secrets", "configmaps"]
+  verbs: ["get"]
+
+---
+# Привязка роли
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: gitlab-runner-binding
+  namespace: gitlab-runners
+subjects:
+- kind: ServiceAccount
+  name: gitlab-runner
+  namespace: gitlab-runners
+roleRef:
+  kind: Role
+  name: gitlab-runner-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# ConfigMap для Runner 1
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gitlab-runner-1-config
+  namespace: gitlab-runners
+data:
+  config.toml: |
+    concurrent = 20
+    [[runners]]
+      name = "runner-1"
+      url = "https://gitlab.example.com"
+      token = "$RUNNER_TOKEN"
+      executor = "kubernetes"
+      [runners.kubernetes]
+        namespace = "gitlab-runners"
+        service_account = "gitlab-runner"
+      [runners.cache]
+        Type = "s3"
+        [runners.cache.s3]
+          ServerAddress = "s3.example.com"
+          AccessKey = "$S3_ACCESS_KEY"
+          SecretKey = "$S3_SECRET_KEY"
+          BucketName = "runner-1-cache"
+          Insecure = false
+
+---
+# Secret для Runner 1
+apiVersion: v1
+kind: Secret
+metadata:
+  name: gitlab-runner-1-secrets
+  namespace: gitlab-runners
+type: Opaque
+stringData:
+  RUNNER_TOKEN: "token-for-runner-1"
+  S3_ACCESS_KEY: "access-key-for-s3"
+  S3_SECRET_KEY: "secret-key-for-s3"
+
+---
+# Deployment для Runner 1
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gitlab-runner-1
+  namespace: gitlab-runners
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gitlab-runner-1
+  template:
+    metadata:
+      labels:
+        app: gitlab-runner-1
+    spec:
+      serviceAccountName: gitlab-runner
+      nodeSelector:
+        runner: "true"
+      containers:
+      - name: gitlab-runner
+        image: gitlab/gitlab-runner:latest
+        volumeMounts:
+        - name: config
+          mountPath: /etc/gitlab-runner/config.toml
+          subPath: config.toml
+        env:
+        - name: RUNNER_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: gitlab-runner-1-secrets
+              key: RUNNER_TOKEN
+        - name: S3_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: gitlab-runner-1-secrets
+              key: S3_ACCESS_KEY
+        - name: S3_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: gitlab-runner-1-secrets
+              key: S3_SECRET_KEY
+      volumes:
+      - name: config
+        configMap:
+          name: gitlab-runner-1-config
+```

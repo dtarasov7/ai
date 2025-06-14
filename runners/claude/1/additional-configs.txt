@@ -1,0 +1,389 @@
+# ==========================================
+# PodDisruptionBudget для высокой доступности
+# ==========================================
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: gitlab-runner-pdb
+  namespace: gitlab-runner-tenant-a
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: gitlab-runner
+      tenant: tenant-a
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: gitlab-runner-pdb
+  namespace: gitlab-runner-tenant-b
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: gitlab-runner
+      tenant: tenant-b
+
+---
+# ==========================================
+# HorizontalPodAutoscaler для автомасштабирования
+# ==========================================
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: gitlab-runner-hpa
+  namespace: gitlab-runner-tenant-a
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: gitlab-runner
+  minReplicas: 1
+  maxReplicas: 3
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Pods
+        value: 1
+        periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Pods
+        value: 1
+        periodSeconds: 180
+
+---
+# ==========================================
+# ResourceQuota для ограничения ресурсов
+# ==========================================
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: gitlab-runner-quota
+  namespace: gitlab-runner-tenant-a
+spec:
+  hard:
+    requests.cpu: "20"
+    requests.memory: 40Gi
+    requests.ephemeral-storage: 200Gi
+    limits.cpu: "40"
+    limits.memory: 80Gi
+    limits.ephemeral-storage: 400Gi
+    pods: "25"
+    persistentvolumeclaims: "10"
+
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: gitlab-runner-quota
+  namespace: gitlab-runner-tenant-b
+spec:
+  hard:
+    requests.cpu: "20"
+    requests.memory: 40Gi
+    requests.ephemeral-storage: 200Gi
+    limits.cpu: "40"
+    limits.memory: 80Gi
+    limits.ephemeral-storage: 400Gi
+    pods: "25"
+    persistentvolumeclaims: "10"
+
+---
+# ==========================================
+# LimitRange для ограничения ресурсов подов
+# ==========================================
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: gitlab-runner-limits
+  namespace: gitlab-runner-tenant-a
+spec:
+  limits:
+  - default:
+      cpu: "2"
+      memory: "4Gi"
+      ephemeral-storage: "20Gi"
+    defaultRequest:
+      cpu: "100m"
+      memory: "128Mi"
+      ephemeral-storage: "1Gi"
+    max:
+      cpu: "4"
+      memory: "8Gi"
+      ephemeral-storage: "50Gi"
+    min:
+      cpu: "50m"
+      memory: "64Mi"
+      ephemeral-storage: "500Mi"
+    type: Container
+  - max:
+      cpu: "8"
+      memory: "16Gi"
+      ephemeral-storage: "100Gi"
+    type: Pod
+
+---
+# ==========================================
+# ConfigMap для кастомных скриптов
+# ==========================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: runner-scripts
+  namespace: gitlab-runner-tenant-a
+data:
+  cleanup.sh: |
+    #!/bin/bash
+    # Скрипт очистки старых кешей и артефактов
+    set -e
+    
+    echo "Starting cleanup process..."
+    
+    # Очистка Docker кеша старше 7 дней
+    find /cache -name "*.tar*" -mtime +7 -delete 2>/dev/null || true
+    
+    # Очистка временных файлов
+    find /tmp -name "kaniko-*" -mtime +1 -delete 2>/dev/null || true
+    
+    # Проверка свободного места
+    DISK_USAGE=$(df /cache | awk 'NR==2 {print $5}' | sed 's/%//')
+    if [ "$DISK_USAGE" -gt 80 ]; then
+        echo "Warning: Disk usage is ${DISK_USAGE}%"
+        # Принудительная очистка при превышении 80%
+        find /cache -name "*.tar*" -mtime +3 -delete 2>/dev/null || true
+    fi
+    
+    echo "Cleanup completed"
+
+  pre-build.sh: |
+    #!/bin/bash
+    # Скрипт подготовки к сборке
+    set -e
+    
+    echo "Preparing build environment..."
+    
+    # Создание необходимых директорий
+    mkdir -p /cache/kaniko
+    mkdir -p /tmp/build
+    
+    # Установка правильных прав
+    chmod 755 /cache/kaniko
+    chmod 755 /tmp/build
+    
+    # Проверка доступности Docker Registry
+    if ! curl -f -s --connect-timeout 10 "$DOCKER_REGISTRY/v2/" > /dev/null; then
+        echo "Warning: Docker Registry is not accessible"
+    fi
+    
+    # Проверка доступности S3
+    if [ -n "$S3_ENDPOINT" ]; then
+        if ! curl -f -s --connect-timeout 10 "$S3_ENDPOINT" > /dev/null; then
+            echo "Warning: S3 endpoint is not accessible"
+        fi
+    fi
+    
+    echo "Build environment prepared"
+
+  post-build.sh: |
+    #!/bin/bash
+    # Скрипт очистки после сборки
+    set -e
+    
+    echo "Starting post-build cleanup..."
+    
+    # Очистка временных файлов текущей сборки
+    rm -rf /tmp/build/* 2>/dev/null || true
+    
+    # Сжатие логов если они большие
+    find /var/log -name "*.log" -size +100M -exec gzip {} \; 2>/dev/null || true
+    
+    # Отправка метрик (если настроен мониторинг)
+    if [ -n "$METRICS_ENDPOINT" ]; then
+        curl -X POST "$METRICS_ENDPOINT/build-completed" \
+             -H "Content-Type: application/json" \
+             -d "{\"project\":\"$CI_PROJECT_NAME\",\"status\":\"success\",\"duration\":\"$BUILD_DURATION\"}" \
+             2>/dev/null || true
+    fi
+    
+    echo "Post-build cleanup completed"
+
+---
+# ==========================================
+# CronJob для периодической очистки
+# ==========================================
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cache-cleanup
+  namespace: gitlab-runner-tenant-a
+spec:
+  schedule: "0 2 * * *"  # Каждый день в 2:00
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          nodeSelector:
+            kubernetes.io/hostname: worker-node-1
+          containers:
+          - name: cleanup
+            image: alpine:latest
+            command:
+            - /bin/sh
+            - -c
+            - |
+              apk add --no-cache curl findutils
+              /scripts/cleanup.sh
+            volumeMounts:
+            - name: cache-volume
+              mountPath: /cache
+            - name: scripts
+              mountPath: /scripts
+            resources:
+              limits:
+                cpu: 100m
+                memory: 128Mi
+              requests:
+                cpu: 50m
+                memory: 64Mi
+          volumes:
+          - name: cache-volume
+            hostPath:
+              path: /var/cache/gitlab-runner-tenant-a
+              type: DirectoryOrCreate
+          - name: scripts
+            configMap:
+              name: runner-scripts
+              defaultMode: 0755
+          restartPolicy: OnFailure
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+
+---
+# ==========================================
+# ServiceMonitor для Prometheus (если используется)
+# ==========================================
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: gitlab-runner-monitor
+  namespace: gitlab-runner-tenant-a
+  labels:
+    app: gitlab-runner
+    tenant: tenant-a
+spec:
+  selector:
+    matchLabels:
+      app: gitlab-runner
+      tenant: tenant-a
+  endpoints:
+  - port: metrics
+    interval: 30s
+    path: /metrics
+    honorLabels: true
+
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: gitlab-runner-monitor
+  namespace: gitlab-runner-tenant-b
+  labels:
+    app: gitlab-runner
+    tenant: tenant-b
+spec:
+  selector:
+    matchLabels:
+      app: gitlab-runner
+      tenant: tenant-b
+  endpoints:
+  - port: metrics
+    interval: 30s
+    path: /metrics
+    honorLabels: true
+
+---
+# ==========================================
+# PodSecurityPolicy (если включен PodSecurityPolicy)
+# ==========================================
+apiVersion: policy/v1beta1
+kind: PodSecurityPolicy
+metadata:
+  name: gitlab-runner-psp
+spec:
+  privileged: false
+  allowPrivilegeEscalation: false
+  requiredDropCapabilities:
+    - ALL
+  volumes:
+    - 'configMap'
+    - 'emptyDir'
+    - 'projected'
+    - 'secret'
+    - 'downwardAPI'
+    - 'persistentVolumeClaim'
+  hostNetwork: false
+  hostIPC: false
+  hostPID: false
+  runAsUser:
+    rule: 'MustRunAsNonRoot'
+  supplementalGroups:
+    rule: 'MustRunAs'
+    ranges:
+      - min: 1
+        max: 65535
+  fsGroup:
+    rule: 'MustRunAs'
+    ranges:
+      - min: 1
+        max: 65535
+  readOnlyRootFilesystem: false
+
+---
+# ==========================================
+# Ingress для доступа к метрикам (опционально)
+# ==========================================
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: gitlab-runner-metrics
+  namespace: gitlab-runner-tenant-a
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/auth-type: basic
+    nginx.ingress.kubernetes.io/auth-secret: basic-auth
+    nginx.ingress.kubernetes.io/auth-realm: 'Authentication Required'
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - runner-metrics-a.company.com
+    secretName: runner-metrics-tls
+  rules:
+  - host: runner-metrics-a.company.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: gitlab-runner-metrics
+            port:
+              number: 9252

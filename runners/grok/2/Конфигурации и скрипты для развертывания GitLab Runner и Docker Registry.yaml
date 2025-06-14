@@ -1,0 +1,87 @@
+# Конфигурация GitLab Runner (runner-a-values.yaml)
+```yaml
+gitlabUrl: "https://gitlab.example.com"
+runnerToken: "token-for-runner-a"
+rbac:
+  create: true
+runners:
+  config: |
+    concurrent = 20
+    [[runners]]
+      name = "runner-a"
+      [runners.kubernetes]
+        namespace = "gitlab-runners"
+        image = "ubuntu:22.04"
+        node_selector = {"worker": "node-a"}
+        [runners.kubernetes.volumes]
+          [runners.kubernetes.volumes.secret]
+            name = "kaniko-secret-a"
+            mount_path = "/kaniko/.docker"
+            read_only = true
+metrics:
+  enabled: true
+  port: 9252
+  serviceMonitor:
+    enabled: true
+```
+
+# Секрет для Kaniko (kaniko-secret-a.yaml)
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: kaniko-secret-a
+  namespace: gitlab-runners
+type: Opaque
+data:
+  config.json: <base64 encoded config.json>
+```
+
+# Конфигурация Docker Registry (registry-a-values.yaml)
+```yaml
+storage: s3
+s3:
+  region: "us-east-1"
+  bucket: "registry-bucket-a"
+  encrypt: false
+  secure: true
+secrets:
+  s3:
+    accessKey: "access-key-a"
+    secretKey: "secret-key-a"
+service:
+  type: ClusterIP
+ingress:
+  enabled: true
+  hosts:
+    - host: registry-a.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+```
+
+# Пример пайплайна (.gitlab-ci.yml)
+```yaml
+stages:
+  - build
+
+build:
+  stage: build
+  tags:
+    - runner-a
+  image: gcr.io/kaniko-project/executor:debug
+  script:
+    - /kaniko/executor --context $CI_PROJECT_DIR --dockerfile $CI_PROJECT_DIR/Dockerfile --destination $IMAGE --cache=true --cache-repo registry-a.example.com/cache
+```
+
+# Скрипты для развертывания
+```bash
+# Установка Helm-чарта для registry
+helm install registry-a twuni/docker-registry --values registry-a-values.yaml
+
+# Создание секрета для Kaniko
+kubectl create secret generic kaniko-secret-a --from-file=config.json=/path/to/config-a.json -n gitlab-runners
+
+# Установка Helm-чарта для runner
+helm install runner-a gitlab/gitlab-runner --values runner-a-values.yaml
+```

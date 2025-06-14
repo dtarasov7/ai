@@ -1,0 +1,117 @@
+﻿Для эффективной очистки кеша и управления ресурсами при работе с 20 параллельными задачами в каждом GitLab Runner необходимо реализовать следующие меры:
+
+---
+
+### 1. **Разделение кешей между пайплайнами**
+- Используйте уникальные ключи кеширования в `.gitlab-ci.yml` для каждого проекта или пайплайна, чтобы избежать конфликтов и перезаписи кешей:
+  ```yaml
+  cache:
+    key: ${CI_PROJECT_NAME}-${CI_COMMIT_BRANCH}
+    paths:
+      - node_modules/
+  ```
+  Это позволит хранить кеши в разных директориях S3 (например, `cache/nodejs/projectA`, `cache/dotnet/projectB`) и ускорить восстановление зависимостей .
+
+---
+
+### 2. **Автоматическая очистка устаревших кешей**
+- **Инструменты очистки**: Используйте утилиты вроде `gitlab-janitor`  или собственные скрипты для удаления устаревших кешей из S3. Например, скрипт на Python с библиотекой `boto3` для удаления объектов старше N дней:
+  ```python
+  import boto3
+  from datetime import datetime, timedelta
+
+  s3 = boto3.resource('s3')
+  bucket = s3.Bucket('gitlab-cache-bucket')
+  cutoff = datetime.now() - timedelta(days=7)
+
+  for obj in bucket.objects.filter(Prefix='cache/'):
+      if obj.last_modified.replace(tzinfo=None) < cutoff:
+          obj.delete()
+  ```
+- **Cron-задачи**: Настройте регулярное выполнение скриптов через Kubernetes CronJob или внешний планировщик.
+
+---
+
+### 3. **Ограничение ресурсов в Kubernetes**
+- **Лимиты на поды**: Укажите ресурсы (`cpu/mem`) в конфигурации GitLab Runner, чтобы предотвратить перегрузку нод:
+  ```yaml
+  [runners.kubernetes]
+    resources = """
+    limits:
+      cpu: "2"
+      memory: "4Gi"
+    requests:
+      cpu: "1"
+      memory: "2Gi"
+    """
+  ```
+  Это гарантирует, что 20 параллельных задач не превысят доступные ресурсы ноды .
+
+- **Изоляция нод**: Используйте `taints/tolerations` и `nodeSelector` для закрепления Runner'ов за фиксированными нодами, чтобы избежать конкуренции за ресурсы с другими workload'ами .
+
+---
+
+### 4. **Контроль размера кеша**
+- **Политики хранения S3**: Настройте автоматическое удаление объектов в бакете S3 через [Lifecycle Policies](https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-lifecycle-mgmt.html). Например, удаление кешей старше 7 дней.
+- **Ограничение размера кеша**: В `config.toml` Runner'а задайте максимальный размер кеша:
+  ```toml
+  [runners.cache]
+    MaxCacheSize = 50_000_000_000  # 50 ГБ
+  ```
+
+---
+
+### 5. **Мониторинг и аудит**
+- **Метрики**: Интегрируйте Prometheus с GitLab Runner для отслеживания использования кеша и ресурсов .
+- **Логи**: Используйте `kubectl logs` и инструменты вроде Loki/Grafana для анализа ошибок в задачах, связанных с кешем или ресурсами.
+
+---
+
+### 6. **Оптимизация сборки через Kaniko**
+- **Multistage-сборка**: Убедитесь, что Dockerfile использует многоэтапную сборку для минимизации размера финального образа и повторного использования кеша .
+- **Кеширование слоев**: Включите флаг `--cache` в Kaniko для повторного использования слоев:
+  ```yaml
+  args = ["--cache=true", "--cache-ttl=24h"]
+  ```
+
+---
+
+### Пример конфигурации Runner'а с лимитами и кешированием:
+```yaml
+runners:
+  config: |
+    [[runners]]
+      name = "nodejs-runner"
+      executor = "kubernetes"
+      [runners.kubernetes]
+        namespace = "gitlab-runners"
+        image = "gcr.io/kaniko-project/executor:latest"
+        privileged = true
+        resources = """
+        limits:
+          cpu: "2"
+          memory: "4Gi"
+        requests:
+          cpu: "1"
+          memory: "2Gi"
+        """
+        node_selector = {"gitlab-runner": "nodejs"}
+      [runners.cache]
+        Type = "s3"
+        Path = "cache/nodejs"
+        MaxCacheSize = 50_000_000_000
+        [runners.cache.s3]
+          ServerAddress = "s3.example.com"
+          BucketName = "gitlab-cache-bucket"
+          AccessKey = "KEY"
+          SecretKey = "SECRET"
+```
+
+---
+
+### Итог
+Эффективная очистка кеша и управление ресурсами достигается через:
+- Разделение кешей по проектам/пайплайнам.
+- Автоматическую очистку через скрипты или S3-политики.
+- Ограничение ресурсов в Kubernetes.
+- Мониторинг и оптимизацию сборки через Kaniko.

@@ -1,0 +1,204 @@
+﻿### Архитектура решения (GitLab Runner + Kaniko)
+
+#### Вариант 1: **Мульти-рендерный подход с отдельными Helm-релизами**
+**Описание:**  
+Каждый GitLab Runner разворачивается как отдельный Helm-релиз в своей неймспейсе или с уникальными метками. Для каждого рендера настраивается:
+- Уникальный `runner-registration-token` (из GitLab).
+- Отдельная учетная запись S3 (IAM-пользователь) и бакет.
+- Node Affinity для фиксированных worker-узлов.
+- Разделение кэша через уникальные пути в S3 (`cache_dir`).
+
+**Сильные стороны:**  
+- Полная изоляция ресурсов и конфигураций между тенантами.
+- Простота управления правами доступа к S3 (через отдельные IAM-пользователи).
+- Гибкость настройки node affinity для каждого рендера.
+
+**Слабые стороны:**  
+- Увеличенная сложность управления множеством Helm-релизов.
+- Требует автоматизации деплоя (например, через Helmfile или Terraform).
+
+---
+
+#### Вариант 2: **Единый Helm-чарт с динамической конфигурацией**
+**Описание:**  
+Все рендеры управляются одним Helm-чартом, но с динамическим назначением параметров через `configMap` или аннотации. Например:
+- Общая Deployment для рендеров, но с разными `envFrom` для S3-конфигураций.
+- Использование `nodeSelector` и `toleration` через шаблонизатор Helm.
+- Кэширование в S3 с уникальными путями (`cache_dir = tenantX/cache`).
+
+**Сильные стороны:**  
+- Централизованное управление.
+- Упрощенный мониторинг через Prometheus (единая метрика с метками `tenant`).
+
+**Слабые стороны:**  
+- Сложности с изоляцией IAM-пользователей (требуется использование AssumeRole или виртуальных учетных записей в S3).
+- Риск конфликта конфигураций при масштабировании.
+
+---
+
+### Конфигурации GitLab Runners
+#### Пример `config.toml` для одного рендера:
+```toml
+concurrent = 20
+check_interval = 0
+
+[session_server]
+  session_timeout = 1800
+
+[[runners]]
+  name = "java-runner"
+  url = "https://gitlab.example.com"
+  token = "GITLAB_RUNNER_TOKEN" # Уникальный токен для каждого рендера
+  executor = "kubernetes"
+  [runners.kubernetes]
+    namespace = "gitlab-runners"
+    image = "alpine:latest"
+    privileged = true
+    node_selector = "gitlab-runner=java" # Фиксированный worker-узел
+    [[runners.kubernetes.envs]]
+      name = "KANIKO_S3_BUCKET"
+      value = "s3://java-cache-bucket"
+    [[runners.kubernetes.envs]]
+      name = "KANIKO_S3_ACCESS_KEY"
+      value = "S3_ACCESS_KEY_JAVA"
+    [[runners.kubernetes.envs]]
+      name = "KANIKO_S3_SECRET_KEY"
+      value = "S3_SECRET_KEY_JAVA"
+```
+
+#### Helm-values для одного рендера:
+```yaml
+gitlabUrl: https://gitlab.example.com
+runnerRegistrationToken: "GITLAB_RUNNER_TOKEN"
+rbac:
+  create: true
+  namespace: "gitlab-runners"
+  rules:
+    - apiGroups: [""]
+      resources: ["pods", "pods/exec"]
+      verbs: ["create", "delete", "get", "list", "watch"]
+nodeSelector:
+  gitlab-runner: "java" # Метка worker-узла
+env:
+  - name: KANIKO_S3_BUCKET
+    value: "s3://java-cache-bucket"
+  - name: KANIKO_S3_ACCESS_KEY
+    valueFrom:
+      secretKeyRef:
+        name: s3-java-credentials
+        key: access_key
+  - name: KANIKO_S3_SECRET_KEY
+    valueFrom:
+      secretKeyRef:
+        name: s3-java-credentials
+        key: secret_key
+```
+
+---
+
+### Pipeline (`.gitlab-ci.yml`) для Java/.NET
+```yaml
+stages:
+  - build
+
+build_java:
+  image: gcr.io/kaniko-project/executor:latest
+  script:
+    - mkdir -p /kaniko && cp /root/.docker/config.json /kaniko/
+    - /kaniko/executor --context $CI_PROJECT_DIR --dockerfile Dockerfile --destination registry.example.com/java-app --cache=true --cache-dir=s3://java-cache-bucket
+
+build_dotnet:
+  image: gcr.io/kaniko-project/executor:latest
+  script:
+    - mkdir -p /kaniko && cp /root/.docker/config.json /kaniko/
+    - /kaniko/executor --context $CI_PROJECT_DIR --dockerfile Dockerfile --destination registry.example.com/dotnet-app --cache=true --cache-dir=s3://dotnet-cache-bucket
+```
+
+---
+
+### Манифесты Kubernetes
+#### Namespace для рендеров:
+```yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gitlab-runners
+```
+
+#### Secret для S3-доступа (на каждый рендер):
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: s3-java-credentials
+  namespace: gitlab-runners
+type: Opaque
+data:
+  access_key: base64-encoded-java-access-key
+  secret_key: base64-encoded-java-secret-key
+```
+
+#### Prometheus ServiceMonitor (для сбора метрик рендеров):
+```yaml
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: gitlab-runner-monitor
+  namespace: gitlab-runners
+spec:
+  jobLabel: gitlab-runner
+  endpoints:
+    - port: metrics
+      interval: 30s
+  selector:
+    matchLabels:
+      app: gitlab-runner
+  namespaceSelector:
+    any: false
+    namespaces:
+      - gitlab-runners
+```
+
+---
+
+### Скрипты деплоя
+#### Автоматизация деплоя через Helmfile (пример):
+```yaml
+environments:
+  java:
+    values:
+      - gitlabUrl: https://gitlab.example.com
+      - runnerRegistrationToken: "JAVA_RUNNER_TOKEN"
+      - nodeSelector: "gitlab-runner=java"
+      - s3Bucket: "s3://java-cache-bucket"
+  dotnet:
+    values:
+      - gitlabUrl: https://gitlab.example.com
+      - runnerRegistrationToken: "DOTNET_RUNNER_TOKEN"
+      - nodeSelector: "gitlab-runner=dotnet"
+      - s3Bucket: "s3://dotnet-cache-bucket"
+
+releases:
+  - name: java-runner
+    chart: gitlab-runner-chart
+    namespace: gitlab-runners
+    values:
+      - envFrom:
+          - secretRef:
+              name: java-runner-secrets
+  - name: dotnet-runner
+    chart: gitlab-runner-chart
+    namespace: gitlab-runners
+    values:
+      - envFrom:
+          - secretRef:
+              name: dotnet-runner-secrets
+```
+
+---
+
+### Рекомендации
+1. **Изоляция через Node Affinity:** Используйте метки узлов (`gitlab-runner=java`, `gitlab-runner=dotnet`) и соответствующие `nodeSelector` в конфигурации рендеров (https://example.com).
+2. **Кэширование:** Для S3-совместимого Ceph используйте флаг `--cache-dir=s3://bucket-name/path` в Kaniko (https://example.com).
+3. **Мониторинг:** Настройте Prometheus для сбора метрик рендеров через аннотации или ServiceMonitor (https://example.com).
+4. **Автоматизация:** Используйте Helmfile или Terraform для управления множеством рендеров (https://example.com).

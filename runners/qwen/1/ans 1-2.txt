@@ -1,0 +1,129 @@
+﻿Для оптимизации конфигурации GitLab Runner при работе с большим количеством параллельных задач (например, 20 задач на один Runner) необходимо учитывать следующие аспекты:
+
+---
+
+### 1. **Увеличение глобального параллелизма**
+- В файле `config.toml` задайте параметр `concurrent` — он определяет максимальное количество одновременно выполняемых задач на уровне Runner'а:
+  ```toml
+  concurrent = 20
+  ```
+  Это позволит Runner'у обрабатывать до 20 задач параллельно .
+
+---
+
+### 2. **Ограничение ресурсов Kubernetes**
+- Укажите лимиты ресурсов (`cpu/mem`) для контейнеров Runner'а, чтобы избежать перегрузки нод:
+  ```toml
+  [runners.kubernetes]
+    resources = """
+    limits:
+      cpu: "2"
+      memory: "4Gi"
+    requests:
+      cpu: "1"
+      memory: "2Gi"
+    """
+  ```
+  Это гарантирует, что 20 параллельных задач не превысят доступные ресурсы ноды .
+
+---
+
+### 3. **Использование `request_concurrency`**
+- Добавьте параметр `request_concurrency` в конфигурацию Runner'а, чтобы контролировать количество одновременных запросов к GitLab:
+  ```toml
+  [runners]
+    request_concurrency = 5
+  ```
+  Это предотвратит перегрузку GitLab API при высоком параллелизме .
+
+---
+
+### 4. **Оптимизация кеширования**
+- Используйте уникальные ключи кеширования в `.gitlab-ci.yml` для разделения данных между проектами:
+  ```yaml
+  cache:
+    key: ${CI_PROJECT_NAME}-${CI_COMMIT_BRANCH}
+    paths:
+      - node_modules/
+  ```
+- Настройте автоматическую очистку устаревших кешей через S3-политики или скрипты, чтобы избежать переполнения хранилища .
+
+---
+
+### 5. **Изоляция Runner'ов через теги и ноды**
+- Привяжите каждый Runner к фиксированной ноде через `nodeSelector` и `taints/tolerations`, чтобы равномерно распределить нагрузку:
+  ```toml
+  [runners.kubernetes]
+    node_selector = {"gitlab-runner": "nodejs"}
+  ```
+- Используйте теги для разделения задач между Runner'ами (например, `tags: ["nodejs", "high-concurrency"]`) .
+
+---
+
+### 6. **Мониторинг и аудит**
+- Интегрируйте Prometheus для отслеживания использования ресурсов и ошибок в задачах:
+  ```bash
+  kubectl logs -n gitlab-runners <pod-name>
+  ```
+- Используйте метрики Runner'а для анализа производительности и выявления узких мест .
+
+---
+
+### 7. **Дополнительные рекомендации**
+- **Shallow clone**: Установите `GIT_DEPTH=10` в `.gitlab-ci.yml`, чтобы ускорить клонирование репозиториев:
+  ```yaml
+  variables:
+    GIT_DEPTH: "10"
+  ```
+- **Параллелизация задач**: Разделяйте длительные задачи (например, тесты) на параллельные этапы:
+  ```yaml
+  test:
+    script: npm run test
+    parallel: 5
+  ```
+  Это сократит общее время выполнения пайплайна .
+
+---
+
+### Пример оптимизированного `config.toml`
+```toml
+concurrent = 20
+
+[[runners]]
+  name = "high-concurrency-runner"
+  url = "https://gitlab.example.com"
+  token = "GENERATED_TOKEN"
+  executor = "kubernetes"
+  request_concurrency = 5
+  [runners.kubernetes]
+    namespace = "gitlab-runners"
+    image = "gcr.io/kaniko-project/executor:latest"
+    privileged = true
+    resources = """
+    limits:
+      cpu: "2"
+      memory: "4Gi"
+    requests:
+      cpu: "1"
+      memory: "2Gi"
+    """
+    node_selector = {"gitlab-runner": "high-concurrency"}
+  [runners.cache]
+    Type = "s3"
+    Path = "cache/global"
+    MaxCacheSize = 50_000_000_000
+    [runners.cache.s3]
+      ServerAddress = "s3.example.com"
+      BucketName = "gitlab-cache-bucket"
+      AccessKey = "KEY"
+      SecretKey = "SECRET"
+```
+
+---
+
+### Итог
+Оптимизация достигается за счет:
+- Глобального параллелизма через `concurrent` и `request_concurrency`.
+- Ограничения ресурсов Kubernetes.
+- Эффективного кеширования и разделения задач через теги/ноды.
+- Мониторинга и использования shallow clone для ускорения операций.

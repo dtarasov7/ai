@@ -1,0 +1,532 @@
+﻿### Глубокое решение для on-premise LLM с учётом мультиверсионной инфраструктуры
+
+#### Выбор LLM и архитектурный подход
+**Оптимальная LLM**: **Mistral 7B Instruct** (GGUF Q4_K_M)
+- Причины:
+  - Лучшее соотношение качества/ресурсов для технических задач
+  - Поддержка длинного контекста (32K токенов)
+  - Эффективное квантование для CPU
+  - Отличные возможности генерации кода
+
+**Архитектура решения**:
+```mermaid
+graph LR
+    A[Пользователь] --> B[Система контекста]
+    B --> C[RAG-ядро]
+    C --> D[Векторная БД]
+    D --> E[Документация по версиям]
+    C --> F[Ansible Inventory]
+    C --> G[База версий]
+    C --> H[LLM Mistral 7B]
+    A --> I[Feedback System]
+    I --> J[База обратной связи]
+    J --> K[Дообучение модели]
+    G --> E
+```
+
+### Детальная реализация системы
+
+#### 1. Предварительная загрузка документации с учётом версий
+**Структура данных для мультиверсионности**:
+```python
+class VersionedDocument:
+    def __init__(self, product: str, version: str, content: str, 
+                 source: str, doc_type: str = "official"):
+        self.product = product
+        self.version = version
+        self.content = content
+        self.source = source  # URL источника
+        self.doc_type = doc_type  # official/stackoverflow/kb
+        self.embedding = None  # Для векторного представления
+```
+
+**Процесс загрузки**:
+1. **Парсинг базы версий**:
+   ```python
+   import pandas as pd
+   from collections import defaultdict
+   
+   # Чтение CSV с версиями
+   versions_df = pd.read_csv("server_versions.csv")
+   
+   # Сбор уникальных версий продуктов
+   product_versions = defaultdict(set)
+   for _, row in versions_df.iterrows():
+       for product in ['ceph', 'kafka', 'prometheus', 'grafana', 'opensearch', 'nginx', 'kubernetes']:
+           if not pd.isna(row[product]):
+               product_versions[product].add(row[product])
+   ```
+
+2. **Автоматизированная загрузка документации**:
+   ```python
+   from langchain_community.document_loaders import WebBaseLoader, OnlinePDFLoader
+   import requests
+   from bs4 import BeautifulSoup
+   
+   def load_versioned_docs(product: str, version: str):
+       docs = []
+       
+       # Загрузка официальной документации
+       official_urls = {
+           'ceph': f"https://docs.ceph.com/en/{version}/",
+           'kafka': f"https://kafka.apache.org/{version}/documentation.html",
+           # ... другие продукты
+       }
+       
+       if product in official_urls:
+           try:
+               loader = WebBaseLoader(official_urls[product])
+               docs.extend(loader.load())
+           except Exception as e:
+               print(f"Ошибка загрузки {product} {version}: {str(e)}")
+       
+       # Загрузка StackOverflow (фильтрация по тегам и версиям)
+       so_api_url = f"https://api.stackexchange.com/2.3/questions?order=desc&sort=votes&tagged={product}-{version}&site=stackoverflow"
+       response = requests.get(so_api_url)
+       for item in response.json().get('items', []):
+           content = f"Вопрос: {item['title']}\nОтвет: {item['body']}"
+           docs.append(VersionedDocument(product, version, content, item['link'], "stackoverflow"))
+       
+       return docs
+   ```
+
+3. **Обработка и индексация**:
+   ```python
+   from langchain.text_splitter import RecursiveCharacterTextSplitter
+   from langchain_community.embeddings import HuggingFaceEmbeddings
+   from langchain_community.vectorstores import Chroma
+   
+   # Конфигурация
+   text_splitter = RecursiveCharacterTextSplitter(
+       chunk_size=1000, chunk_overlap=100,
+       separators=["\n\n", "\n", " ", ""]
+   )
+   
+   embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+   vector_db = Chroma(persist_directory="./vector_db", embedding_function=embeddings)
+   
+   # Обработка для каждой версии
+   for product, versions in product_versions.items():
+       for version in versions:
+           docs = load_versioned_docs(product, version)
+           for doc in docs:
+               chunks = text_splitter.split_text(doc.content)
+               for chunk in chunks:
+                   # Добавление метаданных с версией
+                   metadata = {
+                       "product": product,
+                       "version": version,
+                       "source": doc.source,
+                       "doc_type": doc.doc_type
+                   }
+                   vector_db.add_texts([chunk], [metadata])
+   ```
+
+#### 2. Интеграция инфраструктурного контекста
+**Объединение Ansible и базы версий**:
+```python
+import yaml
+import pandas as pd
+
+class InfrastructureContext:
+    def __init__(self, ansible_path: str, versions_path: str):
+        # Загрузка Ansible инвентаря
+        with open(ansible_path) as f:
+            self.ansible_inventory = yaml.safe_load(f)
+        
+        # Загрузка версий ПО
+        self.versions_df = pd.read_csv(versions_path)
+    
+    def get_host_info(self, hostname: str) -> dict:
+        """Получение полной информации о сервере"""
+        # Поиск в Ansible
+        host_info = next(
+            (host for host in self.ansible_inventory['all']['hosts'] 
+             if host['name'] == hostname), 
+            None
+        )
+        
+        # Поиск в базе версий
+        versions = self.versions_df[self.versions_df['hostname'] == hostname]
+        
+        return {
+            "ansible": host_info,
+            "versions": versions.to_dict(orient='records')[0] if not versions.empty else {}
+        }
+    
+    def get_product_version(self, hostname: str, product: str) -> str:
+        """Получение версии продукта на конкретном сервере"""
+        host_versions = self.versions_df[self.versions_df['hostname'] == hostname]
+        if not host_versions.empty and product in host_versions.columns:
+            return host_versions[product].values[0]
+        return "unknown"
+```
+
+#### 3. RAG-система с учётом версий
+**Контекстно-зависимый поиск**:
+```python
+from langchain.chains import RetrievalQA
+from langchain_community.llms import LlamaCpp
+
+class VersionAwareRAG:
+    def __init__(self, vector_db, infra_context):
+        self.vector_db = vector_db
+        self.infra_context = infra_context
+        self.llm = LlamaCpp(
+            model_path="mistral-7b-instruct-v0.1.Q4_K_M.gguf",
+            n_ctx=32000,
+            n_threads=8,
+            temperature=0.1
+        )
+    
+    def query(self, question: str, hostname: str = None):
+        # Определение контекста версии
+        version_filters = {}
+        if hostname:
+            # Автоматическое определение продуктов в запросе
+            detected_products = self._detect_products(question)
+            for product in detected_products:
+                version = self.infra_context.get_product_version(hostname, product)
+                if version != "unknown":
+                    version_filters[product] = version
+        
+        # Построение фильтров для векторной БД
+        filter_conditions = []
+        for product, version in version_filters.items():
+            filter_conditions.append({"product": product, "version": version})
+        
+        # Извлечение релевантных документов
+        if filter_conditions:
+            docs = self.vector_db.max_marginal_relevance_search(
+                question, 
+                filter={"$or": filter_conditions},
+                k=5
+            )
+        else:
+            docs = self.vector_db.max_marginal_relevance_search(question, k=5)
+        
+        # Формирование промпта с контекстом
+        prompt = self._build_prompt(question, docs, hostname)
+        
+        # Генерация ответа
+        return self.llm.invoke(prompt)
+    
+    def _detect_products(self, text: str) -> list:
+        """Автоматическое определение продуктов в запросе"""
+        products = ['ceph', 'kafka', 'prometheus', 'grafana', 'opensearch', 'nginx', 'kubernetes']
+        return [p for p in products if p in text.lower()]
+    
+    def _build_prompt(self, question: str, docs: list, hostname: str) -> str:
+        """Построение контекстного промпта"""
+        # Информация о сервере
+        host_info = ""
+        if hostname:
+            host_data = self.infra_context.get_host_info(hostname)
+            host_info = f"## Инфраструктурный контекст\nСервер: {hostname}\n"
+            host_info += yaml.dump(host_data)
+        
+        # Релевантные документы
+        docs_text = "\n\n".join([f"Источник: {doc.metadata['source']}\n{doc.page_content}" 
+                                for doc in docs])
+        
+        return f"""Ты senior SRE инженер. Отвечай на технические вопросы с учетом контекста.
+        
+{host_info}
+        
+### Релевантная документация:
+{docs_text}
+        
+### Вопрос:
+{question}
+        
+### Ответ (с учетом версий ПО и инфраструктуры):
+"""
+```
+
+#### 4. Система обновления документации
+**Автоматическое обновление**:
+```python
+import hashlib
+import schedule
+import time
+
+class DocumentationUpdater:
+    def __init__(self, vector_db, versions_df):
+        self.vector_db = vector_db
+        self.versions_df = versions_df
+        self.source_hashes = {}  # Для отслеживания изменений
+    
+    def check_for_updates(self):
+        """Проверка обновлений для всех версий"""
+        for product in self.versions_df['product'].unique():
+            for version in self.versions_df[self.versions_df['product'] == product]['version'].unique():
+                self._update_product_version(product, version)
+    
+    def _update_product_version(self, product: str, version: str):
+        """Обновление документации для конкретной версии"""
+        current_docs = load_versioned_docs(product, version)
+        
+        for doc in current_docs:
+            # Проверка изменений через хеширование
+            content_hash = hashlib.md5(doc.content.encode()).hexdigest()
+            
+            if doc.source not in self.source_hashes or self.source_hashes[doc.source] != content_hash:
+                # Обновление документа в векторной БД
+                self._update_vector_db(doc, content_hash)
+    
+    def _update_vector_db(self, doc: VersionedDocument, content_hash: str):
+        """Обновление векторной БД"""
+        # Удаление старой версии документа
+        self.vector_db.delete(ids=[doc.source])
+        
+        # Добавление новой версии
+        chunks = text_splitter.split_text(doc.content)
+        for chunk in chunks:
+            metadata = {
+                "product": doc.product,
+                "version": doc.version,
+                "source": doc.source,
+                "doc_type": doc.doc_type
+            }
+            self.vector_db.add_texts([chunk], [metadata])
+        
+        # Обновление хеша
+        self.source_hashes[doc.source] = content_hash
+    
+    def run_scheduled_updates(self):
+        """Запуск периодических обновлений"""
+        schedule.every().day.at("02:00").do(self.check_for_updates)
+        while True:
+            schedule.run_pending()
+            time.sleep(3600)  # Проверка каждый час
+```
+
+#### 5. Система обратной связи и дообучения
+**Сбор и обработка фидбека**:
+```python
+from pydantic import BaseModel
+import sqlite3
+from peft import LoraConfig, get_peft_model
+from transformers import AutoModelForCausalLM
+
+class FeedbackSystem:
+    def __init__(self):
+        self.conn = sqlite3.connect('feedback.db')
+        self._create_table()
+    
+    def _create_table(self):
+        self.conn.execute('''CREATE TABLE IF NOT EXISTS feedback
+             (id INTEGER PRIMARY KEY AUTOINCREMENT,
+              query TEXT NOT NULL,
+              response TEXT NOT NULL,
+              correct BOOLEAN NOT NULL,
+              correction TEXT,
+              context TEXT,
+              timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)''')
+    
+    def add_feedback(self, query: str, response: str, correct: bool, correction: str = None, context: str = None):
+        self.conn.execute(
+            "INSERT INTO feedback (query, response, correct, correction, context) VALUES (?, ?, ?, ?, ?)",
+            (query, response, int(correct), correction, context)
+        )
+        self.conn.commit()
+    
+    def generate_fine_tuning_data(self):
+        """Подготовка данных для дообучения"""
+        cursor = self.conn.execute(
+            "SELECT query, correction, context FROM feedback WHERE correct = 0 AND correction IS NOT NULL"
+        )
+        return [
+            {
+                "instruction": row[0],
+                "context": row[2],
+                "output": row[1]
+            }
+            for row in cursor.fetchall()
+        ]
+    
+    def fine_tune_model(self, base_model_path: str, output_path: str):
+        """Дообучение модели на CPU"""
+        # Загрузка модели
+        model = AutoModelForCausalLM.from_pretrained(base_model_path)
+        
+        # Конфигурация LoRA
+        config = LoraConfig(
+            r=8,
+            lora_alpha=32,
+            target_modules=["q_proj", "v_proj"],
+            lora_dropout=0.05,
+            bias="none",
+            task_type="CAUSAL_LM"
+        )
+        model = get_peft_model(model, config)
+        
+        # Подготовка данных
+        training_data = self.generate_fine_tuning_data()
+        
+        # Тренировка (упрощенный вариант)
+        # На практике требуется реализация DataLoader и тренировочного цикла
+        for example in training_data:
+            input_text = f"CONTEXT: {example['context']}\nQUESTION: {example['instruction']}\nANSWER:"
+            inputs = tokenizer(input_text, return_tensors="pt")
+            outputs = model(**inputs, labels=tokenizer(example['output'], return_tensors="pt")["input_ids"])
+            loss = outputs.loss
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad()
+        
+        # Сохранение модели
+        model.save_pretrained(output_path)
+
+# Интеграция с API
+@app.post("/feedback")
+def submit_feedback(fb: FeedbackSchema):
+    feedback_system.add_feedback(
+        query=fb.query,
+        response=fb.response,
+        correct=fb.correct,
+        correction=fb.correction,
+        context=fb.context
+    )
+    return {"status": "success"}
+```
+
+### Требования к оборудованию
+
+#### Минимальная конфигурация (для тестирования)
+| Ресурс       | Значение       | Обоснование                     |
+|--------------|----------------|---------------------------------|
+| CPU          | 4 ядра         | Минимум для llama.cpp           |
+| RAM          | 32 ГБ          | 16ГБ (модель) + 16ГБ (система)  |
+| Диск         | 100 ГБ SSD     | Модели (20ГБ), данные (80ГБ)    |
+| SWAP         | 16 ГБ          | Для обработки пиковых нагрузок  |
+
+#### Рекомендуемая конфигурация
+| Ресурс       | Значение       | Обоснование                     |
+|--------------|----------------|---------------------------------|
+| CPU          | 8 ядер         | Оптимально для параллелизма     |
+| RAM          | 64 ГБ          | 32ГБ (модель) + 32ГБ (система)  |
+| Диск         | 200 ГБ NVMe    | Быстрый доступ к векторной БД   |
+| SWAP         | 32 ГБ          | Буфер для больших запросов      |
+
+#### Оптимизация производительности:
+1. **Использование BLAS/LAPACK**:
+   ```bash
+   make LLAMA_OPENBLAS=1 -j8
+   ```
+   
+2. **Оптимальные параметры запуска**:
+   ```python
+   LlamaCpp(
+       model_path="mistral-7b.Q4_K_M.gguf",
+       n_ctx=16384,
+       n_threads=8,
+       n_batch=512,
+       n_gpu_layers=0,  # CPU-only
+       use_mlock=True,   # Предотвращение свопинга
+       low_vram=True
+   )
+   ```
+
+3. **Распределение нагрузки**:
+   - Отдельные VM для:
+     - LLM инференса
+     - Векторной БД
+     - Веб-интерфейса
+
+### Развертывание системы
+
+1. **Подготовка инфраструктуры**:
+   ```bash
+   # Установка базовых зависимостей
+   sudo apt update
+   sudo apt install -y python3.10 python3-pip make gcc cmake
+   pip install poetry
+   
+   # Сборка llama.cpp
+   git clone https://github.com/ggerganov/llama.cpp
+   cd llama.cpp && make LLAMA_OPENBLAS=1 -j8
+   
+   # Загрузка модели
+   wget https://huggingface.co/TheBloke/Mistral-7B-Instruct-v0.1-GGUF/resolve/main/mistral-7b-instruct-v0.1.Q4_K_M.gguf
+   ```
+
+2. **Установка Python-зависимостей**:
+   ```bash
+   poetry init
+   poetry add langchain langchain-community chromadb sentence-transformers 
+                fastapi uvicorn sqlalchemy pandas pyyaml peft transformers
+   ```
+
+3. **Инициализация системы**:
+   ```python
+   from infrastructure import InfrastructureContext
+   from vector_db import init_vector_db
+   from rag_system import VersionAwareRAG
+   
+   # Инициализация
+   infra_context = InfrastructureContext("ansible_inventory.yml", "server_versions.csv")
+   vector_db = init_vector_db("./vector_db")
+   rag_system = VersionAwareRAG(vector_db, infra_context)
+   
+   # Пример использования
+   response = rag_system.query(
+       "Как диагностировать проблемы с OSD в Ceph?",
+       hostname="ceph-node-01"
+   )
+   ```
+
+4. **Запуск API**:
+   ```python
+   from fastapi import FastAPI
+   app = FastAPI()
+   
+   @app.post("/query")
+   async def handle_query(query: dict):
+       return rag_system.query(query["text"], query.get("hostname"))
+   ```
+
+### Особенности работы системы
+
+1. **Версионно-зависимые ответы**:
+   - При запросе о конкретном сервере система автоматически определяет версию ПО
+   - Использует соответствующую документацию для ответа
+
+2. **Автообновление знаний**:
+   - Ежедневная проверка обновлений документации
+   - Автоматическое переиндексирование при изменении источников
+
+3. **Непрерывное улучшение**:
+   - Сбор пользовательского фидбека
+   - Периодическое дообучение модели (раз в неделю/месяц)
+   - Ротация моделей без остановки сервиса
+
+4. **Безопасность**:
+   - Полная изоляция в приватной сети
+   - Шифрование данных на диске
+   - Аутентификация через LDAP/AD
+
+### Рекомендации по эксплуатации
+
+1. **Мониторинг**:
+   - Отслеживание использования RAM/CPU
+   - Логирование времени ответа
+   - Анализ качества ответов (accuracy)
+
+2. **Оптимизация**:
+   - Использование кэширования частых запросов
+   - Предварительная загрузка моделей в RAM
+   - Балансировка нагрузки между инстансами
+
+3. **Резервное копирование**:
+   - Ежедневное бэкапирование векторной БД
+   - Версионирование моделей
+   - Резервные копии фидбек-системы
+
+Данная система обеспечит:
+- Точные, контекстно-зависимые ответы с учётом версий ПО
+- Автоматическое поддержание актуальности знаний
+- Непрерывное улучшение качества ответов
+- Работу в полностью изолированной среде без GPU
+
+Для старта рекомендую начать с одного продукта (например, Ceph), затем постепенно расширять покрытие.

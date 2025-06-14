@@ -1,0 +1,234 @@
+# ==========================================
+# Dockerfile.nodejs - Multistage Node.js
+# ==========================================
+# Build stage
+FROM node:18-alpine AS builder
+
+WORKDIR /app
+
+# Copy package files and install production dependencies
+COPY package*.json ./
+RUN npm ci --only=production --silent && npm cache clean --force
+
+# Copy built application from builder stage
+COPY --from=builder --chown=nodejs:nodejs /app/dist ./dist
+
+# Switch to non-root user
+USER nodejs
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD node dist/healthcheck.js
+
+# Expose port
+EXPOSE 3000
+
+# Use dumb-init to handle signals properly
+ENTRYPOINT ["dumb-init", "--"]
+CMD ["node", "dist/index.js"]
+
+# Metadata
+ARG BUILD_DATE
+ARG VCS_REF
+ARG VERSION
+LABEL org.label-schema.build-date=$BUILD_DATE \
+      org.label-schema.name="nodejs-app" \
+      org.label-schema.description="Node.js application" \
+      org.label-schema.url="https://company.com" \
+      org.label-schema.vcs-ref=$VCS_REF \
+      org.label-schema.vcs-url="https://gitlab.company.com/group/nodejs-app" \
+      org.label-schema.vendor="Company Name" \
+      org.label-schema.version=$VERSION \
+      org.label-schema.schema-version="1.0"
+
+# ==========================================
+# Dockerfile.java - Multistage Java
+# ==========================================
+# Build stage
+FROM maven:3.8.6-openjdk-11-slim AS builder
+
+WORKDIR /app
+
+# Copy pom.xml first for better caching
+COPY pom.xml .
+
+# Download dependencies
+RUN mvn dependency:go-offline -B
+
+# Copy source code
+COPY src ./src
+
+# Build application
+RUN mvn clean package -B -DskipTests
+
+# Runtime stage
+FROM openjdk:11-jre-slim AS runtime
+
+# Install security updates and tools
+RUN apt-get update && \
+    apt-get upgrade -y && \
+    apt-get install -y --no-install-recommends \
+        curl \
+        dumb-init && \
+    rm -rf /var/lib/apt/lists/* && \
+    apt-get clean
+
+# Create non-root user
+RUN groupadd -r spring && useradd -r -g spring spring
+
+# Set working directory
+WORKDIR /app
+
+# Copy JAR from builder stage
+ARG JAR_FILE
+COPY --from=builder --chown=spring:spring /app/target/*.jar app.jar
+
+# Switch to non-root user
+USER spring
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:8080/actuator/health || exit 1
+
+# Expose port
+EXPOSE 8080
+
+# JVM options
+ENV JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -Djava.security.egd=file:/dev/./urandom"
+
+# Use dumb-init to handle signals properly
+ENTRYPOINT ["dumb-init", "--"]
+CMD ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]
+
+# Metadata
+ARG BUILD_DATE
+ARG VCS_REF
+ARG VERSION
+LABEL org.label-schema.build-date=$BUILD_DATE \
+      org.label-schema.name="java-app" \
+      org.label-schema.description="Java Spring Boot application" \
+      org.label-schema.url="https://company.com" \
+      org.label-schema.vcs-ref=$VCS_REF \
+      org.label-schema.vcs-url="https://gitlab.company.com/group/java-app" \
+      org.label-schema.vendor="Company Name" \
+      org.label-schema.version=$VERSION \
+      org.label-schema.schema-version="1.0"
+
+# ==========================================
+# Dockerfile.dotnet - Multistage .NET
+# ==========================================
+# Build stage
+FROM mcr.microsoft.com/dotnet/sdk:6.0 AS builder
+
+WORKDIR /app
+
+# Copy csproj files and restore dependencies
+COPY *.csproj ./
+RUN dotnet restore
+
+# Copy source code
+COPY . .
+
+# Build and publish
+RUN dotnet publish -c Release -o out --no-restore
+
+# Runtime stage
+FROM mcr.microsoft.com/dotnet/aspnet:6.0 AS runtime
+
+# Install security updates
+RUN apt-get update && \
+    apt-get upgrade -y && \
+    apt-get install -y --no-install-recommends \
+        curl && \
+    rm -rf /var/lib/apt/lists/* && \
+    apt-get clean
+
+# Create non-root user
+RUN groupadd -r dotnet && useradd -r -g dotnet dotnet
+
+# Set working directory
+WORKDIR /app
+
+# Copy published application from builder stage
+COPY --from=builder --chown=dotnet:dotnet /app/out .
+
+# Switch to non-root user
+USER dotnet
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:5000/health || exit 1
+
+# Expose port
+EXPOSE 5000
+
+# Environment variables
+ENV ASPNETCORE_URLS=http://+:5000
+ENV ASPNETCORE_ENVIRONMENT=Production
+
+# Start application
+ENTRYPOINT ["dotnet", "YourApp.dll"]
+
+# Metadata
+ARG BUILD_DATE
+ARG VCS_REF
+ARG VERSION
+ARG DOTNET_VERSION
+LABEL org.label-schema.build-date=$BUILD_DATE \
+      org.label-schema.name="dotnet-app" \
+      org.label-schema.description=".NET application" \
+      org.label-schema.url="https://company.com" \
+      org.label-schema.vcs-ref=$VCS_REF \
+      org.label-schema.vcs-url="https://gitlab.company.com/group/dotnet-app" \
+      org.label-schema.vendor="Company Name" \
+      org.label-schema.version=$VERSION \
+      org.label-schema.schema-version="1.0" \
+      dotnet.version=$DOTNET_VERSION
+
+# ==========================================
+# Dockerfile.kaniko-cache - Кастомный образ с кешем
+# ==========================================
+FROM gcr.io/kaniko-project/executor:v1.9.0 AS kaniko-base
+
+# Custom stage для добавления S3 credentials
+FROM kaniko-base AS kaniko-with-s3
+
+# Добавляем поддержку S3 кеша
+COPY --from=amazon/aws-cli:latest /usr/local/aws-cli/ /usr/local/aws-cli/
+COPY --from=amazon/aws-cli:latest /usr/local/bin/ /usr/local/bin/
+
+# Создаем скрипт для настройки S3 кеша
+RUN echo '#!/bin/sh' > /kaniko/setup-s3-cache.sh && \
+    echo 'if [ -n "$S3_ENDPOINT" ] && [ -n "$S3_BUCKET" ]; then' >> /kaniko/setup-s3-cache.sh && \
+    echo '  export KANIKO_CACHE_OPTIONS="--cache=true --cache-repo=s3://$S3_BUCKET/cache --cache-ttl=24h"' >> /kaniko/setup-s3-cache.sh && \
+    echo 'else' >> /kaniko/setup-s3-cache.sh && \
+    echo '  export KANIKO_CACHE_OPTIONS="--cache=false"' >> /kaniko/setup-s3-cache.sh && \
+    echo 'fi' >> /kaniko/setup-s3-cache.sh && \
+    chmod +x /kaniko/setup-s3-cache.sh
+
+ENTRYPOINT ["/kaniko/executor"] files
+COPY package*.json ./
+
+# Install dependencies
+RUN npm ci --only=production --silent
+
+# Copy source code
+COPY . .
+
+# Build application
+RUN npm run build
+
+# Runtime stage
+FROM node:18-alpine AS runtime
+
+# Install security updates
+RUN apk update && apk upgrade && apk add --no-cache dumb-init
+
+# Create non-root user
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S nodejs -u 1001
+
+# Set working directory
+WORKDIR /app
+
+# Copy package

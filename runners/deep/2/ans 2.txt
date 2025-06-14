@@ -1,0 +1,212 @@
+﻿### Архитектура решения: GitLab Runner + Kaniko в Kubernetes
+
+---
+
+#### **Варианты архитектуры с кешированием**
+
+1. **Кеширование через S3 (Ceph)**  
+   - **Описание:** Kaniko сохраняет промежуточные слои образов в S3-бакеты.  
+   - **Плюсы:**  
+     - Независимость от Docker Registry.  
+     - Высокая скорость (если Ceph в той же сети).  
+     - Поддержка мультитенантности через изолированные бакеты.  
+   - **Минусы:**  
+     - Риск конфиденциальности данных (требуется строгий IAM).  
+     - Сложнее управлять жизненным циклом кеша.  
+
+2. **Кеширование через Docker Registry**  
+   - **Описание:** Kaniko использует Docker Registry (например, GitLab Registry) для кеширования слоев.  
+   - **Плюсы:**  
+     - Интеграция с GitLab (проще управление образами).  
+     - Встроенная аутентификация (через CI_JOB_TOKEN).  
+   - **Минусы:**  
+     - Дополнительная нагрузка на Registry.  
+     - Ограничения на размер кеша (требует очистки).  
+
+**Рекомендация:** Используйте S3 (Ceph) для изоляции кешей между тенантами и снижения нагрузки на GitLab.
+
+---
+
+#### **Общая архитектура**
+```mermaid
+graph TD
+  subgraph Kubernetes Cluster
+    subgraph Namespace Tenant1
+      Runner1[GitLab Runner Pod] -->|Запускает| Job1[Job with Kaniko Pod]
+      Job1 -->|Кеширует в| S3_Tenant1[S3 Bucket Tenant1]
+    end
+    subgraph Namespace Tenant2
+      Runner2[GitLab Runner Pod] -->|Запускает| Job2[Job with Kaniko Pod]
+      Job2 -->|Кеширует в| S3_Tenant2[S3 Bucket Tenant2]
+    end
+    Prometheus -->|Собирает метрики| Runner1 & Runner2
+  end
+  GitLab -->|Регистрирует| Runner1 & Runner2
+  S3_Tenant1 & S3_Tenant2 --> Ceph[Ceph S3 Storage]
+```
+
+- **Изоляция:**  
+  - Каждый тенант в отдельном namespace.  
+  - Runner → фиксированные worker-узлы через `nodeAffinity`.  
+  - Отдельные S3-бакеты и IAM-учетки для каждого тенанта.  
+- **Масштабирование:**  
+  - Один Runner обрабатывает до 20 задач параллельно (настройка `concurrent`).  
+- **Мониторинг:**  
+  - GitLab Runner экспортирует метрики в Prometheus.  
+
+---
+
+#### **Конфигурация GitLab Runner**
+
+1. **Helm-чарт для установки:**  
+   ```bash
+   helm repo add gitlab https://charts.gitlab.io
+   helm install tenant1-runner gitlab/gitlab-runner -n tenant1
+   ```
+
+2. **`values.yaml` для тенанта (пример):**  
+   ```yaml
+   gitlabUrl: "https://gitlab.example.com"
+   runnerRegistrationToken: "TOKEN_TENANT1"
+   concurrent: 20
+   metrics:
+     enabled: true
+     serviceMonitor:
+       enabled: true  # Для сбора метрик Prometheus
+   runners:
+     config: |
+       [[runners]]
+         executor = "kubernetes"
+         [runners.kubernetes]
+           namespace = "{{.Release.Namespace}}"
+           node_selector = { "node-type": "tenant1-worker" }  # Фиксированные узлы
+           [runners.kubernetes.pod_security_context]
+             run_as_user = 1000
+           [runners.kubernetes.volumes]
+             [[runners.kubernetes.volumes.empty_dir]]
+               name = "kaniko-cache"
+               mount_path = "/kaniko/cache"
+         [runners.cache]
+           Type = "s3"
+           Path = "tenant1-runner"
+           Shared = false
+           [runners.cache.s3]
+             BucketName = "tenant1-bucket"
+             BucketLocation = "us-east-1"
+             Insecure = false
+   envVars:
+     - name: AWS_ACCESS_KEY_ID
+       valueFrom:
+         secretKeyRef:
+           name: tenant1-s3-credentials
+           key: accesskey
+     - name: AWS_SECRET_ACCESS_KEY
+       valueFrom:
+         secretKeyRef:
+           name: tenant1-s3-credentials
+           key: secretkey
+   ```
+
+3. **Секреты для S3 (создать перед установкой):**  
+   ```bash
+   kubectl -n tenant1 create secret generic tenant1-s3-credentials \
+     --from-literal=accesskey=XXX \
+     --from-literal=secretkey=XXX
+   ```
+
+---
+
+#### **Пример пайплайна GitLab CI (`.gitlab-ci.yml`)**
+```yaml
+stages:
+  - build
+
+build-java-app:
+  stage: build
+  image:
+    name: gcr.io/kaniko-project/executor:v1.19.0-debug
+    entrypoint: [""]
+  variables:
+    AWS_REGION: "us-east-1"
+  script:
+    - /kaniko/executor
+      --context ${CI_PROJECT_DIR}
+      --dockerfile ${CI_PROJECT_DIR}/Dockerfile
+      --destination registry.example.com/group/project:${CI_COMMIT_SHA}
+      --cache=true
+      --cache-repo s3://tenant1-bucket/cache  # S3 кеш
+      # --cache-repo registry.example.com/cache  # Registry кеш
+  tags:
+    - tenant1  # Использует изолированный Runner
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+```
+
+---
+
+#### **Манифесты для деплоя**
+
+1. **Настройка worker-узлов:**  
+   Пометьте узлы для каждого тенанта:  
+   ```bash
+   kubectl label nodes worker-node-1 node-type=tenant1-worker
+   kubectl label nodes worker-node-2 node-type=tenant2-worker
+   ```
+
+2. **Создание S3-бакетов (пример через Ceph RGW):**  
+   ```bash
+   # Для tenant1
+   aws s3api create-bucket --bucket tenant1-bucket --endpoint-url http://ceph-s3.example.com
+   aws iam create-user --user-name tenant1-runner
+   aws iam attach-user-policy --user-name tenant1-runner --policy-arn arn:aws:iam::policy/s3-full-access
+   ```
+
+3. **ServiceMonitor для Prometheus (если не через Helm):**  
+   ```yaml
+   apiVersion: monitoring.coreos.com/v1
+   kind: ServiceMonitor
+   metadata:
+     name: gitlab-runner-tenant1
+     namespace: tenant1
+   spec:
+     selector:
+       matchLabels:
+         app: gitlab-runner
+     endpoints:
+     - port: metrics
+       interval: 15s
+   ```
+
+---
+
+#### **Скрипты деплоя**
+1. **Установка для тенанта 1:**  
+   ```bash
+   # Создать namespace
+   kubectl create ns tenant1
+
+   # Создать секрет S3
+   kubectl -n tenant1 create secret generic tenant1-s3-credentials \
+     --from-literal=accesskey=XXX --from-literal=secretkey=XXX
+
+   # Установить Runner
+   helm install tenant1-runner gitlab/gitlab-runner \
+     -f values-tenant1.yaml \
+     --namespace tenant1
+   ```
+
+2. **Проверка:**  
+   ```bash
+   kubectl -n tenant1 get pods -l app=gitlab-runner
+   kubectl -n tenant1 logs -f <runner-pod>
+   ```
+
+---
+
+### **Итог**
+- **Изоляция:** Namespaces + nodeAffinity + отдельные S3 бакеты.  
+- **Кеширование:** Kaniko → S3 (рекомендация) или Docker Registry.  
+- **Масштабирование:** `concurrent: 20` на Runner.  
+- **Мониторинг:** ServiceMonitor + Prometheus.  
+
+Настройки можно адаптировать под требования, сохраняя принцип мультитенантности.

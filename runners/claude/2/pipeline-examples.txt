@@ -1,0 +1,398 @@
+# ==========================================
+# .gitlab-ci.yml для Java приложения
+# ==========================================
+stages:
+  - build
+  - test
+  - package
+  - deploy
+
+variables:
+  KANIKO_IMAGE: gcr.io/kaniko-project/executor:v1.12.1-debug
+  REGISTRY: "registry.company.com"
+  IMAGE_NAME: "$REGISTRY/tenant-1/java-app"
+  CACHE_REGISTRY: "$REGISTRY/cache/tenant-1"
+  S3_CACHE_BUCKET: "tenant-1-gitlab-cache"
+  DOCKER_DRIVER: overlay2
+
+.kaniko_build: &kaniko_build
+  image: $KANIKO_IMAGE
+  stage: package
+  before_script:
+    - echo "{\"auths\":{\"$REGISTRY\":{\"auth\":\"$(echo -n $REGISTRY_USER:$REGISTRY_PASSWORD | base64)\"}}}" > /kaniko/.docker/config.json
+    - mkdir -p /kaniko/.aws
+    - echo "[default]" > /kaniko/.aws/credentials
+    - echo "aws_access_key_id = $CACHE_S3_ACCESS_KEY" >> /kaniko/.aws/credentials
+    - echo "aws_secret_access_key = $CACHE_S3_SECRET_KEY" >> /kaniko/.aws/credentials
+    - echo "[default]" > /kaniko/.aws/config
+    - echo "region = us-east-1" >> /kaniko/.aws/config
+    - echo "s3 =" >> /kaniko/.aws/config
+    - echo "addressing_style = path" >> /kaniko/.aws/config
+  script:
+    - /kaniko/executor
+      --context $CI_PROJECT_DIR
+      --dockerfile $CI_PROJECT_DIR/Dockerfile
+      --destination $IMAGE_NAME:$CI_COMMIT_SHA
+      --destination $IMAGE_NAME:latest
+      --cache=true
+      --cache-repo=$CACHE_REGISTRY/java-cache
+      --cache-ttl=72h
+      --build-arg BUILDKIT_INLINE_CACHE=1
+      --build-arg CI_COMMIT_SHA=$CI_COMMIT_SHA
+      --build-arg CI_COMMIT_REF_NAME=$CI_COMMIT_REF_NAME
+      --snapshotMode=redo
+      --use-new-run
+      --compressed-caching=false
+  tags:
+    - tenant-1
+
+# Java build stage
+maven_build:
+  image: maven:3.8.6-openjdk-17
+  stage: build
+  variables:
+    MAVEN_OPTS: "-Dmaven.repo.local=$CI_PROJECT_DIR/.m2/repository"
+  cache:
+    key: maven-$CI_COMMIT_REF_SLUG
+    paths:
+      - .m2/repository/
+    policy: pull-push
+  script:
+    - mvn clean compile -DskipTests
+  artifacts:
+    paths:
+      - target/
+      - .m2/repository/
+    expire_in: 1 hour
+  tags:
+    - tenant-1
+
+# Unit tests
+maven_test:
+  image: maven:3.8.6-openjdk-17
+  stage: test
+  variables:
+    MAVEN_OPTS: "-Dmaven.repo.local=$CI_PROJECT_DIR/.m2/repository"
+  cache:
+    key: maven-$CI_COMMIT_REF_SLUG
+    paths:
+      - .m2/repository/
+    policy: pull
+  script:
+    - mvn test
+  coverage: '/Total.*?([0-9]{1,3})%/'
+  artifacts:
+    when: always
+    reports:
+      junit:
+        - target/surefire-reports/TEST-*.xml
+      coverage_report:
+        coverage_format: jacoco
+        path: target/site/jacoco/jacoco.xml
+    paths:
+      - target/surefire-reports/
+      - target/site/jacoco/
+    expire_in: 1 week
+  dependencies:
+    - maven_build
+  tags:
+    - tenant-1
+
+# Package application
+maven_package:
+  image: maven:3.8.6-openjdk-17
+  stage: package
+  variables:
+    MAVEN_OPTS: "-Dmaven.repo.local=$CI_PROJECT_DIR/.m2/repository"
+  cache:
+    key: maven-$CI_COMMIT_REF_SLUG
+    paths:
+      - .m2/repository/
+    policy: pull
+  script:
+    - mvn package -DskipTests
+  artifacts:
+    paths:
+      - target/*.jar
+    expire_in: 1 hour
+  dependencies:
+    - maven_build
+    - maven_test
+  tags:
+    - tenant-1
+
+# Build Docker image with Kaniko
+build_image:
+  <<: *kaniko_build
+  dependencies:
+    - maven_package
+  only:
+    - main
+    - develop
+    - merge_requests
+
+---
+# ==========================================
+# .gitlab-ci.yml для .NET приложения
+# ==========================================
+stages:
+  - build
+  - test
+  - package
+  - deploy
+
+variables:
+  KANIKO_IMAGE: gcr.io/kaniko-project/executor:v1.12.1-debug
+  REGISTRY: "registry.company.com"
+  IMAGE_NAME: "$REGISTRY/tenant-2/dotnet-app"
+  CACHE_REGISTRY: "$REGISTRY/cache/tenant-2"
+  DOTNET_VERSION: "8.0"
+  NUGET_PACKAGES_DIRECTORY: '.nuget'
+
+.kaniko_build: &kaniko_build
+  image: $KANIKO_IMAGE
+  stage: package
+  before_script:
+    - echo "{\"auths\":{\"$REGISTRY\":{\"auth\":\"$(echo -n $REGISTRY_USER:$REGISTRY_PASSWORD | base64)\"}}}" > /kaniko/.docker/config.json
+    - mkdir -p /kaniko/.aws
+    - echo "[default]" > /kaniko/.aws/credentials
+    - echo "aws_access_key_id = $CACHE_S3_ACCESS_KEY" >> /kaniko/.aws/credentials
+    - echo "aws_secret_access_key = $CACHE_S3_SECRET_KEY" >> /kaniko/.aws/credentials
+  script:
+    - /kaniko/executor
+      --context $CI_PROJECT_DIR
+      --dockerfile $CI_PROJECT_DIR/Dockerfile
+      --destination $IMAGE_NAME:$CI_COMMIT_SHA
+      --destination $IMAGE_NAME:latest
+      --cache=true
+      --cache-repo=$CACHE_REGISTRY/dotnet-cache
+      --cache-ttl=72h
+      --build-arg BUILDKIT_INLINE_CACHE=1
+      --build-arg CI_COMMIT_SHA=$CI_COMMIT_SHA
+      --snapshotMode=redo
+      --use-new-run
+  tags:
+    - tenant-2
+
+# .NET restore and build
+dotnet_build:
+  image: mcr.microsoft.com/dotnet/sdk:$DOTNET_VERSION
+  stage: build
+  cache:
+    key: dotnet-$CI_COMMIT_REF_SLUG
+    paths:
+      - $NUGET_PACKAGES_DIRECTORY
+  script:
+    - dotnet restore --packages $NUGET_PACKAGES_DIRECTORY
+    - dotnet build --configuration Release --no-restore
+  artifacts:
+    paths:
+      - bin/
+      - obj/
+      - $NUGET_PACKAGES_DIRECTORY
+    expire_in: 1 hour
+  tags:
+    - tenant-2
+
+# Unit tests
+dotnet_test:
+  image: mcr.microsoft.com/dotnet/sdk:$DOTNET_VERSION
+  stage: test
+  cache:
+    key: dotnet-$CI_COMMIT_REF_SLUG
+    paths:
+      - $NUGET_PACKAGES_DIRECTORY
+    policy: pull
+  script:
+    - dotnet test 
+      --configuration Release 
+      --no-build 
+      --collect:"XPlat Code Coverage" 
+      --logger trx 
+      --results-directory TestResults/
+  coverage: '/Total\s*\|\s*(\d+(?:\.\d+)?)/'
+  artifacts:
+    when: always
+    reports:
+      junit:
+        - TestResults/*.trx
+      coverage_report:
+        coverage_format: cobertura
+        path: TestResults/*/coverage.cobertura.xml
+    paths:
+      - TestResults/
+    expire_in: 1 week
+  dependencies:
+    - dotnet_build
+  tags:
+    - tenant-2
+
+# Publish application
+dotnet_publish:
+  image: mcr.microsoft.com/dotnet/sdk:$DOTNET_VERSION
+  stage: package
+  cache:
+    key: dotnet-$CI_COMMIT_REF_SLUG
+    paths:
+      - $NUGET_PACKAGES_DIRECTORY
+    policy: pull
+  script:
+    - dotnet publish 
+      --configuration Release 
+      --no-build 
+      --output publish/
+  artifacts:
+    paths:
+      - publish/
+    expire_in: 1 hour
+  dependencies:
+    - dotnet_build
+    - dotnet_test
+  tags:
+    - tenant-2
+
+# Build Docker image
+build_image:
+  <<: *kaniko_build
+  dependencies:
+    - dotnet_publish
+  only:
+    - main
+    - develop
+    - merge_requests
+
+---
+# ==========================================
+# Пример multistage .gitlab-ci.yml с S3 кешированием
+# ==========================================
+stages:
+  - build
+  - test
+  - security
+  - package
+  - deploy
+
+variables:
+  KANIKO_IMAGE: gcr.io/kaniko-project/executor:v1.12.1-debug
+  REGISTRY: "registry.company.com"
+  IMAGE_NAME: "$REGISTRY/tenant-1/microservice"
+  S3_ENDPOINT: "https://ceph.company.com"
+  S3_BUCKET: "tenant-1-gitlab-cache"
+
+.s3_cache_config: &s3_cache_config
+  before_script:
+    - mkdir -p /kaniko/.aws
+    - echo "[default]" > /kaniko/.aws/credentials
+    - echo "aws_access_key_id = $CACHE_S3_ACCESS_KEY" >> /kaniko/.aws/credentials
+    - echo "aws_secret_access_key = $CACHE_S3_SECRET_KEY" >> /kaniko/.aws/credentials
+    - echo "[default]" > /kaniko/.aws/config
+    - echo "region = us-east-1" >> /kaniko/.aws/config
+    - echo "s3 =" >> /kaniko/.aws/config
+    - echo "endpoint_url = $S3_ENDPOINT" >> /kaniko/.aws/config
+    - echo "addressing_style = path" >> /kaniko/.aws/config
+
+# Build with S3 cache
+build_with_s3_cache:
+  image: $KANIKO_IMAGE
+  stage: package
+  <<: *s3_cache_config
+  script:
+    - echo "{\"auths\":{\"$REGISTRY\":{\"auth\":\"$(echo -n $REGISTRY_USER:$REGISTRY_PASSWORD | base64)\"}}}" > /kaniko/.docker/config.json
+    - /kaniko/executor
+      --context $CI_PROJECT_DIR
+      --dockerfile $CI_PROJECT_DIR/Dockerfile
+      --destination $IMAGE_NAME:$CI_COMMIT_SHA
+      --cache=true
+      --cache-dir=/cache
+      --cache-repo=$REGISTRY/cache/tenant-1/kaniko-cache
+      --cache-ttl=168h
+      --build-arg BUILDKIT_INLINE_CACHE=1
+      --build-arg APP_VERSION=$CI_COMMIT_SHA
+      --snapshotMode=redo
+      --use-new-run
+      --compressed-caching=false
+      --log-format=text
+      --verbosity=info
+  tags:
+    - tenant-1
+  only:
+    - main
+    - develop
+    - merge_requests
+
+# Alternative: Registry cache example
+build_with_registry_cache:
+  image: $KANIKO_IMAGE
+  stage: package
+  script:
+    - echo "{\"auths\":{\"$REGISTRY\":{\"auth\":\"$(echo -n $REGISTRY_USER:$REGISTRY_PASSWORD | base64)\"}}}" > /kaniko/.docker/config.json
+    - /kaniko/executor
+      --context $CI_PROJECT_DIR
+      --dockerfile $CI_PROJECT_DIR/Dockerfile
+      --destination $IMAGE_NAME:$CI_COMMIT_SHA-registry-cache
+      --cache=true
+      --cache-repo=$REGISTRY/cache/tenant-1/layers
+      --cache-ttl=168h
+      --build-arg BUILDKIT_INLINE_CACHE=1
+      --snapshotMode=redo
+      --use-new-run
+  tags:
+    - tenant-1
+  when: manual
+
+# Security scan
+container_scanning:
+  image: 
+    name: aquasec/trivy:latest
+    entrypoint: [""]
+  stage: security
+  script:
+    - trivy image --exit-code 0 --format template --template "@contrib/gitlab.tpl" -o gl-container-scanning-report.json $IMAGE_NAME:$CI_COMMIT_SHA
+  artifacts:
+    reports:
+      container_scanning: gl-container-scanning-report.json
+  dependencies:
+    - build_with_s3_cache
+  tags:
+    - tenant-1
+  only:
+    - main
+    - develop
+
+# Deploy to staging
+deploy_staging:
+  image: bitnami/kubectl:latest
+  stage: deploy
+  script:
+    - kubectl config use-context staging
+    - kubectl set image deployment/microservice microservice=$IMAGE_NAME:$CI_COMMIT_SHA -n staging
+    - kubectl rollout status deployment/microservice -n staging --timeout=300s
+  environment:
+    name: staging
+    url: https://staging.company.com
+  dependencies:
+    - build_with_s3_cache
+  tags:
+    - tenant-1
+  only:
+    - develop
+
+# Deploy to production
+deploy_production:
+  image: bitnami/kubectl:latest
+  stage: deploy
+  script:
+    - kubectl config use-context production
+    - kubectl set image deployment/microservice microservice=$IMAGE_NAME:$CI_COMMIT_SHA -n production
+    - kubectl rollout status deployment/microservice -n production --timeout=600s
+  environment:
+    name: production
+    url: https://app.company.com
+  dependencies:
+    - build_with_s3_cache
+    - container_scanning
+  tags:
+    - tenant-1
+  when: manual
+  only:
+    - main

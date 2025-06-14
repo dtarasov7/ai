@@ -1,0 +1,528 @@
+# ==========================================
+# Namespace для tenant-1
+# ==========================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gitlab-runner-tenant-1
+  labels:
+    tenant: tenant-1
+---
+# ==========================================
+# ServiceAccount для tenant-1 runner
+# ==========================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: gitlab-runner
+  namespace: gitlab-runner-tenant-1
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: gitlab-runner
+  namespace: gitlab-runner-tenant-1
+rules:
+- apiGroups: [""]
+  resources: ["pods", "pods/log", "pods/attach", "pods/exec"]
+  verbs: ["get", "list", "watch", "create", "patch", "delete"]
+- apiGroups: [""]
+  resources: ["secrets", "configmaps"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: gitlab-runner
+  namespace: gitlab-runner-tenant-1
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: gitlab-runner
+subjects:
+- kind: ServiceAccount
+  name: gitlab-runner
+  namespace: gitlab-runner-tenant-1
+---
+# ==========================================
+# Secret с S3 credentials для tenant-1
+# ==========================================
+apiVersion: v1
+kind: Secret
+metadata:
+  name: s3-credentials
+  namespace: gitlab-runner-tenant-1
+type: Opaque
+data:
+  access-key: <base64-encoded-access-key-tenant-1>
+  secret-key: <base64-encoded-secret-key-tenant-1>
+---
+# ==========================================
+# ConfigMap с конфигурацией GitLab Runner
+# ==========================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gitlab-runner-config
+  namespace: gitlab-runner-tenant-1
+data:
+  config.toml: |
+    concurrent = 20
+    check_interval = 30
+    log_level = "info"
+    listen_address = ":9252"
+    
+    [session_server]
+      session_timeout = 1800
+    
+    [[runners]]
+      name = "tenant-1-k8s-runner"
+      url = "https://gitlab.company.com"
+      token = "YOUR_RUNNER_TOKEN_TENANT_1"
+      executor = "kubernetes"
+      limit = 20
+      
+      [runners.kubernetes]
+        namespace = "gitlab-runner-tenant-1"
+        image_pull_policy = "Always"
+        service_account = "gitlab-runner"
+        
+        # Node selection для изоляции
+        node_selector = { "tenant" = "tenant-1" }
+        node_tolerations = [
+          { key = "tenant", operator = "Equal", value = "tenant-1", effect = "NoSchedule" }
+        ]
+        
+        # Ресурсы для runner pod
+        cpu_limit = "2"
+        cpu_request = "1"
+        memory_limit = "4Gi"
+        memory_request = "2Gi"
+        
+        # Конфигурация для build pods
+        helper_cpu_limit = "500m"
+        helper_cpu_request = "250m"
+        helper_memory_limit = "1Gi"
+        helper_memory_request = "512Mi"
+        
+        # Pod security context
+        run_as_user = 1000
+        run_as_group = 1000
+        fs_group = 1000
+        
+        # Volumes для кеширования
+        [[runners.kubernetes.volumes.empty_dir]]
+          name = "build-cache"
+          mount_path = "/cache"
+        
+        [[runners.kubernetes.volumes.secret]]
+          name = "s3-credentials"
+          mount_path = "/s3-credentials"
+          read_only = true
+          
+      [runners.cache]
+        Type = "s3"
+        Path = "cache"
+        Shared = false
+        [runners.cache.s3]
+          ServerAddress = "ceph.company.com:443"
+          BucketName = "tenant-1-gitlab-cache"
+          BucketLocation = "us-east-1"
+          Insecure = false
+---
+# ==========================================
+# Deployment GitLab Runner для tenant-1
+# ==========================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gitlab-runner
+  namespace: gitlab-runner-tenant-1
+  labels:
+    app: gitlab-runner
+    tenant: tenant-1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gitlab-runner
+      tenant: tenant-1
+  template:
+    metadata:
+      labels:
+        app: gitlab-runner
+        tenant: tenant-1
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9252"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: gitlab-runner
+      nodeSelector:
+        tenant: tenant-1
+      tolerations:
+      - key: tenant
+        operator: Equal
+        value: tenant-1
+        effect: NoSchedule
+      containers:
+      - name: gitlab-runner
+        image: gitlab/gitlab-runner:v16.7.0
+        ports:
+        - containerPort: 9252
+          name: metrics
+          protocol: TCP
+        env:
+        - name: CACHE_S3_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: s3-credentials
+              key: access-key
+        - name: CACHE_S3_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: s3-credentials
+              key: secret-key
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+          limits:
+            cpu: 1
+            memory: 2Gi
+        volumeMounts:
+        - name: config
+          mountPath: /etc/gitlab-runner
+          readOnly: true
+        - name: runner-data
+          mountPath: /home/gitlab-runner
+        livenessProbe:
+          httpGet:
+            path: /metrics
+            port: 9252
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /metrics
+            port: 9252
+          initialDelaySeconds: 10
+          periodSeconds: 10
+      volumes:
+      - name: config
+        configMap:
+          name: gitlab-runner-config
+      - name: runner-data
+        emptyDir: {}
+      restartPolicy: Always
+---
+# ==========================================
+# Service для мониторинга
+# ==========================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: gitlab-runner-metrics
+  namespace: gitlab-runner-tenant-1
+  labels:
+    app: gitlab-runner
+    tenant: tenant-1
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9252"
+spec:
+  ports:
+  - name: metrics
+    port: 9252
+    targetPort: 9252
+  selector:
+    app: gitlab-runner
+    tenant: tenant-1
+---
+# ==========================================
+# NetworkPolicy для изоляции tenant-1
+# ==========================================
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: gitlab-runner-isolation
+  namespace: gitlab-runner-tenant-1
+spec:
+  podSelector:
+    matchLabels:
+      app: gitlab-runner
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+    ports:
+    - protocol: TCP
+      port: 9252
+  egress:
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 443  # GitLab HTTPS
+    - protocol: TCP
+      port: 53   # DNS
+    - protocol: UDP
+      port: 53   # DNS
+    - protocol: TCP
+      port: 9443 # S3 HTTPS
+---
+# ==========================================
+# TENANT-2 CONFIGURATION (аналогично tenant-1)
+# ==========================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gitlab-runner-tenant-2
+  labels:
+    tenant: tenant-2
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: gitlab-runner
+  namespace: gitlab-runner-tenant-2
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: gitlab-runner
+  namespace: gitlab-runner-tenant-2
+rules:
+- apiGroups: [""]
+  resources: ["pods", "pods/log", "pods/attach", "pods/exec"]
+  verbs: ["get", "list", "watch", "create", "patch", "delete"]
+- apiGroups: [""]
+  resources: ["secrets", "configmaps"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: gitlab-runner
+  namespace: gitlab-runner-tenant-2
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: gitlab-runner
+subjects:
+- kind: ServiceAccount
+  name: gitlab-runner
+  namespace: gitlab-runner-tenant-2
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: s3-credentials
+  namespace: gitlab-runner-tenant-2
+type: Opaque
+data:
+  access-key: <base64-encoded-access-key-tenant-2>
+  secret-key: <base64-encoded-secret-key-tenant-2>
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gitlab-runner-config
+  namespace: gitlab-runner-tenant-2
+data:
+  config.toml: |
+    concurrent = 20
+    check_interval = 30
+    log_level = "info"
+    listen_address = ":9252"
+    
+    [session_server]
+      session_timeout = 1800
+    
+    [[runners]]
+      name = "tenant-2-k8s-runner"
+      url = "https://gitlab.company.com"
+      token = "YOUR_RUNNER_TOKEN_TENANT_2"
+      executor = "kubernetes"
+      limit = 20
+      
+      [runners.kubernetes]
+        namespace = "gitlab-runner-tenant-2"
+        image_pull_policy = "Always"
+        service_account = "gitlab-runner"
+        
+        node_selector = { "tenant" = "tenant-2" }
+        node_tolerations = [
+          { key = "tenant", operator = "Equal", value = "tenant-2", effect = "NoSchedule" }
+        ]
+        
+        cpu_limit = "2"
+        cpu_request = "1"
+        memory_limit = "4Gi"
+        memory_request = "2Gi"
+        
+        helper_cpu_limit = "500m"
+        helper_cpu_request = "250m"
+        helper_memory_limit = "1Gi"
+        helper_memory_request = "512Mi"
+        
+        run_as_user = 1000
+        run_as_group = 1000
+        fs_group = 1000
+        
+        [[runners.kubernetes.volumes.empty_dir]]
+          name = "build-cache"
+          mount_path = "/cache"
+        
+        [[runners.kubernetes.volumes.secret]]
+          name = "s3-credentials"
+          mount_path = "/s3-credentials"
+          read_only = true
+          
+      [runners.cache]
+        Type = "s3"
+        Path = "cache"
+        Shared = false
+        [runners.cache.s3]
+          ServerAddress = "ceph.company.com:443"
+          BucketName = "tenant-2-gitlab-cache"
+          BucketLocation = "us-east-1"
+          Insecure = false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gitlab-runner
+  namespace: gitlab-runner-tenant-2
+  labels:
+    app: gitlab-runner
+    tenant: tenant-2
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gitlab-runner
+      tenant: tenant-2
+  template:
+    metadata:
+      labels:
+        app: gitlab-runner
+        tenant: tenant-2
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9252"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: gitlab-runner
+      nodeSelector:
+        tenant: tenant-2
+      tolerations:
+      - key: tenant
+        operator: Equal
+        value: tenant-2
+        effect: NoSchedule
+      containers:
+      - name: gitlab-runner
+        image: gitlab/gitlab-runner:v16.7.0
+        ports:
+        - containerPort: 9252
+          name: metrics
+          protocol: TCP
+        env:
+        - name: CACHE_S3_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: s3-credentials
+              key: access-key
+        - name: CACHE_S3_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: s3-credentials
+              key: secret-key
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+          limits:
+            cpu: 1
+            memory: 2Gi
+        volumeMounts:
+        - name: config
+          mountPath: /etc/gitlab-runner
+          readOnly: true
+        - name: runner-data
+          mountPath: /home/gitlab-runner
+        livenessProbe:
+          httpGet:
+            path: /metrics
+            port: 9252
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /metrics
+            port: 9252
+          initialDelaySeconds: 10
+          periodSeconds: 10
+      volumes:
+      - name: config
+        configMap:
+          name: gitlab-runner-config
+      - name: runner-data
+        emptyDir: {}
+      restartPolicy: Always
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gitlab-runner-metrics
+  namespace: gitlab-runner-tenant-2
+  labels:
+    app: gitlab-runner
+    tenant: tenant-2
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9252"
+spec:
+  ports:
+  - name: metrics
+    port: 9252
+    targetPort: 9252
+  selector:
+    app: gitlab-runner
+    tenant: tenant-2
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: gitlab-runner-isolation
+  namespace: gitlab-runner-tenant-2
+spec:
+  podSelector:
+    matchLabels:
+      app: gitlab-runner
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+    ports:
+    - protocol: TCP
+      port: 9252
+  egress:
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 443
+    - protocol: TCP
+      port: 53
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 9443
