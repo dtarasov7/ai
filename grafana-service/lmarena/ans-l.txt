@@ -1,0 +1,126 @@
+﻿Отлично, задача понятна:  
+**Показать в Grafana таблицу сервисов (и серверов), которые должны быть запущены (есть в systemd через node_exporter), но не отдают метрику uptime (т.е. не ответили Prometheus).**
+
+У вас:
+- **Grafana 10**
+- **Prometheus 2.31** (нет функций типа `@`, только стандартный PromQL)
+- **node_exporter** (метрика systemd, например, `node_systemd_unit_state`)
+- **метрика uptime** (например, `myservice_uptime_seconds{service="имя_сервиса"}`)
+
+---
+
+## **Решение**
+
+### 1. **Получить список сервисов, которые должны быть запущены**
+
+Обычно это метрика:
+```
+node_systemd_unit_state{state="active", name=~".*\.service"}
+```
+или, если нужно только те, что должны быть запущены (например, `state="active"` или `substate="running"`):
+
+```promql
+node_systemd_unit_state{state="active", name=~".*\.service"}
+```
+
+**Важно:**  
+- Лейбл сервера обычно называется `instance` или `exported_instance` (зависит от вашей конфигурации Prometheus).
+- Лейбл сервиса — `name`.
+
+### 2. **Получить список сервисов, которые отдают метрику uptime**
+
+Например:
+```
+myservice_uptime_seconds
+```
+с лейблами:
+- `service` — имя сервиса
+- `instance` — сервер
+
+### 3. **Сравнить: кто есть в systemd, но не отдает uptime**
+
+В PromQL можно использовать оператор `unless` для поиска разницы между двумя наборами метрик.
+
+**Но:**  
+- Лейблы должны совпадать по именам и значениям для корректного сравнения.
+
+#### **Приведение лейблов к общему виду**
+
+Если в `node_systemd_unit_state` имя сервиса — это `name`, а в `myservice_uptime_seconds` — `service`, используем `label_replace`:
+
+```promql
+label_replace(
+  node_systemd_unit_state{state="active", name=~".*\.service"},
+  "service", "$1", "name", "(.*)"
+)
+unless
+myservice_uptime_seconds
+```
+
+**Добавьте лейбл instance, если он есть в обеих метриках:**
+
+```promql
+label_replace(
+  node_systemd_unit_state{state="active", name=~".*\.service"},
+  "service", "$1", "name", "(.*)"
+)
+unless
+myservice_uptime_seconds
+```
+
+Если в одной из метрик сервер называется не `instance`, а, например, `exported_instance`, тоже используйте `label_replace` для унификации.
+
+---
+
+### **Итоговый PromQL-запрос**
+
+```promql
+label_replace(
+  node_systemd_unit_state{state="active", name=~".*\.service"},
+  "service", "$1", "name", "(.*)"
+)
+unless
+myservice_uptime_seconds
+```
+
+- Этот запрос вернет time series для сервисов, которые активны в systemd, но не отдают метрику uptime.
+- В результате будут лейблы: `instance` (сервер), `service` (имя сервиса), и другие из node_exporter.
+
+---
+
+### **В Grafana:**
+
+1. **Создайте Table-панель**
+2. **Вставьте этот PromQL-запрос**
+3. **В настройках Table выберите поля для отображения:**  
+   - `instance` (сервер)
+   - `service` (имя сервиса)
+   - (опционально) другие лейблы, например, `state`, `name`
+
+---
+
+## **Пример результата:**
+
+| instance         | service         |
+|------------------|----------------|
+| server1:9100     | nginx.service  |
+| server2:9100     | myapp.service  |
+| ...              | ...            |
+
+---
+
+## **Если лейблы называются по-другому**
+
+- Проверьте, как называются лейблы сервера и сервиса в обеих метриках.
+- Если нужно, скорректируйте `label_replace` для совпадения лейблов.
+
+---
+
+## **Если что-то не работает**
+
+- Покажите реальные имена метрик и лейблов (например, результат запроса в Prometheus), я помогу скорректировать запрос под вашу ситуацию.
+
+---
+
+**Удачи!**  
+Если нужно — могу расписать пример с вашими реальными метриками.
