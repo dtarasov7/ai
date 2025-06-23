@@ -1,0 +1,354 @@
+﻿# Скрипты для резервного копирования и архивации объектов из S3 (на базе Ceph) через rclone
+
+## Описание задачи
+
+Есть:
+- S3-совместимое хранилище на основе **Ceph 17.2.7**
+- Rclone **v1.65.2**
+- Бакеты: `storage-<год><месяц><декада>`, где декада — это 0, 1 или 2 (начало декады: 1, 11, 21 числа)
+- Файловый сервер для хранения резервных копий
+
+### Задача 1: Регулярное резервное копирование
+- Каждые 30 минут:
+  - Копируются изменённые файлы в подкаталог с временной меткой
+  - Обнаруживаются удалённые файлы
+  - Логируется всё в один общий лог
+  - Сохраняются метрики в формате Prometheus
+  - Предотвращается параллельный запуск
+
+### Задача 2: Архивация предыдущего бакета
+- Раз в начале новой декады:
+  - Создаётся полная копия содержимого предыдущего бакета
+  - Логируется выполнение
+  - Сохраняются метрики в формате Prometheus
+  - Работает в щадящем режиме
+
+---
+
+## 📁 Структура каталогов
+
+```
+/backup/
+├── storage-2025040-backup/
+│   ├── 01-00-00/                 # первая копия
+│   ├── 01-00-30-deleted/
+│   ├── metrics.prom
+│   └── backup.log
+├── storage-2025041-backup/
+│   └── ...                       # аналогично
+└── ...
+```
+
+---
+
+## ⚠️ Особенности версий ПО
+
+- **Rclone v1.65.2** поддерживает все современные функции:
+  - `--include` / `--exclude`
+  - `--files-from` / `--use-server-modtime`
+  - `--log-file`, `--verbose`
+  - `--fast-list`
+- **Ceph RGW (S3)**:
+  - Поддерживает List V1/V2
+  - Может работать с `--use-server-modtime` для более точной проверки времени изменения
+
+---
+
+## ✅ Возможные сбои и способы их обработки
+
+| Возможный сбой | Причина | Как обработать |
+|----------------|---------|----------------|
+| Параллельный запуск скрипта | Дублирование операций, конфликты | Использовать lock-файл |
+| Недоступность S3 | Проблемы сети, Ceph не отвечает | Увеличить таймауты, повторные попытки |
+| Переполнение диска | Не хватает места под резервы | Мониторинг свободного места, очистка старых резервов |
+| Ошибки при копировании | Проблемы с конкретными файлами | Логировать ошибки, продолжать работу |
+| Изменение структуры бакета во время копирования | В S3 данные неизменны после записи, но список может меняться | Использовать `--fast-list` и `--checkers=1` для последовательности |
+
+---
+
+# 🔧 Скрипт 1: Регулярное резервное копирование (`backup_s3.sh`)
+
+```bash
+#!/bin/bash
+set -eEuo pipefail
+
+# Конфигурация
+BUCKET_PREFIX="storage"
+BACKUP_ROOT="/backup"
+RCLONE_REMOTE="my-s3"  # имя remote в rclone.conf
+LOG_FILE="$BACKUP_ROOT/current_backup.log"
+PROMETHEUS_METRICS="$BACKUP_ROOT/metrics.prom"
+LOCK_FILE="/var/lock/s3_backup.lock"
+TIME=$(date +"%d-%H-%M")
+DATE_TIME=$(date +"%Y-%m-%d %H:%M:%S")
+START_TIME_EPOCH=$(date +%s)
+LAST_RUN_FILE="/etc/s3-backup/last_run"
+
+# Получаем текущий активный бакет
+CURRENT_YEAR_MONTH_DECAD=$(date +'%Y%m%d' | awk '{decade=int(substr($0,7,2)/10); print substr($0,1,6) decade}')
+
+# Формируем имя текущего бакета и пути
+CURRENT_BACKUP_DIR="$BACKUP_ROOT/storage-${CURRENT_YEAR_MONTH_DECAD}-backup"
+CURRENT_LOG_DIR="$CURRENT_BACKUP_DIR/$TIME"
+DELETED_DIR="$CURRENT_BACKUP_DIR/${TIME}-deleted"
+
+# Проверка блокировки
+if [ -f "$LOCK_FILE" ]; then
+    echo "[$DATE_TIME] Another instance is running. Exiting." >> "$LOG_FILE"
+    exit 1
+fi
+touch "$LOCK_FILE"
+
+trap 'rm -f "$LOCK_FILE"' EXIT
+
+echo "[$DATE_TIME] Backup started" >> "$LOG_FILE"
+
+# Получаем время предыдущего запуска
+PREV_TIME=""
+if [ -f "$LAST_RUN_FILE" ]; then
+    PREV_TIME=$(cat "$LAST_RUN_FILE")
+else
+    # Если первый запуск, то берем всё за последние 24 часа
+    PREV_TIME=$(date -d '24 hours ago' +"%Y-%m-%d %H:%M:%S")
+fi
+
+# Создаём необходимые директории
+mkdir -p "$CURRENT_LOG_DIR" "$DELETED_DIR"
+
+# Запускаем копирование изменённых файлов
+RCLONE_LOG="$CURRENT_LOG_DIR/rclone_$TIME.log"
+RCLONE_OPTS="--use-server-modtime --fast-list --transfers=8 --checkers=8 --log-file=$RCLONE_LOG --verbose"
+
+rclone copy "$RCLONE_REMOTE:$BUCKET_PREFIX-$CURRENT_YEAR_MONTH_DECAD" "$CURRENT_LOG_DIR" \
+    $RCLONE_OPTS \
+    --min-age "$PREV_TIME" \
+    || { COPY_SUCCESS=0; echo "Error during rclone copy"; } || true
+
+# Получаем списки объектов для поиска удалённых
+CURRENT_LIST="$CURRENT_LOG_DIR/current_list.txt"
+PREV_LIST="$CURRENT_LOG_DIR/prev_list.txt"
+DELETED_LIST="$DELETED_DIR/deleted_files.txt"
+
+rclone lsf "$RCLONE_REMOTE:$BUCKET_PREFIX-$CURRENT_YEAR_MONTH_DECAD" --recursive > "$CURRENT_LIST"
+if [ -f "$PREV_LIST" ]; then
+    comm -23 <(sort "$PREV_LIST") <(sort "$CURRENT_LIST") > "$DELETED_LIST"
+    DELETED_COUNT=$(wc -l < "$DELETED_LIST")
+else
+    touch "$PREV_LIST"
+    DELETED_COUNT=0
+fi
+
+# Сохраняем текущий список как предыдущий
+cp "$CURRENT_LIST" "$PREV_LIST"
+
+# Считаем количество скопированных файлов
+COPIED_COUNT=$(grep -c 'Copied' "$RCLONE_LOG" || true)
+TOTAL_SIZE=$(du -sb "$CURRENT_LOG_DIR" | awk '{print $1}' || echo 0)
+
+# Обновляем время последнего запуска
+date +"%Y-%m-%d %H:%M:%S" > "$LAST_RUN_FILE"
+
+# Сбор метрик Prometheus
+{
+    echo "# HELP s3-backup_objects_copied Number of copied objects"
+    echo "# TYPE s3-backup_objects_copied gauge"
+    echo "s3-backup_objects_copied{timestamp=\"$TIME\"} $COPIED_COUNT"
+
+    echo "# HELP s3-backup_objects_deleted Number of deleted objects"
+    echo "# TYPE s3-backup_objects_deleted gauge"
+    echo "s3-backup_objects_deleted{timestamp=\"$TIME\"} $DELETED_COUNT"
+
+    echo "# HELP s3-backup_copy_duration_seconds Duration of copying in seconds"
+    echo "# TYPE s3-backup_copy_duration_seconds gauge"
+    echo "s3-backup_copy_duration_seconds{timestamp=\"$TIME\"} $(($(date +%s) - START_TIME_EPOCH))"
+
+    echo "# HELP s3-backup_total_size_bytes Total size of copied data in bytes"
+    echo "# TYPE s3-backup_total_size_bytes gauge"
+    echo "s3-backup_total_size_bytes{timestamp=\"$TIME\"} $TOTAL_SIZE"
+
+    echo "# HELP s3-backup_success Flag indicating successful backup"
+    echo "# TYPE s3-backup_success gauge"
+    echo "s3-backup_success{timestamp=\"$TIME\"} ${COPY_SUCCESS:-1}"
+
+    # Логируем ошибки
+    ERRORS=$(grep -i 'error' "$RCLONE_LOG" 2>/dev/null | sort | uniq)
+    if [[ -n "$ERRORS" ]]; then
+        while IFS= read -r line; do
+            LABEL=$(echo "$line" | tr -cd '[:alnum:]_' | cut -c1-60)
+            echo "# HELP s3-backup_errors Errors occurred during backup"
+            echo "# TYPE s3-backup_errors counter"
+            echo "s3-backup_errors{error=\"$LABEL\", timestamp=\"$TIME\"} 1"
+        done <<< "$ERRORS"
+    fi
+
+} > "$CURRENT_LOG_DIR/metrics_$TIME.prom"
+
+# Объединяем метрики
+cat "$CURRENT_LOG_DIR/metrics_$TIME.prom" >> "$PROMETHEUS_METRICS"
+
+# Лог успешного завершения
+END_TIME_EPOCH=$(date +%s)
+echo "[$DATE_TIME] Backup finished. Copied: $COPIED_COUNT files, Deleted: $DELETED_COUNT files, Duration: $((END_TIME_EPOCH - START_TIME_EPOCH)) sec" >> "$LOG_FILE"
+```
+
+---
+
+# 🔧 Скрипт 2: Архивация предыдущего бакета (`archive_s3.sh`)
+
+```bash
+#!/bin/bash
+set -eEuo pipefail
+
+# Конфигурация
+BUCKET_PREFIX="storage"
+ARCHIVE_ROOT="/backup"
+RCLONE_REMOTE="my-s3"
+LOG_FILE="$ARCHIVE_ROOT/archive.log"
+PROMETHEUS_METRICS="$ARCHIVE_ROOT/archive_metrics.prom"
+LOCK_FILE="/var/lock/s3_archive.lock"
+TIME=$(date +"%d-%H-%M")
+DATE_TIME=$(date +"%Y-%m-%d %H:%M:%S")
+START_TIME_EPOCH=$(date +%s)
+
+# Проверка блокировки
+if [ -f "$LOCK_FILE" ]; then
+    echo "[$DATE_TIME] Another instance is running. Exiting." >> "$LOG_FILE"
+    exit 1
+fi
+touch "$LOCK_FILE"
+
+trap 'rm -f "$LOCK_FILE"' EXIT
+
+# Вычисляем номер предыдущей декады
+CURRENT_DECAD=$(date +'%Y%m%d' | awk '{decade=int(substr($0,7,2)/10); print substr($0,1,6) decade}')
+CURRENT_YEAR=${CURRENT_DECAD:0:4}
+CURRENT_MONTH=${CURRENT_DECAD:4:2}
+CURRENT_DECAD_NUM=${CURRENT_DECAD:6:1}
+
+# Вычисляем предыдущую декаду
+case "$CURRENT_DECAD_NUM" in
+    0)
+        PREV_DECAD="${CURRENT_YEAR}${CURRENT_MONTH}2"
+        ;;
+    1)
+        PREV_DECAD="${CURRENT_YEAR}${CURRENT_MONTH}0"
+        ;;
+    2)
+        # Переход на следующий месяц
+        NEXT_MONTH=$(date -d 'last day of previous month' +"%Y%m")
+        PREV_DECAD="${NEXT_MONTH}1"
+        ;;
+esac
+
+# Путь к архиву
+ARCHIVE_DIR="$ARCHIVE_ROOT/storage-${PREV_DECAD}-backup"
+mkdir -p "$ARCHIVE_DIR"
+
+echo "[$DATE_TIME] Archiving bucket: $BUCKET_PREFIX-$PREV_DECAD to $ARCHIVE_DIR" >> "$LOG_FILE"
+
+# Настройки rclone для архивации (щадящий режим)
+RCLONE_OPTS="--use-server-modtime --fast-list --transfers=2 --checkers=2 --log-file=$ARCHIVE_DIR/archive_rclone_$TIME.log --verbose"
+
+# Синхронизация
+rclone sync "$RCLONE_REMOTE:$BUCKET_PREFIX-$PREV_DECAD" "$ARCHIVE_DIR" $RCLONE_OPTS || ARCHIVE_SUCCESS=0
+
+# Сбор метрик
+COPIED_COUNT=$(find "$ARCHIVE_DIR" -type f | wc -l)
+DURATION=$(( $(date +%s) - START_TIME_EPOCH ))
+TOTAL_SIZE=$(du -sb "$ARCHIVE_DIR" | awk '{print $1}' || echo 0)
+
+{
+    echo "# HELP s3-archive_objects_copied Number of archived objects"
+    echo "# TYPE s3-archive_objects_copied gauge"
+    echo "s3-archive_objects_copied{timestamp=\"$TIME\"} $COPIED_COUNT"
+
+    echo "# HELP s3-archive_copy_duration_seconds Duration of archiving in seconds"
+    echo "# TYPE s3-archive_copy_duration_seconds gauge"
+    echo "s3-archive_copy_duration_seconds{timestamp=\"$TIME\"} $DURATION"
+
+    echo "# HELP s3-archive_total_size_bytes Total size of archived data in bytes"
+    echo "# TYPE s3-archive_total_size_bytes gauge"
+    echo "s3-archive_total_size_bytes{timestamp=\"$TIME\"} $TOTAL_SIZE"
+
+    echo "# HELP s3-archive_success Flag indicating successful archive"
+    echo "# TYPE s3-archive_success gauge"
+    echo "s3-archive_success{timestamp=\"$TIME\"} ${ARCHIVE_SUCCESS:-1}"
+
+    # Логируем ошибки
+    if [ -f "$ARCHIVE_DIR/archive_rclone_$TIME.log" ]; then
+        ERRORS=$(grep -i 'error' "$ARCHIVE_DIR/archive_rclone_$TIME.log" 2>/dev/null | sort | uniq)
+        if [[ -n "$ERRORS" ]]; then
+            while IFS= read -r line; do
+                LABEL=$(echo "$line" | tr -cd '[:alnum:]_' | cut -c1-60)
+                echo "# HELP s3-archive_errors Errors occurred during archive"
+                echo "# TYPE s3-archive_errors counter"
+                echo "s3-archive_errors{error=\"$LABEL\", timestamp=\"$TIME\"} 1"
+            done <<< "$ERRORS"
+        fi
+    fi
+
+} > "$ARCHIVE_DIR/archive_metrics_$TIME.prom"
+
+cat "$ARCHIVE_DIR/archive_metrics_$TIME.prom" >> "$PROMETHEUS_METRICS"
+
+END_TIME=$(date +"%Y-%m-%d %H:%M:%S")
+echo "[$END_TIME] Archive completed. Objects: $COPIED_COUNT, Size: $TOTAL_SIZE bytes, Duration: $DURATION sec" >> "$LOG_FILE"
+```
+
+---
+
+## 📊 Предложенные дополнительные метрики
+
+Для обоих скриптов можно добавить:
+
+```prometheus
+# HELP s3-backup_last_modified_time Unix timestamp of the last modified file backed up
+# TYPE s3-backup_last_modified_time gauge
+s3-backup_last_modified_time{timestamp="..."} ...
+
+# HELP s3-backup_average_file_size Average size of copied files
+# TYPE s3-backup_average_file_size gauge
+s3-backup_average_file_size{timestamp="..."} ...
+
+# HELP s3-backup_rate_bytes_per_second Transfer rate in bytes per second
+# TYPE s3-backup_rate_bytes_per_second gauge
+s3-backup_rate_bytes_per_second{timestamp="..."} ...
+```
+
+---
+
+## 🛡️ Рекомендации по безопасности
+
+- Все логи должны быть доступны только администраторам
+- Lock-файлы должны иметь строгие права доступа
+- Rclone должен использовать IAM-ключи с минимальными правами
+- Логи и метрики рекомендуется шифровать, если требуется защита данных
+
+---
+
+## 🕒 Cron расписание
+
+### Для регулярного резервного копирования:
+```cron
+0,30 * * * * /path/to/backup_s3.sh
+```
+
+### Для архивации:
+```cron
+0 0 1,11,21 * * /path/to/archive_s3.sh
+```
+
+---
+
+## 📌 Заключение
+
+Оба скрипта реализуют заданные требования:
+- Регулярное резервное копирование с учётом времени изменений
+- Отслеживание удалённых файлов
+- Полный архив предыдущего бакета в начале каждой декады
+- Генерация метрик Prometheus
+- Логирование и защита от параллельного запуска
+
+При необходимости можно интегрировать с Prometheus/Grafana для мониторинга.
+
+Если потребуется — могу подготовить systemd unit-файлы, автоматическую очистку старых бэкапов или интеграцию с alertmanager.

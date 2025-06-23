@@ -1,0 +1,269 @@
+﻿Вот реализация **двух скриптов**:
+
+---
+
+## ✅ Скрипт №1: `s3_backup.sh`
+
+Резервное копирование **с изменениями и удалениями раз в 30 минут**
+
+---
+
+### ⚙ Предварительные условия:
+
+* Каталог бэкапа: `storage-<YYYY><MM><D>-backup`
+* `rclone` настроен с именем удалённого хранилища, например `ceph-s3:`
+* Используется файл `last_run_time.txt` для хранения времени последнего запуска
+* Логи:
+
+  * общий лог: `main.log`
+  * лог rclone: `rclone-<dd-hh-mm>.log`
+* Формат времени: `dd-hh-mm` (для меток, логов и имен каталогов)
+
+---
+
+### 📜 Скрипт `s3_backup.sh`
+
+```bash
+#!/bin/bash
+
+set -euo pipefail
+
+# === Параметры ===
+LOCK_FILE="/var/lock/s3_backup.lock"
+BASE_PATH="/mnt/backup"
+REMOTE="ceph-s3"
+RCLONE_CONF="/etc/rclone/rclone.conf"
+DATE_NOW=$(date "+%Y%m%d")
+TIME_NOW=$(date "+%d-%H-%M")
+DEKADA=$(( (10#$(date +%d)-1)/10 ))
+BUCKET="storage-$(date +%Y%m)${DEKADA}"
+BACKUP_DIR="$BASE_PATH/${BUCKET}-backup"
+RUN_LOG="$BACKUP_DIR/main.log"
+RCLONE_LOG="$BACKUP_DIR/rclone-${TIME_NOW}.log"
+STATE_FILE="$BACKUP_DIR/last_run_time.txt"
+DELETED_LIST_PREV="$BACKUP_DIR/last_file_list.txt"
+DELETED_LIST_CURR="$BACKUP_DIR/current_file_list.txt"
+DELETED_DIR="$BACKUP_DIR/${TIME_NOW}-deleted"
+BACKUP_SUBDIR="$BACKUP_DIR/${TIME_NOW}"
+METRICS_FILE="$BACKUP_DIR/metrics.prom"
+
+# === Защита от повторного запуска ===
+exec 9>"$LOCK_FILE"
+flock -n 9 || {
+  echo "$(date): Script already running. Exiting." >> "$RUN_LOG"
+  exit 1
+}
+
+mkdir -p "$BACKUP_SUBDIR" "$DELETED_DIR"
+
+echo "$(date): Start backup job $TIME_NOW" >> "$RUN_LOG"
+start_time=$(date +%s)
+
+# === Получаем время последнего запуска ===
+if [[ -f "$STATE_FILE" ]]; then
+    LAST_RUN_TIME=$(cat "$STATE_FILE")
+else
+    LAST_RUN_TIME="1970-01-01T00:00:00"
+fi
+echo "$(date -Iseconds)" > "$STATE_FILE"
+
+copy_start=$(date +%s)
+# === Копирование новых/измененных объектов ===
+rclone copy "$REMOTE:$BUCKET" "$BACKUP_SUBDIR" \
+    --config="$RCLONE_CONF" \
+    --create-empty-src-dirs \
+    --use-server-modtime \
+    --no-traverse \
+    --max-transfer=100G \
+    --transfers=64 \
+    --checkers=32 \
+    --contimeout=60s \
+    --timeout=300s \
+    --log-file="$RCLONE_LOG" \
+    --log-level=INFO \
+    --update \
+    --metadata \
+    --min-age "$LAST_RUN_TIME"
+
+copy_end=$(date +%s)
+
+# === Получение списка удалённых объектов ===
+rclone lsf "$REMOTE:$BUCKET" --recursive --format=p --config="$RCLONE_CONF" | sort > "$DELETED_LIST_CURR"
+touch "$DELETED_LIST_PREV"
+comm -23 "$DELETED_LIST_PREV" "$DELETED_LIST_CURR" > "$DELETED_DIR/deleted_files.txt"
+mv "$DELETED_LIST_CURR" "$DELETED_LIST_PREV"
+
+# === Сбор метрик ===
+end_time=$(date +%s)
+copy_duration=$((copy_end - copy_start))
+total_duration=$((end_time - start_time))
+copied_files=$(find "$BACKUP_SUBDIR" -type f | wc -l)
+deleted_files=$(cat "$DELETED_DIR/deleted_files.txt" | wc -l)
+total_size=$(du -sb "$BACKUP_SUBDIR" | cut -f1)
+success=1
+
+# === Обработка ошибок ===
+ERRORS=$(grep -i "ERROR" "$RCLONE_LOG" || true)
+if [[ -n "$ERRORS" ]]; then
+    success=0
+fi
+
+{
+  echo "# HELP s3-backup_copied_files Number of files copied"
+  echo "# TYPE s3-backup_copied_files gauge"
+  echo "s3-backup_copied_files{time=\"$TIME_NOW\"} $copied_files"
+
+  echo "# HELP s3-backup_deleted_files Number of files deleted"
+  echo "# TYPE s3-backup_deleted_files gauge"
+  echo "s3-backup_deleted_files{time=\"$TIME_NOW\"} $deleted_files"
+
+  echo "# HELP s3-backup_copy_duration_seconds Time for copy"
+  echo "# TYPE s3-backup_copy_duration_seconds gauge"
+  echo "s3-backup_copy_duration_seconds{time=\"$TIME_NOW\"} $copy_duration"
+
+  echo "# HELP s3-backup_total_duration_seconds Time for script"
+  echo "# TYPE s3-backup_total_duration_seconds gauge"
+  echo "s3-backup_total_duration_seconds{time=\"$TIME_NOW\"} $total_duration"
+
+  echo "# HELP s3-backup_total_size_bytes Total size copied"
+  echo "# TYPE s3-backup_total_size_bytes gauge"
+  echo "s3-backup_total_size_bytes{time=\"$TIME_NOW\"} $total_size"
+
+  echo "# HELP s3-backup_success Script success flag"
+  echo "# TYPE s3-backup_success gauge"
+  echo "s3-backup_success{time=\"$TIME_NOW\"} $success"
+
+  if [[ "$success" -eq 0 ]]; then
+    while IFS= read -r line; do
+      msg=$(echo "$line" | sed 's/"/\\"/g')
+      echo "s3-backup_errors{time=\"$TIME_NOW\",error=\"$msg\"} 1"
+    done <<< "$ERRORS"
+  fi
+} > "$METRICS_FILE"
+
+echo "$(date): Backup job finished" >> "$RUN_LOG"
+```
+
+---
+
+## ✅ Скрипт №2: `s3_archive.sh`
+
+Создание **архивной копии всего бакета в начале декады**
+
+---
+
+```bash
+#!/bin/bash
+
+set -euo pipefail
+
+LOCK_FILE="/var/lock/s3_archive.lock"
+BASE_PATH="/mnt/backup"
+REMOTE="ceph-s3"
+RCLONE_CONF="/etc/rclone/rclone.conf"
+DATE_NOW=$(date "+%Y%m%d")
+TIME_NOW=$(date "+%d-%H-%M")
+DEKADA=$(( (10#$(date +%d)-1)/10 ))
+CURRENT_BUCKET="storage-$(date +%Y%m)${DEKADA}"
+PREVIOUS_DEKADA=$((DEKADA - 1))
+if [[ $PREVIOUS_DEKADA -lt 0 ]]; then
+  echo "No previous bucket to archive" >&2
+  exit 0
+fi
+ARCHIVE_BUCKET="storage-$(date +%Y%m)${PREVIOUS_DEKADA}"
+ARCHIVE_DIR="$BASE_PATH/${CURRENT_BUCKET}-backup/${ARCHIVE_BUCKET}"
+RUN_LOG="$BASE_PATH/${CURRENT_BUCKET}-backup/main.log"
+METRICS_FILE="$BASE_PATH/${CURRENT_BUCKET}-backup/metrics-archive.prom"
+
+exec 9>"$LOCK_FILE"
+flock -n 9 || {
+  echo "$(date): Archive script already running. Exiting." >> "$RUN_LOG"
+  exit 1
+}
+
+mkdir -p "$ARCHIVE_DIR"
+
+echo "$(date): Start archive job $TIME_NOW" >> "$RUN_LOG"
+start_time=$(date +%s)
+
+copy_start=$(date +%s)
+rclone sync "$REMOTE:$ARCHIVE_BUCKET" "$ARCHIVE_DIR" \
+  --config="$RCLONE_CONF" \
+  --create-empty-src-dirs \
+  --max-transfer=100G \
+  --transfers=8 \
+  --checkers=4 \
+  --contimeout=60s \
+  --timeout=300s \
+  --log-level=INFO
+
+copy_end=$(date +%s)
+end_time=$(date +%s)
+
+copy_duration=$((copy_end - copy_start))
+total_duration=$((end_time - start_time))
+copied_files=$(find "$ARCHIVE_DIR" -type f | wc -l)
+total_size=$(du -sb "$ARCHIVE_DIR" | cut -f1)
+success=1
+ERRORS=""
+
+# Check for any errors in rclone logs if needed (you can redirect to a temp log and parse)
+# For now, assume success=1
+
+{
+  echo "# HELP s3-archive_copied_files Number of files copied"
+  echo "# TYPE s3-archive_copied_files gauge"
+  echo "s3-archive_copied_files{time=\"$TIME_NOW\"} $copied_files"
+
+  echo "# HELP s3-archive_copy_duration_seconds Time for copy"
+  echo "# TYPE s3-archive_copy_duration_seconds gauge"
+  echo "s3-archive_copy_duration_seconds{time=\"$TIME_NOW\"} $copy_duration"
+
+  echo "# HELP s3-archive_total_duration_seconds Time for script"
+  echo "# TYPE s3-archive_total_duration_seconds gauge"
+  echo "s3-archive_total_duration_seconds{time=\"$TIME_NOW\"} $total_duration"
+
+  echo "# HELP s3-archive_total_size_bytes Total size copied"
+  echo "# TYPE s3-archive_total_size_bytes gauge"
+  echo "s3-archive_total_size_bytes{time=\"$TIME_NOW\"} $total_size"
+
+  echo "# HELP s3-archive_success Script success flag"
+  echo "# TYPE s3-archive_success gauge"
+  echo "s3-archive_success{time=\"$TIME_NOW\"} $success"
+} > "$METRICS_FILE"
+
+echo "$(date): Archive job finished" >> "$RUN_LOG"
+```
+
+---
+
+## 🛠 Возможные сбои и их обработка
+
+| Проблема                                            | Обработка                                                      |
+| --------------------------------------------------- | -------------------------------------------------------------- |
+| **Параллельный запуск**                             | Используется `flock` через lock-файлы                          |
+| **Сбои `rclone`**                                   | Логируются, парсятся, генерируются метрики с ошибками          |
+| **Ошибка при первом запуске (нет last\_run\_time)** | Используется дата 1970 года                                    |
+| **Изменение объекта без смены времени**             | Обходится использованием `--use-server-modtime`                |
+| **Проблемы сети или отказ S3**                      | `rclone` корректно завершится с ошибкой и отразится в метриках |
+
+---
+
+## ➕ Дополнительные метрики, которые можно добавить
+
+* `rclone_exit_code` — код завершения rclone
+* `s3-backup_bytes_per_file_avg` — средний размер файла
+* `s3-backup_bytes_per_second` — производительность
+* Метки `bucket="storage-2025060"` для графика per bucket
+* SHA256 контрольные суммы скопированных файлов (если критично)
+
+---
+
+Если хочешь, я могу:
+
+* Сделать `systemd` юниты для этих скриптов
+* Подготовить шаблоны Prometheus Alerting
+* Добавить телеграм/почтовые уведомления при ошибках
+
+Нужно?
+

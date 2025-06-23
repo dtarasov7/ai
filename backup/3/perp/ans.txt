@@ -1,0 +1,458 @@
+﻿```bash
+#!/bin/bash
+# s3_backup_incremental.sh
+# Скрипт инкрементального резервного копирования объектов из Ceph S3 с использованием rclone v1.65.2
+# Алгоритм:
+# - В начале каждой декады создается каталог backup
+# - Каждые 30 минут копируются изменившиеся объекты в подкаталог dd-hh-mm
+# - Определяются удалённые объекты и сохраняются списки в dd-hh-mm-deleted
+# - Ведется общий лог
+# - Формируются метрики Prometheus с префиксом s3-backup
+# - Проверка на одновременный запуск
+
+set -euo pipefail
+
+# --- Настройки ---
+# Конфигурация rclone (remote должен быть настроен в ~/.config/rclone/rclone.conf)
+RCLONE_REMOTE="cephs3"
+# Путь к каталогу backup (будет создан в начале декады)
+BASE_BACKUP_DIR_ROOT="/backup"  # путь на файловом сервере, монтируемый в систему
+LOCKFILE="/var/lock/s3_backup_incremental.lock"
+LOGFILE=""
+METRICS_FILE=""
+LAST_RUN_FILE=""
+PREV_OBJECTS_LIST=""
+CUR_OBJECTS_LIST=""
+DELETED_LIST=""
+START_TS=0
+END_TS=0
+
+# Получение текущей даты и времени для именования
+now_dd_hh_mm() {
+  date +'%d-%H-%M'
+}
+now_ymd() {
+  date +'%Y%m%d'
+}
+now_ymd_decade() {
+  local day=$(date +'%d')
+  local decade=0
+  if (( day >= 21 )); then
+    decade=2
+  elif (( day >= 11 )); then
+    decade=1
+  else
+    decade=0
+  fi
+  echo "$(date +'%Y%m')${decade}"
+}
+
+# Создание каталога backup в начале декады
+prepare_backup_dir() {
+  local bucket_name=$1
+  local backup_dir="${BASE_BACKUP_DIR_ROOT}/${bucket_name}-backup"
+  mkdir -p "$backup_dir"
+  echo "$backup_dir"
+}
+
+# Проверка и установка блокировки
+acquire_lock() {
+  exec 200>"$LOCKFILE"
+  flock -n 200 && return 0 || return 1
+}
+
+release_lock() {
+  flock -u 200
+  rm -f "$LOCKFILE"
+}
+
+# Запись в лог
+log() {
+  echo "[$(date +'%Y-%m-%d %H:%M:%S')] $*"
+  echo "[$(date +'%Y-%m-%d %H:%M:%S')] $*" >> "$LOGFILE"
+}
+
+# Формирование метрик Prometheus
+write_metrics() {
+  local prefix=$1
+  local label=$2
+  local copied_objects=$3
+  local deleted_objects=$4
+  local copy_duration=$5
+  local total_duration=$6
+  local copied_bytes=$7
+  local success_flag=$8
+  shift 8
+  local errors=("$@")
+
+  {
+    echo "# HELP ${prefix}_copied_objects Количество скопированных объектов"
+    echo "# TYPE ${prefix}_copied_objects gauge"
+    echo "${prefix}_copied_objects{run=\"${label}\"} ${copied_objects}"
+
+    echo "# HELP ${prefix}_deleted_objects Количество удалённых объектов"
+    echo "# TYPE ${prefix}_deleted_objects gauge"
+    echo "${prefix}_deleted_objects{run=\"${label}\"} ${deleted_objects}"
+
+    echo "# HELP ${prefix}_copy_duration_seconds Время выполнения копирования в секундах"
+    echo "# TYPE ${prefix}_copy_duration_seconds gauge"
+    echo "${prefix}_copy_duration_seconds{run=\"${label}\"} ${copy_duration}"
+
+    echo "# HELP ${prefix}_total_duration_seconds Общее время работы скрипта в секундах"
+    echo "# TYPE ${prefix}_total_duration_seconds gauge"
+    echo "${prefix}_total_duration_seconds{run=\"${label}\"} ${total_duration}"
+
+    echo "# HELP ${prefix}_copied_bytes_total Общий размер скопированных данных в байтах"
+    echo "# TYPE ${prefix}_copied_bytes_total gauge"
+    echo "${prefix}_copied_bytes_total{run=\"${label}\"} ${copied_bytes}"
+
+    echo "# HELP ${prefix}_success_flag Флаг успешного выполнения (1 - успех, 0 - ошибка)"
+    echo "# TYPE ${prefix}_success_flag gauge"
+    echo "${prefix}_success_flag{run=\"${label}\"} ${success_flag}"
+
+    for err in "${errors[@]}"; do
+      # Экранируем кавычки и спецсимволы в ошибках
+      local err_escaped=$(echo "$err" | sed 's/\\/\\\\/g; s/"/\\"/g')
+      echo "# HELP ${prefix}_error Сообщение об ошибке"
+      echo "# TYPE ${prefix}_error gauge"
+      echo "${prefix}_error{run=\"${label}\",message=\"${err_escaped}\"} 1"
+    done
+  } > "$METRICS_FILE"
+}
+
+# Основная логика
+main() {
+  if ! acquire_lock; then
+    echo "Another instance is running. Exiting."
+    exit 1
+  fi
+
+  START_TS=$(date +%s)
+  local run_label=$(now_dd_hh_mm)
+  local bucket_name=$(now_ymd_decade)
+  local backup_dir=$(prepare_backup_dir "$bucket_name")
+  LOGFILE="${backup_dir}/backup.log"
+  METRICS_FILE="${backup_dir}/metrics_${run_label}.prom"
+  LAST_RUN_FILE="${backup_dir}/last_run_timestamp.txt"
+  PREV_OBJECTS_LIST="${backup_dir}/objects_prev.txt"
+  CUR_OBJECTS_LIST="${backup_dir}/objects_curr.txt"
+  DELETED_LIST="${backup_dir}/${run_label}-deleted.txt"
+
+  log "=== START BACKUP RUN ${run_label} for bucket ${bucket_name} ==="
+
+  # Время предыдущего запуска
+  local last_run_ts=0
+  if [[ -f "$LAST_RUN_FILE" ]]; then
+    last_run_ts=$(cat "$LAST_RUN_FILE")
+  fi
+
+  # Записываем текущее время начала
+  echo "$START_TS" > "$LAST_RUN_FILE"
+
+  local errors=()
+  local copied_objects=0
+  local deleted_objects=0
+  local copied_bytes=0
+  local copy_start copy_end copy_duration total_duration
+
+  # Формируем путь к бакету rclone
+  local rclone_bucket="${RCLONE_REMOTE}:storage-${bucket_name}"
+
+  # --- Получаем список объектов текущего состояния ---
+  log "Listing current objects in bucket..."
+  if ! rclone lsjson --fast-list "$rclone_bucket" > "$CUR_OBJECTS_LIST"; then
+    errors+=("Failed to list current objects")
+  fi
+
+  # --- Определяем изменившиеся объекты с момента last_run_ts ---
+  # rclone copy с --min-age не подходит для точного отбора по времени изменения,
+  # поэтому используем --max-age с отрицательным значением не можем.
+  # Вместо этого используем --filter-from с файлом, но это сложно.
+  # Альтернативно: копируем все объекты, изменившиеся за последние 30 минут (--max-age 30m).
+  # Чтобы избежать пропуска, лучше брать с запасом (например, 40 минут).
+  local max_age="40m"
+  local copy_subdir="${backup_dir}/${run_label}"
+  mkdir -p "$copy_subdir"
+
+  log "Copying changed objects since last run (approximate, max-age=${max_age})..."
+  copy_start=$(date +%s)
+  if ! rclone copy --fast-list --max-age "$max_age" "$rclone_bucket" "$copy_subdir" --log-file="${backup_dir}/rclone_copy_${run_label}.log" --log-level INFO; then
+    errors+=("rclone copy failed")
+  fi
+  copy_end=$(date +%s)
+  copy_duration=$((copy_end - copy_start))
+
+  # Подсчет скопированных объектов и размера
+  copied_objects=$(find "$copy_subdir" -type f | wc -l)
+  copied_bytes=$(du -sb "$copy_subdir" | awk '{print $1}')
+
+  # --- Определение удалённых объектов ---
+  # Сравниваем списки объектов предыдущего и текущего запуска
+  if [[ -f "$PREV_OBJECTS_LIST" ]]; then
+    log "Comparing previous and current object lists to find deletions..."
+    # Извлекаем ключи объектов (имена) из JSON
+    jq -r '.[].Path' "$PREV_OBJECTS_LIST" | sort > "${backup_dir}/prev_keys.txt"
+    jq -r '.[].Path' "$CUR_OBJECTS_LIST" | sort > "${backup_dir}/curr_keys.txt"
+    comm -23 "${backup_dir}/prev_keys.txt" "${backup_dir}/curr_keys.txt" > "$DELETED_LIST"
+    deleted_objects=$(wc -l  "$DELETED_LIST"
+  fi
+
+  # Копируем список текущих объектов в PREV_OBJECTS_LIST для следующего запуска
+  cp "$CUR_OBJECTS_LIST" "$PREV_OBJECTS_LIST"
+
+  END_TS=$(date +%s)
+  total_duration=$((END_TS - START_TS))
+
+  # Записываем метрики
+  local success_flag=1
+  if (( ${#errors[@]} > 0 )); then
+    success_flag=0
+  fi
+
+  write_metrics "s3-backup" "$run_label" "$copied_objects" "$deleted_objects" "$copy_duration" "$total_duration" "$copied_bytes" "$success_flag" "${errors[@]}"
+
+  log "Backup run finished. Copied objects: $copied_objects, Deleted objects: $deleted_objects, Copy duration: ${copy_duration}s, Total duration: ${total_duration}s, Success: $success_flag"
+  if (( success_flag == 0 )); then
+    for e in "${errors[@]}"; do
+      log "ERROR: $e"
+    done
+  fi
+
+  release_lock
+}
+
+main "$@"
+```
+
+---
+
+```bash
+#!/bin/bash
+# s3_archive_full.sh
+# Скрипт полного архивного копирования предыдущего бакета Ceph S3 с использованием rclone sync
+# Запускается в начале каждой декады, работает в щадящем режиме (ограничение по ресурсам)
+# Формирует метрики Prometheus с префиксом s3-archive
+# Ведет общий лог, проверяет одновременный запуск
+
+set -euo pipefail
+
+# --- Настройки ---
+RCLONE_REMOTE="cephs3"
+BASE_BACKUP_DIR_ROOT="/backup"
+LOCKFILE="/var/lock/s3_archive_full.lock"
+LOGFILE=""
+METRICS_FILE=""
+START_TS=0
+END_TS=0
+
+# Получение текущей даты и времени для именования
+now_dd_hh_mm() {
+  date +'%d-%H-%M'
+}
+now_ymd_decade() {
+  local day=$(date +'%d')
+  local decade=0
+  if (( day >= 21 )); then
+    decade=2
+  elif (( day >= 11 )); then
+    decade=1
+  else
+    decade=0
+  fi
+  echo "$(date +'%Y%m')${decade}"
+}
+
+# Определение предыдущего бакета (предыдущая декада)
+prev_ymd_decade() {
+  local day=$(date +'%d')
+  local month=$(date +'%m')
+  local year=$(date +'%Y')
+  local decade=0
+  if (( day >= 21 )); then
+    decade=1
+  elif (( day >= 11 )); then
+    decade=0
+  else
+    # Переход на предыдущий месяц
+    local prev_month=$(date -d "${year}-${month}-01 -1 day" +'%m')
+    local prev_year=$(date -d "${year}-${month}-01 -1 day" +'%Y')
+    # Для упрощения считаем декаду 2 предыдущего месяца
+    echo "${prev_year}${prev_month}2"
+    return
+  fi
+  echo "$(date +'%Y%m')${decade}"
+}
+
+# Создание каталога архива
+prepare_archive_dir() {
+  local bucket_name=$1
+  local archive_dir="${BASE_BACKUP_DIR_ROOT}/${bucket_name}-archive"
+  mkdir -p "$archive_dir"
+  echo "$archive_dir"
+}
+
+# Проверка и установка блокировки
+acquire_lock() {
+  exec 201>"$LOCKFILE"
+  flock -n 201 && return 0 || return 1
+}
+
+release_lock() {
+  flock -u 201
+  rm -f "$LOCKFILE"
+}
+
+# Запись в лог
+log() {
+  echo "[$(date +'%Y-%m-%d %H:%M:%S')] $*"
+  echo "[$(date +'%Y-%m-%d %H:%M:%S')] $*" >> "$LOGFILE"
+}
+
+# Формирование метрик Prometheus
+write_metrics() {
+  local prefix=$1
+  local label=$2
+  local copied_objects=$3
+  local copy_duration=$4
+  local total_duration=$5
+  local copied_bytes=$6
+  local success_flag=$7
+  shift 7
+  local errors=("$@")
+
+  {
+    echo "# HELP ${prefix}_copied_objects Количество скопированных объектов"
+    echo "# TYPE ${prefix}_copied_objects gauge"
+    echo "${prefix}_copied_objects{run=\"${label}\"} ${copied_objects}"
+
+    echo "# HELP ${prefix}_copy_duration_seconds Время выполнения копирования в секундах"
+    echo "# TYPE ${prefix}_copy_duration_seconds gauge"
+    echo "${prefix}_copy_duration_seconds{run=\"${label}\"} ${copy_duration}"
+
+    echo "# HELP ${prefix}_total_duration_seconds Общее время работы скрипта в секундах"
+    echo "# TYPE ${prefix}_total_duration_seconds gauge"
+    echo "${prefix}_total_duration_seconds{run=\"${label}\"} ${total_duration}"
+
+    echo "# HELP ${prefix}_copied_bytes_total Общий размер скопированных данных в байтах"
+    echo "# TYPE ${prefix}_copied_bytes_total gauge"
+    echo "${prefix}_copied_bytes_total{run=\"${label}\"} ${copied_bytes}"
+
+    echo "# HELP ${prefix}_success_flag Флаг успешного выполнения (1 - успех, 0 - ошибка)"
+    echo "# TYPE ${prefix}_success_flag gauge"
+    echo "${prefix}_success_flag{run=\"${label}\"} ${success_flag}"
+
+    for err in "${errors[@]}"; do
+      local err_escaped=$(echo "$err" | sed 's/\\/\\\\/g; s/"/\\"/g')
+      echo "# HELP ${prefix}_error Сообщение об ошибке"
+      echo "# TYPE ${prefix}_error gauge"
+      echo "${prefix}_error{run=\"${label}\",message=\"${err_escaped}\"} 1"
+    done
+  } > "$METRICS_FILE"
+}
+
+main() {
+  if ! acquire_lock; then
+    echo "Another instance is running. Exiting."
+    exit 1
+  fi
+
+  START_TS=$(date +%s)
+  local run_label=$(now_dd_hh_mm)
+  local prev_bucket_name=$(prev_ymd_decade)
+  local archive_dir=$(prepare_archive_dir "$prev_bucket_name")
+  LOGFILE="${archive_dir}/archive.log"
+  METRICS_FILE="${archive_dir}/metrics_${run_label}.prom"
+
+  log "=== START ARCHIVE RUN ${run_label} for bucket ${prev_bucket_name} ==="
+
+  local errors=()
+  local copied_objects=0
+  local copy_start copy_end copy_duration total_duration copied_bytes=0
+
+  local rclone_bucket="${RCLONE_REMOTE}:storage-${prev_bucket_name}"
+
+  # rclone sync с ограничением ресурсов (щадящий режим)
+  # Используем --transfers=4 --checkers=8 для снижения нагрузки
+  copy_start=$(date +%s)
+  if ! rclone sync --fast-list --transfers=4 --checkers=8 "$rclone_bucket" "${archive_dir}/full_sync" --log-file="${archive_dir}/rclone_sync_${run_label}.log" --log-level INFO; then
+    errors+=("rclone sync failed")
+  fi
+  copy_end=$(date +%s)
+  copy_duration=$((copy_end - copy_start))
+
+  copied_objects=$(find "${archive_dir}/full_sync" -type f | wc -l)
+  copied_bytes=$(du -sb "${archive_dir}/full_sync" | awk '{print $1}')
+
+  END_TS=$(date +%s)
+  total_duration=$((END_TS - START_TS))
+
+  local success_flag=1
+  if (( ${#errors[@]} > 0 )); then
+    success_flag=0
+  fi
+
+  write_metrics "s3-archive" "$run_label" "$copied_objects" "$copy_duration" "$total_duration" "$copied_bytes" "$success_flag" "${errors[@]}"
+
+  log "Archive run finished. Copied objects: $copied_objects, Copy duration: ${copy_duration}s, Total duration: ${total_duration}s, Success: $success_flag"
+  if (( success_flag == 0 )); then
+    for e in "${errors[@]}"; do
+      log "ERROR: $e"
+    done
+  fi
+
+  release_lock
+}
+
+main "$@"
+```
+
+---
+
+## Анализ возможных сбоев и рекомендации по обработке
+
+1. **Параллельный запуск скрипта**  
+   Решено с помощью блокировок (`flock`), чтобы исключить одновременный запуск.
+
+2. **Сбои в работе rclone (сеть, авторизация, ошибки API)**  
+   - Логируются ошибки, формируются метрики с ошибками.  
+   - Рекомендуется настроить повторные попытки запуска скрипта по cron с проверкой успешности предыдущего запуска.
+
+3. **Погрешность отбора изменённых объектов по времени**  
+   - Используется `--max-age 40m` для копирования изменённых объектов за последние 40 минут, чтобы избежать пропуска из-за задержек.  
+   - Можно увеличить интервал перекрытия, но это увеличит объем данных.
+
+4. **Большой объем объектов и потребление памяти**  
+   - Используется `--fast-list` для ускорения операций, но требует памяти (~1КБ на объект).  
+   - При очень большом количестве объектов можно отключить `--fast-list` или разбить копирование на части.
+
+5. **Синхронизация удалённых объектов**  
+   - Определяется путем сравнения списков объектов с помощью `jq` и `comm`.  
+   - Возможны ошибки при повреждении списков — рекомендуется проверять целостность.
+
+6. **Ротация логов**  
+   - Логи пишутся в один файл на каталог с ротацией средствами ОС (например, logrotate).
+
+7. **Щадящий режим архива**  
+   - Для архива используется ограничение `--transfers=4 --checkers=8` для снижения нагрузки.
+
+---
+
+## Дополнительные полезные метрики (опционально)
+
+- Количество попыток повторного копирования объектов (retry count).  
+- Средняя скорость копирования (байт/сек).  
+- Количество ошибок по типам (например, сетевые, авторизации).  
+- Время ожидания блокировки (если скрипт ждал запуска).
+
+---
+
+Данные скрипты и рекомендации учитывают специфику rclone v1.65.2 и Ceph 17.2.7, обеспечивают инкрементальный и полный бэкап с метриками и логированием.
+
+[1] https://rclone.org/s3/
+[2] https://forum.rclone.org/t/how-to-copy-all-ceph-s3-buckets-to-a-standard-fs/27052
+[3] https://www.reddit.com/r/ceph/comments/1etxxes/backing_up_ceph_rgw_data/
+[4] https://openmetal.io/docs/manuals/tutorials/backup-vm-data-to-ceph-with-swift-s3api
+[5] https://clouddocs.web.cern.ch/object_store/backup.html
+[6] https://www.youtube.com/watch?v=L9O9bDIvx28
+[7] https://rci.stonybrook.edu/hpc/faqs/using-rclone-to-backup-data
+[8] https://www.reddit.com/r/ceph/comments/191xbkt/backup_rbd_cephfs_and_rgw_to_s3/

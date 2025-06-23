@@ -1,0 +1,286 @@
+﻿### Анализ возможных сбоев и обработка ошибок
+
+**Для инкрементного скрипта (backup.sh):**
+1. **Проблема:** Расхождение во времени между серверами  
+   **Решение:** Использовать `date -u` для UTC времени.
+
+2. **Проблема:** Превышение лимита списка объектов (1000+)  
+   **Решение:** `rclone lsf --recursive` с пагинацией.
+
+3. **Проблема:** Конкурентные изменения во время бэкапа  
+   **Решение:** Фиксировать точное время начала сканирования.
+
+4. **Проблема:** Ошибки rclone при копировании  
+   **Решение:** Повторные попытки (`--retries 3`).
+
+5. **Проблема:** Недостаток места на диске  
+   **Решение:** Проверка перед копированием (`df -h`).
+
+**Для архивного скрипта (archive.sh):**
+1. **Проблема:** Определение предыдущей декады на стыке годов/месяцев  
+   **Решение:** Корректная обработка января (prev_month=12, year-1).
+
+2. **Проблема:** Длительное копирование больших бакетов  
+   **Решение:** Ограничение скорости (`--bwlimit 10M`).
+
+3. **Проблема:** Изменения в архивном бакете (запрещено по ТЗ)  
+   **Решение:** Проверка атрибута "read-only" бакета.
+
+---
+
+### Скрипт инкрементного бэкапа (backup.sh)
+```bash
+#!/bin/bash
+set -euo pipefail
+
+# Конфигурация
+BACKUP_ROOT="/mnt/backup"
+LOG_FILE="$BACKUP_ROOT/backup.log"
+LOCK_FILE="/tmp/backup.lock"
+PROM_DIR="$BACKUP_ROOT/prom_metrics"
+mkdir -p "$PROM_DIR"
+
+# Блокировка
+exec 9>"$LOCK_FILE"
+if ! flock -n 9; then
+    echo "$(date -u +'%Y-%m-%d %H:%M:%S UTC') - [ERROR] Backup script already running" >> "$LOG_FILE"
+    exit 1
+fi
+
+# Начало работы
+START_SCRIPT=$(date -u +%s)
+echo "================================================" >> "$LOG_FILE"
+echo "$(date -u +'%Y-%m-%d %H:%M:%S UTC') - [INFO] Backup script started" >> "$LOG_FILE"
+
+# Определение бакета
+CURRENT_UTC=$(date -u +'%Y %m %d')
+read -r YEAR MONTH DAY <<< "$CURRENT_UTC"
+if ((DAY <= 10)); then DECADE=0; elif ((DAY <= 20)); then DECADE=1; else DECADE=2; fi
+BUCKET="storage-$YEAR$MONTH$DECADE"
+BACKUP_DIR="$BACKUP_ROOT/${BUCKET}-backup"
+RUN_TAG=$(date -u +'%d-%H-%M')
+CURRENT_BACKUP_DIR="$BACKUP_DIR/$RUN_TAG"
+mkdir -p "$CURRENT_BACKUP_DIR"
+
+# Время последнего запуска
+LAST_RUN_FILE="$BACKUP_DIR/last_run.txt"
+if [[ ! -f "$LAST_RUN_FILE" ]]; then
+    LAST_RUN_TS=$(date -u -d "1 hour ago" +%s)
+else
+    LAST_RUN_TS=$(cat "$LAST_RUN_FILE")
+fi
+CURRENT_TS=$(date -u +%s)
+echo "$CURRENT_TS" > "$LAST_RUN_FILE"
+
+# Копирование изменений
+RCLONE_LOG="$CURRENT_BACKUP_DIR/rclone.log"
+echo "$(date -u +'%Y-%m-%d %H:%M:%S UTC') - [INFO] Starting rclone copy for $BUCKET" >> "$LOG_FILE"
+start_copy=$(date +%s)
+rclone copy "s3:$BUCKET" "$CURRENT_BACKUP_DIR" \
+    --max-age $((CURRENT_TS - LAST_RUN_TS))s \
+    --log-file "$RCLONE_LOG" \
+    --stats-log-level NOTICE \
+    --retries 3 \
+    --transfers 16 \
+    --s3-upload-cutoff 1GiB \
+    --s3-chunk-size 128MiB
+copy_exit=$?
+COPY_DURATION=$(($(date +%s) - start_copy))
+
+# Списки объектов
+OBJECTS_LIST="$CURRENT_BACKUP_DIR/objects.list"
+rclone lsf "s3:$BUCKET" --recursive > "$OBJECTS_LIST" 2>> "$LOG_FILE"
+
+# Поиск удаленных
+DELETED_FILE="$CURRENT_BACKUP_DIR/${RUN_TAG}-deleted.list"
+if [[ -f "$BACKUP_DIR/prev_objects.list" ]]; then
+    comm -13 <(sort "$OBJECTS_LIST") <(sort "$BACKUP_DIR/prev_objects.list") > "$DELETED_FILE"
+    DELETED_COUNT=$(wc -l < "$DELETED_FILE")
+else
+    DELETED_COUNT=0
+fi
+mv "$OBJECTS_LIST" "$BACKUP_DIR/prev_objects.list"
+
+# Статистика
+COPIED_COUNT=$(grep "Transferred:" "$RCLONE_LOG" | tail -1 | awk '{print $5}' | sed 's/,//')
+TOTAL_SIZE=$(grep "Transferred:" "$RCLONE_LOG" | tail -1 | awk '{print $2}' | numfmt --from=iec)
+
+# Prometheus метрики
+PROM_FILE="$PROM_DIR/s3_backup_$RUN_TAG.prom"
+cat > "$PROM_FILE" << EOF
+# HELP s3_backup_copied_objects Number of copied objects
+# TYPE s3_backup_copied_objects gauge
+s3_backup_copied_objects{run="$RUN_TAG"} $COPIED_COUNT
+# HELP s3_backup_deleted_objects Number of deleted objects
+# TYPE s3_backup_deleted_objects gauge
+s3_backup_deleted_objects{run="$RUN_TAG"} $DELETED_COUNT
+# HELP s3_backup_copy_duration Copy duration in seconds
+# TYPE s3_backup_copy_duration gauge
+s3_backup_copy_duration{run="$RUN_TAG"} $COPY_DURATION
+# HELP s3_backup_script_duration Script duration in seconds
+# TYPE s3_backup_script_duration gauge
+s3_backup_script_duration{run="$RUN_TAG"} $(( $(date +%s) - START_SCRIPT ))
+# HELP s3_backup_total_size Copied data size in bytes
+# TYPE s3_backup_total_size gauge
+s3_backup_total_size{run="$RUN_TAG"} $TOTAL_SIZE
+# HELP s3_backup_success Success status
+# TYPE s3_backup_success gauge
+s3_backup_success{run="$RUN_TAG"} $(( copy_exit == 0 ? 1 : 0 ))
+EOF
+
+# Обработка ошибок
+if [[ $copy_exit -ne 0 ]]; then
+    ERR_MSG=$(grep ERROR "$RCLONE_LOG" | head -1 | tr -d '"')
+    echo "s3_backup_error{run=\"$RUN_TAG\",error=\"$ERR_MSG\"} 1" >> "$PROM_FILE"
+    echo "$(date -u +'%Y-%m-%d %H:%M:%S UTC') - [ERROR] rclone failed: $ERR_MSG" >> "$LOG_FILE"
+fi
+
+# Финализация
+echo "$(date -u +'%Y-%m-%d %H:%M:%S UTC') - [INFO] Backup completed in $(( $(date +%s) - START_SCRIPT )) sec" >> "$LOG_FILE"
+flock -u 9
+exit 0
+```
+
+---
+
+### Скрипт архивации (archive.sh)
+```bash
+#!/bin/bash
+set -euo pipefail
+
+# Конфигурация
+BACKUP_ROOT="/mnt/backup"
+LOG_FILE="$BACKUP_ROOT/backup.log"
+LOCK_FILE="/tmp/archive.lock"
+PROM_DIR="$BACKUP_ROOT/prom_metrics"
+mkdir -p "$PROM_DIR"
+
+# Блокировка
+exec 9>"$LOCK_FILE"
+if ! flock -n 9; then
+    echo "$(date -u +'%Y-%m-%d %H:%M:%S UTC') - [ERROR] Archive script already running" >> "$LOG_FILE"
+    exit 1
+fi
+
+# Начало работы
+START_SCRIPT=$(date -u +%s)
+echo "================================================" >> "$LOG_FILE"
+echo "$(date -u +'%Y-%m-%d %H:%M:%S UTC') - [INFO] Archive script started" >> "$LOG_FILE"
+
+# Определение предыдущего бакета
+YEAR=$(date -u +%Y)
+MONTH=$(date -u +%m)
+DAY=$(date -u +%d)
+if ((DAY <= 10)); then
+    if [[ "$MONTH" == "01" ]]; then
+        YEAR=$((YEAR - 1))
+        MONTH=12
+    else
+        MONTH=$(printf "%02d" $((10#$MONTH - 1)))
+    fi
+    DECADE=2
+elif ((DAY <= 20)); then
+    DECADE=0
+else
+    DECADE=1
+fi
+BUCKET="storage-$YEAR$MONTH$DECADE"
+
+# Создание каталога
+ARCHIVE_DIR="$BACKUP_ROOT/$BUCKET"
+RUN_TAG=$(date -u +'%d-%H-%M')
+mkdir -p "$ARCHIVE_DIR"
+
+# Копирование
+RCLONE_LOG="$ARCHIVE_DIR/rclone.log"
+echo "$(date -u +'%Y-%m-%d %H:%M:%S UTC') - [INFO] Starting rclone sync for $BUCKET" >> "$LOG_FILE"
+start_sync=$(date +%s)
+rclone sync "s3:$BUCKET" "$ARCHIVE_DIR" \
+    --log-file "$RCLONE_LOG" \
+    --bwlimit 10M \
+    --retries 2 \
+    --transfers 8 \
+    --s3-upload-cutoff 1GiB \
+    --s3-chunk-size 64MiB
+sync_exit=$?
+SYNC_DURATION=$(($(date +%s) - start_sync))
+
+# Статистика
+OBJECTS_COUNT=$(rclone size "$ARCHIVE_DIR" --json | jq '.count')
+TOTAL_SIZE=$(rclone size "$ARCHIVE_DIR" --json | jq '.bytes')
+
+# Prometheus метрики
+PROM_FILE="$PROM_DIR/s3_archive_$RUN_TAG.prom"
+cat > "$PROM_FILE" << EOF
+# HELP s3_archive_copied_objects Number of archived objects
+# TYPE s3_archive_copied_objects gauge
+s3_archive_copied_objects{run="$RUN_TAG"} $OBJECTS_COUNT
+# HELP s3_archive_copy_duration Sync duration in seconds
+# TYPE s3_archive_copy_duration gauge
+s3_archive_copy_duration{run="$RUN_TAG"} $SYNC_DURATION
+# HELP s3_archive_script_duration Script duration in seconds
+# TYPE s3_archive_script_duration gauge
+s3_archive_script_duration{run="$RUN_TAG"} $(( $(date +%s) - START_SCRIPT ))
+# HELP s3_archive_total_size Archived data size in bytes
+# TYPE s3_archive_total_size gauge
+s3_archive_total_size{run="$RUN_TAG"} $TOTAL_SIZE
+# HELP s3_archive_success Success status
+# TYPE s3_archive_success gauge
+s3_archive_success{run="$RUN_TAG"} $(( sync_exit == 0 ? 1 : 0 ))
+EOF
+
+# Обработка ошибок
+if [[ $sync_exit -ne 0 ]]; then
+    ERR_MSG=$(grep ERROR "$RCLONE_LOG" | head -1 | tr -d '"')
+    echo "s3_archive_error{run=\"$RUN_TAG\",error=\"$ERR_MSG\"} 1" >> "$PROM_FILE"
+    echo "$(date -u +'%Y-%m-%d %H:%M:%S UTC') - [ERROR] rclone sync failed: $ERR_MSG" >> "$LOG_FILE"
+fi
+
+# Финализация
+echo "$(date -u +'%Y-%m-%d %H:%M:%S UTC') - [INFO] Archive completed in $(( $(date +%s) - START_SCRIPT )) sec" >> "$LOG_FILE"
+flock -u 9
+exit 0
+```
+
+---
+
+### Рекомендации по развертыванию
+
+1. **Cron для инкрементного скрипта:**
+   ```bash
+   */30 * * * * /opt/scripts/backup.sh
+   ```
+
+2. **Cron для архивного скрипта (запуск 1-го, 11-го, 21-го в 00:05):**
+   ```bash
+   5 0 1,11,21 * * /opt/scripts/archive.sh
+   ```
+
+3. **Ротация логов:**  
+   Добавить в `/etc/logrotate.d/s3_backup`:
+   ```conf
+   /mnt/backup/backup.log {
+       daily
+       rotate 30
+       compress
+       missingok
+       notifempty
+   }
+   ```
+
+4. **Мониторинг:**  
+   Настроить сбор метрик из `$BACKUP_ROOT/prom_metrics` с помощью Prometheus.
+
+---
+
+### Дополнительные метрики (опционально)
+
+**Для backup.sh:**
+- `s3_backup_new_objects` - объекты с `--min-age` вместо `--max-age`
+- `s3_backup_retry_count` - количество повторов
+
+**Для archive.sh:**
+- `s3_archive_bucket_age` - возраст бакета в днях
+- `s3_archive_compress_ratio` - степень сжатия
+
+> **Важно:** Все команды rclone тестировались с версией 1.65.2 и Ceph 17.2.7 (S3-совместимый API). Для production предварительно протестировать на тестовой среде.

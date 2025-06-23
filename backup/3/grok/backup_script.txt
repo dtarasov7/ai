@@ -1,0 +1,164 @@
+#!/bin/bash
+
+# Скрипт резервного копирования для S3-хранилища на базе Ceph 17.2.7 с использованием rclone v1.65.2
+
+# Конфигурация
+remote="s3backup"  # Имя rclone-ремота (настроен с bucket="")
+log_file="/var/log/backup_script.log"
+pid_file="/var/run/backup_script.pid"
+metrics_dir="/var/log/prometheus"  # Каталог для метрик Prometheus
+
+# Функция логирования
+log() {
+  echo "$(date +'%Y-%m-%d %H:%M:%S') - $1" >> "$log_file"
+}
+
+# Проверка на запуск второго экземпляра
+if [ -f "$pid_file" ] && kill -0 $(cat "$pid_file") 2>/dev/null; then
+  log "Другой экземпляр уже запущен. Выход."
+  exit 1
+fi
+echo $$ > "$pid_file"
+
+log "Запуск скрипта резервного копирования"
+
+# Определение текущей даты иස
+
+year=$(date +%Y)
+month=$(date +%m)
+day=$(date +%d)
+hour=$(date +%H)
+minute=$(date +%M)
+second=$(date +%S)
+
+# Вычисление декады (0 для 1-10, 1 для 11-20, 2 для 21-31)
+if [ $day -le 10 ]; then
+  decade=0
+elif [ $day -le 20 ]; then
+  decade=1
+else
+  decade=2
+fi
+
+current_bucket="storage-${year}${month}${decade}"
+backup_dir_base="storage-${year}${month}${decade}-backup"
+
+# Создание базового каталога для резервных копий, если не существует
+mkdir -p "$backup_dir_base"
+
+dd_hh_mm=$(printf "%02d-%02d-%02d" $day $hour $minute)
+backup_subdir="$backup_dir_base/$dd_hh_mm"
+mkdir -p "$backup_subdir"
+
+# Чтение времени последнего успешного резервного копирования
+last_backup_time_file="$backup_dir_base/last_backup_time.txt"
+if [ -f "$last_backup_time_file" ]; then
+  last_backup_time=$(cat "$last_backup_time_file")
+else
+  last_backup_time="1970-01-01T00:00:00Z"
+fi
+
+# Получение списка текущих объектов
+current_list_file="/tmp/current_list_$$.json"
+retry=3
+for i in $(seq 1 $retry); do
+  rclone lsjson "${remote}:${current_bucket}" > "$current_list_file" 2>> "$log_file"
+  if [ $? -eq 0 ]; then
+    break
+  fi
+  if [ $i -eq $retry ]; then
+    log "Ошибка выполнения rclone lsjson после $retry попыток"
+    rm -f "$pid_file"
+    exit 1
+  fi
+  sleep 5
+done
+
+# Получение списка объектов из предыдущего запуска
+previous_list_file="$backup_dir_base/previous_list.json"
+if [ -f "$previous_list_file" ]; then
+  previous_keys=$(jq -r '.[].Path' "$previous_list_file" | sort)
+else
+  previous_keys=""
+fi
+
+current_keys=$(jq -r '.[].Path' "$current_list_file" | sort)
+
+# Определение удалённых объектов
+deleted_keys=$(comm -23 <(echo "$previous_keys") <(echo "$current_keys"))
+if [ -n "$deleted_keys" ]; then
+  echo "$deleted_keys" > "$backup_dir_base/$dd_hh_mm-deleted.txt"
+fi
+
+# Получение списка изменённых объектов
+changed_objects=$(jq -r '[.[] | select(.ModTime > "'$last_backup_time'") | .Path] | .[]' "$current_list_file")
+num_copied_objects=$(echo "$changed_objects" | wc -l)
+
+# Копирование изменённых объектов
+log_file_rclone="$backup_dir_base/rclone_log_$dd_hh_mm.log"
+copy_time=0
+total_transferred=0
+success=1
+if [ -n "$changed_objects" ]; then
+  filters=("--filter" "- *")
+  for path in $changed_objects; do
+    filters+=("--filter" "+ $path")
+  done
+  start_copy=$(date +%s)
+  rclone copy "${remote}:${current_bucket}/" "$backup_subdir/" "${filters[@]}" --stats 1s --transfers 32 --checkers 8 --multi-thread-streams 4 > "$log_file_rclone" 2>&1
+  if [ $? -ne 0 ]; then
+    log "Ошибка выполнения rclone copy"
+    success=0
+  else
+    end_copy=$(date +%s)
+    copy_time=$((end_copy - start_copy))
+    total_transferred=$(grep "Transferred" "$log_file_rclone" | awk '{print $2}' | head -1)
+    [ -z "$total_transferred" ] && total_transferred=0
+  fi
+else
+  log "Нет изменённых объектов для копирования"
+fi
+
+# Сохранение текущего списка для следующего запуска
+cp "$current_list_file" "$previous_list_file"
+
+# Сохранение времени текущего запуска
+current_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+echo "$current_time" > "$last_backup_time_file"
+
+# Генерация метрик Prometheus
+mkdir -p "$metrics_dir"
+metrics_file="$metrics_dir/backup_metrics_$dd_hh_mm.prom"
+echo "# HELP s3_backup_copied_objects Количество скопированных объектов" > "$metrics_file"
+echo "# TYPE s3_backup_copied_objects gauge" >> "$metrics_file"
+echo "s3_backup_copied_objects{dd_hh_mm=\"$dd_hh_mm\"} $num_copied_objects" >> "$metrics_file"
+
+echo "# HELP s3_backup_deleted_objects Количество удалённых объектов" >> "$metrics_file"
+echo "# TYPE s3_backup_deleted_objects gauge" >> "$metrics_file"
+echo "s3_backup_deleted_objects{dd_hh_mm=\"$dd_hh_mm\"} $(echo "$deleted_keys" | wc -l)" >> "$metrics_file"
+
+echo "# HELP s3_backup_copy_duration_seconds Время копирования в секундах" >> "$metrics_file"
+echo "# TYPE s3_backup_copy_duration_seconds gauge" >> "$metrics_file"
+echo "s3_backup_copy_duration_seconds{dd_hh_mm=\"$dd_hh_mm\"} $copy_time" >> "$metrics_file"
+
+start_script=$(date +%s)
+end_script=$(date +%s)
+script_time=$((end_script - start_script))
+
+echo "# HELP s3_backup_script_duration_seconds Общее время выполнения скрипта в секундах" >> "$metrics_file"
+echo "# TYPE s3_backup_script_duration_seconds gauge" >> "$metrics_file"
+echo "s3_backup_script_duration_seconds{dd_hh_mm=\"$dd_hh_mm\"} $script_time" >> "$metrics_file"
+
+echo "# HELP s3_backup_total_transferred_bytes Общий объём переданных данных в байтах" >> "$metrics_file"
+echo "# TYPE s3_backup_total_transferred_bytes gauge" >> "$metrics_file"
+echo "s3_backup_total_transferred_bytes{dd_hh_mm=\"$dd_hh_mm\"} $total_transferred" >> "$metrics_file"
+
+echo "# HELP s3_backup_success Флаг успешного выполнения" >> "$metrics_file"
+echo "# TYPE s3_backup_success gauge" >> "$metrics_file"
+echo "s3_backup_success{dd_hh_mm=\"$dd_hh_mm\"} $success" >> "$metrics_file"
+
+# Очистка
+rm -f "$current_list_file"
+rm -f "$pid_file"
+
+log "Скрипт резервного копирования завершён"
