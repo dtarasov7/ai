@@ -1,0 +1,473 @@
+﻿Отличная задача! Алгоритм хорошо продуман. Давайте реализуем его в виде двух скриптов, добавим анализ и учтем все ваши требования.
+
+### Анализ алгоритма и возможные сбои
+
+Прежде чем перейти к скриптам, рассмотрим потенциальные проблемы и пути их решения:
+
+1.  **Длительное выполнение скрипта инкрементального бэкапа:**
+    *   **Проблема:** Если за 30 минут (интервал cron) скрипт не успевает завершиться, запустится второй экземпляр.
+    *   **Решение:** Вы правильно предусмотрели проверку на запуск второго экземпляра (lock-файл). Это обязательное условие. Если скрипт регулярно выполняется дольше 30 минут, стоит увеличить интервал в cron или оптимизировать производительность `rclone`.
+
+2.  **Определение удаленных объектов:**
+    *   **Проблема:** Сравнение полных списков объектов (`rclone lsf`) для бакетов с миллионами и миллиардами объектов может быть очень долгим и ресурсоемким (нагрузка на S3 API и на файловый сервер).
+    *   **Решение:**
+        *   В предложенном решении мы используем `rclone lsf -R`, что является самым быстрым способом получения списка.
+        *   Если производительность станет проблемой, можно рассмотреть альтернативы, хотя они сложнее в реализации:
+            *   Использовать Ceph RGW Server-Side Logging для получения логов операций (включая удаления) и их парсинг. Это самый надежный, но и самый сложный способ.
+            *   Увеличить интервал проверки удалений (например, раз в день), чтобы снизить нагрузку.
+
+3.  **Точность времени (`--min-age`):**
+    *   **Проблема:** Корректная работа флага `--min-age` зависит от синхронизации времени между сервером, где запускается скрипт, и узлами Ceph. Расхождение в несколько секунд может привести к пропуску объектов.
+    *   **Решение:** Убедитесь, что на всех серверах настроен и работает NTP-клиент. В качестве "страховки" можно при первом запуске скрипта для новой декады не использовать `--min-age`, а копировать все объекты, чтобы гарантированно ничего не упустить. Но так как предыдущий бакет неизменяемый, это не требуется. Для текущего бакета это может быть полезно. Я добавлю в скрипт небольшую "перехлест" по времени на 1 минуту (`--min-age` будет использовать время_прошлого_запуска - 60 секунд), чтобы компенсировать возможные задержки.
+
+4.  **Атомарность операций:**
+    *   **Проблема:** Скрипт может упасть после копирования, но до обновления файла с последним временем запуска. В этом случае при следующем запуске он заново скопирует те же файлы.
+    *   **Решение:** Это не критично, так как `rclone copy` перезапишет файлы. Это приведет к избыточной работе, но не к потере данных. Сохранение состояния (время, список объектов) в самом конце работы скрипта — правильная стратегия.
+
+---
+
+### Скрипт 1: Инкрементальное резервное копирование (раз в 30 минут)
+
+Этот скрипт выполняет основную работу по бэкапу изменяющихся данных.
+
+**`s3_incremental_backup.sh`**
+
+```bash
+#!/bin/bash
+set -eo pipefail # Выход при любой ошибке
+
+# --- НАСТРОЙКИ ---
+# Имя rclone-конфигурации для вашего S3
+S3_REMOTE="mycephs3"
+
+# Корневой каталог для бэкапов на файловом сервере
+BASE_BACKUP_DIR="/mnt/backup/s3"
+
+# Лок-файл для предотвращения параллельного запуска
+LOCK_FILE="/var/run/s3_incremental_backup.lock"
+
+# --- КОНЕЦ НАСТРОЕК ---
+
+# Функция логирования с временными метками
+log_message() {
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1"
+}
+
+# --- Проверка на запуск второго экземпляра ---
+exec 200>$LOCK_FILE
+flock -n 200 || { log_message "ERROR: Script is already running. Exiting."; exit 1; }
+# Лок будет снят автоматически при завершении скрипта
+
+# --- Начало работы ---
+SCRIPT_START_TIME=$SECONDS
+RUN_ID=$(date '+%d-%H-%M')
+
+log_message "--- Starting incremental backup run ID: ${RUN_ID} ---"
+
+# 1. Определение текущего бакета и каталога для бэкапа
+YEAR=$(date '+%Y')
+MONTH=$(date '+%m')
+DAY=$(date '+%d')
+
+if (( 10#${DAY} >= 21 )); then
+    DECADE=2
+elif (( 10#${DAY} >= 11 )); then
+    DECADE=1
+else
+    DECADE=0
+fi
+
+CURRENT_BUCKET="storage-${YEAR}${MONTH}${DECADE}"
+BACKUP_DIR="${BASE_BACKUP_DIR}/${CURRENT_BUCKET}-backup"
+
+# Создаем основной каталог бэкапа и подкаталоги, если их нет
+mkdir -p "${BACKUP_DIR}"
+
+# Общий лог-файл (ротируется внешними средствами)
+LOG_FILE="${BACKUP_DIR}/backup.log"
+exec >> "${LOG_FILE}" 2>&1 # Перенаправляем stdout и stderr в лог
+
+# Файл с метриками Prometheus
+METRICS_FILE="${BACKUP_DIR}/metrics.prom"
+
+# Файл состояния - хранит время последнего успешного запуска
+STATE_FILE="${BACKUP_DIR}/.last_run_timestamp"
+
+# Поддиректория для этой сессии бэкапа
+RUN_DIR="${BACKUP_DIR}/${RUN_ID}"
+mkdir -p "${RUN_DIR}"
+log_message "Current S3 bucket: ${CURRENT_BUCKET}"
+log_message "Backup directory: ${RUN_DIR}"
+
+# Инициализация переменных для метрик
+SUCCESS_FLAG=0
+COPIED_OBJECTS=0
+COPIED_BYTES=0
+DELETED_OBJECTS=0
+COPY_DURATION=0
+ERROR_MESSAGES=()
+
+# 2. Определение удаленных объектов
+log_message "Detecting deleted objects..."
+PREVIOUS_LIST_FILE="${BACKUP_DIR}/.previous_full_list.txt"
+CURRENT_LIST_FILE="${BACKUP_DIR}/.current_full_list.txt"
+DELETED_LIST_FILE="${RUN_DIR}/${RUN_ID}-deleted.txt"
+
+SOURCE_PATH="${S3_REMOTE}:${CURRENT_BUCKET}"
+
+# Получаем текущий список объектов
+log_message "Fetching current object list from ${SOURCE_PATH}"
+rclone lsf -R "${SOURCE_PATH}" | sort > "${CURRENT_LIST_FILE}"
+
+if [[ -f "${PREVIOUS_LIST_FILE}" ]]; then
+    log_message "Comparing with previous object list to find deletions."
+    # comm -23 <(sort FILE1) <(sort FILE2) - показывает строки, которые есть в FILE1, но нет в FILE2
+    comm -23 "${PREVIOUS_LIST_FILE}" "${CURRENT_LIST_FILE}" > "${DELETED_LIST_FILE}"
+    DELETED_OBJECTS=$(wc -l < "${DELETED_LIST_FILE}")
+    log_message "Detected ${DELETED_OBJECTS} deleted objects. List saved to ${DELETED_LIST_FILE}"
+else
+    log_message "Previous object list not found. Skipping deletion check for the first run."
+    DELETED_OBJECTS=0
+fi
+
+# 3. Копирование новых/измененных объектов
+log_message "Copying new/modified objects..."
+LAST_RUN_TIMESTAMP_UTC=$(cat "${STATE_FILE}" 2>/dev/null || echo "1970-01-01T00:00:00Z")
+# Даем перехлест в 1 минуту на случай рассинхронизации времени
+MAX_AGE_PARAM=$(date -d "${LAST_RUN_TIMESTAMP_UTC} - 1 minute" --iso-8601=seconds)
+
+RCLONE_LOG_FILE="${RUN_DIR}/${RUN_ID}-rclone.log"
+RCLONE_COPY_START_TIME=$SECONDS
+
+# Опции для максимальной производительности
+# --s3-no-check-bucket - не проверять существование бакета, полезно при работе с sub-юзерами Ceph
+# --fast-list - использовать меньше API-запросов для листинга
+# --transfers и --checkers - подбираются экспериментально, начнем с разумных значений
+RCLONE_OPTS_HIGH_PERF=(
+    --verbose
+    --log-file="${RCLONE_LOG_FILE}"
+    --stats-one-line
+    --stats=10s
+    --max-age "${MAX_AGE_PARAM}"
+    --transfers=32
+    --checkers=16
+    --s3-upload-concurrency=16
+    --s3-chunk-size=64M
+    --s3-no-check-bucket
+    --fast-list
+)
+
+# Запускаем rclone
+RCLONE_STATS=$(rclone copy "${SOURCE_PATH}" "${RUN_DIR}" "${RCLONE_OPTS_HIGH_PERF[@]}" 2>&1 | tail -n 1)
+RCLONE_EXIT_CODE=$?
+COPY_DURATION=$((SECONDS - RCLONE_COPY_START_TIME))
+
+log_message "Rclone copy finished in ${COPY_DURATION}s. Exit code: ${RCLONE_EXIT_CODE}"
+log_message "Rclone stats: ${RCLONE_STATS}"
+
+# 4. Анализ результатов и сбор метрик
+if [[ ${RCLONE_EXIT_CODE} -eq 0 ]]; then
+    # Парсим статистику из вывода rclone, например:
+    # Transferred:         15.999 G / 15.999 G, 100%, 1.116 G/s, ETA 0s
+    # Errors:                 0
+    # Checks:             12345 / 12345, 100%
+    # Transferred:          678 / 678, 100%
+    # Elapsed time:        14.8s
+    # Если rclone < 1.66, статистика может быть в другом формате. Этот grep+awk универсален.
+    COPIED_BYTES_STR=$(echo "${RCLONE_STATS}" | grep -oP 'Transferred:\s*[\d.]+\s*[a-zA-Z]*/\s*\K[\d.]+\s*[a-zA-Z]+' | head -n1)
+    COPIED_BYTES=$(numfmt --from=iec "${COPIED_BYTES_STR}" 2>/dev/null || echo 0)
+    COPIED_OBJECTS=$(echo "${RCLONE_STATS}" | grep -oP 'Transferred:\s+\K\d+' | tail -n1)
+    
+    # Ищем ошибки в логе rclone, даже если он завершился с кодом 0
+    # (могут быть некритичные ошибки, rclone пытается повторить)
+    mapfile -t RCLONE_ERRORS < <(grep -i "ERROR" "${RCLONE_LOG_FILE}" | sed 's/"/\\"/g' | sort -u)
+    if [[ ${#RCLONE_ERRORS[@]} -gt 0 ]]; then
+        log_message "Found ${#RCLONE_ERRORS[@]} unique errors in rclone log."
+        ERROR_MESSAGES+=("${RCLONE_ERRORS[@]}")
+    else
+        log_message "No errors found in rclone log."
+        SUCCESS_FLAG=1
+    fi
+else
+    ERROR_MESSAGES+=("rclone_exit_code_${RCLONE_EXIT_CODE}")
+    log_message "Rclone exited with non-zero code: ${RCLONE_EXIT_CODE}"
+fi
+
+# 5. Обновление файлов состояния (только при успешном запуске)
+if [[ ${SUCCESS_FLAG} -eq 1 ]]; then
+    log_message "Run successful. Updating state files."
+    # Записываем время НАЧАЛА работы скрипта как точку отсчета для следующего.
+    # Это гарантирует, что мы не пропустим файлы, созданные во время работы скрипта.
+    date -u --iso-8601=seconds > "${STATE_FILE}"
+    # Перемещаем текущий список, чтобы он стал предыдущим для следующего запуска
+    mv "${CURRENT_LIST_FILE}" "${PREVIOUS_LIST_FILE}"
+else
+    log_message "Run failed. State files will not be updated."
+    # Удаляем некорректный текущий список, чтобы не использовать его в следующий раз
+    rm -f "${CURRENT_LIST_FILE}"
+fi
+
+# 6. Генерация файла метрик
+SCRIPT_DURATION=$((SECONDS - SCRIPT_START_TIME))
+log_message "Total script execution time: ${SCRIPT_DURATION}s."
+
+METRIC_PREFIX="s3_backup"
+{
+    echo "# HELP ${METRIC_PREFIX}_copied_objects_total Total number of objects copied."
+    echo "# TYPE ${METRIC_PREFIX}_copied_objects_total gauge"
+    echo "${METRIC_PREFIX}_copied_objects_total{run_id=\"${RUN_ID}\"} ${COPIED_OBJECTS:-0}"
+
+    echo "# HELP ${METRIC_PREFIX}_deleted_objects_total Total number of objects detected as deleted."
+    echo "# TYPE ${METRIC_PREFIX}_deleted_objects_total gauge"
+    echo "${METRIC_PREFIX}_deleted_objects_total{run_id=\"${RUN_ID}\"} ${DELETED_OBJECTS:-0}"
+
+    echo "# HELP ${METRIC_PREFIX}_copied_bytes_total Total size of copied data in bytes."
+    echo "# TYPE ${METRIC_PREFIX}_copied_bytes_total gauge"
+    echo "${METRIC_PREFIX}_copied_bytes_total{run_id=\"${RUN_ID}\"} ${COPIED_BYTES:-0}"
+
+    echo "# HELP ${METRIC_PREFIX}_copy_duration_seconds Time spent in rclone copy operation."
+    echo "# TYPE ${METRIC_PREFIX}_copy_duration_seconds gauge"
+    echo "${METRIC_PREFIX}_copy_duration_seconds{run_id=\"${RUN_ID}\"} ${COPY_DURATION}"
+
+    echo "# HELP ${METRIC_PREFIX}_script_duration_seconds Total script execution time."
+    echo "# TYPE ${METRIC_PREFIX}_script_duration_seconds gauge"
+    echo "${METRIC_PREFIX}_script_duration_seconds{run_id=\"${RUN_ID}\"} ${SCRIPT_DURATION}"
+
+    echo "# HELP ${METRIC_PREFIX}_success Flag indicating if the backup run was successful."
+    echo "# TYPE ${METRIC_PREFIX}_success gauge"
+    echo "${METRIC_PREFIX}_success{run_id=\"${RUN_ID}\"} ${SUCCESS_FLAG}"
+
+    # Дополнительная полезная метрика - отставание бэкапа
+    echo "# HELP ${METRIC_PREFIX}_backup_lag_seconds Lag between now and the last successful backup timestamp."
+    echo "# TYPE ${METRIC_PREFIX}_backup_lag_seconds gauge"
+    LAST_SUCCESS_TS=$(date -d "${LAST_RUN_TIMESTAMP_UTC}" +%s 2>/dev/null || echo 0)
+    CURRENT_TS=$(date +%s)
+    LAG=$(( CURRENT_TS - LAST_SUCCESS_TS ))
+    echo "${METRIC_PREFIX}_backup_lag_seconds ${LAG}"
+
+    if [[ ${#ERROR_MESSAGES[@]} -gt 0 ]]; then
+        echo "# HELP ${METRIC_PREFIX}_error An error that occurred during the backup run."
+        echo "# TYPE ${METRIC_PREFIX}_error gauge"
+        for error in "${ERROR_MESSAGES[@]}"; do
+            # Экранируем кавычки в сообщении об ошибке
+            escaped_error=$(echo "${error}" | sed 's/"/\\"/g')
+            echo "${METRIC_PREFIX}_error{run_id=\"${RUN_ID}\",message=\"${escaped_error:0:250}\"} 1"
+        done
+    fi
+
+} > "${METRICS_FILE}.tmp"
+mv "${METRICS_FILE}.tmp" "${METRICS_FILE}"
+log_message "Metrics file generated at ${METRICS_FILE}"
+
+log_message "--- Finished incremental backup run ID: ${RUN_ID} ---"
+exit 0
+```
+
+---
+
+### Скрипт 2: Архивная синхронизация (раз в декаду)
+
+Этот скрипт запускается реже и копирует весь бакет предыдущей декады в архивную директорию.
+
+**`s3_archive_decade.sh`**
+
+```bash
+#!/bin/bash
+set -eo pipefail # Выход при любой ошибке
+
+# --- НАСТРОЙКИ ---
+S3_REMOTE="mycephs3"
+BASE_ARCHIVE_DIR="/mnt/backup/s3_archive" # Отдельный каталог для архивов
+LOCK_FILE="/var/run/s3_archive_decade.lock"
+# --- КОНЕЦ НАСТРОЕК ---
+
+log_message() {
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1"
+}
+
+# --- Проверка на запуск второго экземпляра ---
+exec 200>$LOCK_FILE
+flock -n 200 || { log_message "ERROR: Archive script is already running. Exiting."; exit 1; }
+
+# --- Начало работы ---
+SCRIPT_START_TIME=$SECONDS
+RUN_ID=$(date '+%d-%H-%M')
+
+# Определяем каталог для логов/метрик сегодняшнего запуска
+# Логи и метрики будут в подкаталоге с датой запуска, чтобы не смешиваться с архивными данными
+CONTROL_DIR="${BASE_ARCHIVE_DIR}/.control/$(date +%Y-%m-%d)"
+mkdir -p "$CONTROL_DIR"
+
+LOG_FILE="${CONTROL_DIR}/archive.log"
+exec >> "${LOG_FILE}" 2>&1
+
+METRICS_FILE="${CONTROL_DIR}/metrics.prom"
+
+log_message "--- Starting decade archive run ID: ${RUN_ID} ---"
+
+# 1. Определение бакета ПРЕДЫДУЩЕЙ декады
+# Эта логика работает только при запуске 1, 11 или 21 числа
+PREVIOUS_BUCKET_DATE=$(date -d "yesterday")
+YEAR=$(date -d "${PREVIOUS_BUCKET_DATE}" '+%Y')
+MONTH=$(date -d "${PREVIOUS_BUCKET_DATE}" '+%m')
+DAY=$(date -d "${PREVIOUS_BUCKET_DATE}" '+%d')
+
+if (( 10#${DAY} >= 21 )); then
+    DECADE=2
+elif (( 10#${DAY} >= 11 )); then
+    DECADE=1
+else
+    DECADE=0
+fi
+
+PREVIOUS_BUCKET="storage-${YEAR}${MONTH}${DECADE}"
+ARCHIVE_DIR="${BASE_ARCHIVE_DIR}/${PREVIOUS_BUCKET}"
+
+# Проверка, что мы не пытаемся архивировать уже существующий каталог
+if [[ -d "${ARCHIVE_DIR}" ]]; then
+    log_message "WARNING: Archive directory ${ARCHIVE_DIR} already exists. Skipping run to prevent data loss."
+    # Создаем метрику с предупреждением, но выходим успешно
+    {
+         echo '# HELP s3_archive_skipped Archivation was skipped.'
+         echo '# TYPE s3_archive_skipped gauge'
+         echo "s3_archive_skipped{reason=\"destination_exists\", bucket=\"${PREVIOUS_BUCKET}\"} 1"
+    } > "${METRICS_FILE}"
+    exit 0
+fi
+
+log_message "Archiving bucket: ${PREVIOUS_BUCKET}"
+log_message "Destination directory: ${ARCHIVE_DIR}"
+mkdir -p "${ARCHIVE_DIR}"
+
+# Инициализация переменных для метрик
+SUCCESS_FLAG=0
+COPIED_OBJECTS=0
+COPIED_BYTES=0
+COPY_DURATION=0
+ERROR_MESSAGES=()
+
+# 2. Синхронизация данных в щадящем режиме
+RCLONE_LOG_FILE="${CONTROL_DIR}/${RUN_ID}-rclone-archive.log"
+RCLONE_COPY_START_TIME=$SECONDS
+SOURCE_PATH="${S3_REMOTE}:${PREVIOUS_BUCKET}"
+
+# Опции для щадящего режима (меньше параллельных потоков, ограничение скорости)
+RCLONE_OPTS_GENTLE=(
+    --verbose
+    --log-file="${RCLONE_LOG_FILE}"
+    --stats-one-line
+    --stats=30s
+    --transfers=8 # Меньше
+    --checkers=4  # Меньше
+    --bwlimit=50M # Ограничение скорости до 50 MByte/s
+    --s3-no-check-bucket
+    --fast-list
+)
+
+# Используем sync, т.к. бакет неизменяемый, это эквивалентно copy, но семантически вернее.
+RCLONE_STATS=$(rclone sync "${SOURCE_PATH}" "${ARCHIVE_DIR}" "${RCLONE_OPTS_GENTLE[@]}" 2>&1 | tail -n 1)
+RCLONE_EXIT_CODE=$?
+COPY_DURATION=$((SECONDS - RCLONE_COPY_START_TIME))
+
+log_message "Rclone sync finished in ${COPY_DURATION}s. Exit code: ${RCLONE_EXIT_CODE}"
+log_message "Rclone stats: ${RCLONE_STATS}"
+
+# 3. Анализ результатов и сбор метрик
+if [[ ${RCLONE_EXIT_CODE} -eq 0 ]]; then
+    COPIED_BYTES_STR=$(echo "${RCLONE_STATS}" | grep -oP 'Transferred:\s*[\d.]+\s*[a-zA-Z]*/\s*\K[\d.]+\s*[a-zA-Z]+' | head -n1)
+    COPIED_BYTES=$(numfmt --from=iec "${COPIED_BYTES_STR}" 2>/dev/null || echo 0)
+    COPIED_OBJECTS=$(echo "${RCLONE_STATS}" | grep -oP 'Transferred:\s+\K\d+' | tail -n1)
+    
+    mapfile -t RCLONE_ERRORS < <(grep -i "ERROR" "${RCLONE_LOG_FILE}" | sed 's/"/\\"/g' | sort -u)
+    if [[ ${#RCLONE_ERRORS[@]} -gt 0 ]]; then
+        log_message "Found ${#RCLONE_ERRORS[@]} unique errors in rclone log."
+        ERROR_MESSAGES+=("${RCLONE_ERRORS[@]}")
+    else
+        log_message "No errors found in rclone log."
+        SUCCESS_FLAG=1
+    fi
+else
+    ERROR_MESSAGES+=("rclone_exit_code_${RCLONE_EXIT_CODE}")
+    log_message "Rclone exited with non-zero code: ${RCLONE_EXIT_CODE}"
+    # В случае ошибки удаляем неполный архив, чтобы не занимать место мусором
+    log_message "Removing incomplete archive directory ${ARCHIVE_DIR} due to failure."
+    rm -rf "${ARCHIVE_DIR}"
+fi
+
+# 4. Генерация файла метрик
+SCRIPT_DURATION=$((SECONDS - SCRIPT_START_TIME))
+log_message "Total script execution time: ${SCRIPT_DURATION}s."
+
+METRIC_PREFIX="s3_archive"
+{
+    echo "# HELP ${METRIC_PREFIX}_copied_objects_total Total number of objects archived."
+    echo "# TYPE ${METRIC_PREFIX}_copied_objects_total gauge"
+    echo "${METRIC_PREFIX}_copied_objects_total{run_id=\"${RUN_ID}\",bucket=\"${PREVIOUS_BUCKET}\"} ${COPIED_OBJECTS:-0}"
+
+    echo "# HELP ${METRIC_PREFIX}_copied_bytes_total Total size of archived data in bytes."
+    echo "# TYPE ${METRIC_PREFIX}_copied_bytes_total gauge"
+    echo "${METRIC_PREFIX}_copied_bytes_total{run_id=\"${RUN_ID}\",bucket=\"${PREVIOUS_BUCKET}\"} ${COPIED_BYTES:-0}"
+
+    echo "# HELP ${METRIC_PREFIX}_copy_duration_seconds Time spent in rclone sync operation."
+    echo "# TYPE ${METRIC_PREFIX}_copy_duration_seconds gauge"
+    echo "${METRIC_PREFIX}_copy_duration_seconds{run_id=\"${RUN_ID}\",bucket=\"${PREVIOUS_BUCKET}\"} ${COPY_DURATION}"
+
+    echo "# HELP ${METRIC_PREFIX}_script_duration_seconds Total script execution time."
+    echo "# TYPE ${METRIC_PREFIX}_script_duration_seconds gauge"
+    echo "${METRIC_PREFIX}_script_duration_seconds{run_id=\"${RUN_ID}\",bucket=\"${PREVIOUS_BUCKET}\"} ${SCRIPT_DURATION}"
+
+    echo "# HELP ${METRIC_PREFIX}_success Flag indicating if the archive run was successful."
+    echo "# TYPE ${METRIC_PREFIX}_success gauge"
+    echo "${METRIC_PREFIX}_success{run_id=\"${RUN_ID}\",bucket=\"${PREVIOUS_BUCKET}\"} ${SUCCESS_FLAG}"
+
+    if [[ ${#ERROR_MESSAGES[@]} -gt 0 ]]; then
+        echo "# HELP ${METRIC_PREFIX}_error An error that occurred during the archive run."
+        echo "# TYPE ${METRIC_PREFIX}_error gauge"
+        for error in "${ERROR_MESSAGES[@]}"; do
+            escaped_error=$(echo "${error}" | sed 's/"/\\"/g')
+            echo "${METRIC_PREFIX}_error{run_id=\"${RUN_ID}\",bucket=\"${PREVIOUS_BUCKET}\",message=\"${escaped_error:0:250}\"} 1"
+        done
+    fi
+
+} > "${METRICS_FILE}.tmp"
+mv "${METRICS_FILE}.tmp" "${METRICS_FILE}"
+log_message "Metrics file generated at ${METRICS_FILE}"
+
+log_message "--- Finished decade archive run ID: ${RUN_ID} ---"
+exit 0
+```
+
+### Дополнительные полезные метрики
+
+*   **Для скрипта 1 (`s3_backup`):**
+    *   `s3_backup_backup_lag_seconds`: Я уже добавил эту метрику. Она крайне полезна для мониторинга. Показывает, насколько "отстает" ваш бэкап от реального времени. Большое значение этого показателя — повод для тревоги.
+    *   `s3_backup_listing_duration_seconds`: Время, потраченное на получение списка объектов. Если это время начинает расти, это сигнал о потенциальных проблемах с производительностью листинга.
+*   **Для скрипта 2 (`s3_archive`):**
+    *   `s3_archive_skipped`: Я добавил эту метрику на случай, если архив уже существует. Это помогает понять, почему скрипт отработал, но ничего не скопировал.
+
+### Настройка и запуск
+
+1.  **Настройка rclone:** Убедитесь, что у вас настроен rclone для доступа к Ceph S3, и имя удаленного хранилища (`mycephs3` в примерах) указано верно.
+    ```bash
+    rclone config
+    ```
+
+2.  **Размещение скриптов:** Поместите `s3_incremental_backup.sh` и `s3_archive_decade.sh` в подходящий каталог, например, `/usr/local/bin/`. Сделайте их исполняемыми:
+    ```bash
+    chmod +x /usr/local/bin/s3_incremental_backup.sh
+    chmod +x /usr/local/bin/s3_archive_decade.sh
+    ```
+
+3.  **Настройка Cron:**
+    Откройте crontab для редактирования (`crontab -e`) и добавьте следующие строки:
+
+    ```crontab
+    # Запускать инкрементальный бэкап каждые 30 минут
+    */30 * * * * /usr/local/bin/s3_incremental_backup.sh
+
+    # Запускать архивацию в 00:05 в 1, 11 и 21 число каждого месяца
+    # (Небольшая задержка в 5 минут, чтобы не конфликтовать с другими ночными задачами)
+    5 0 1,11,21 * * /usr/local/bin/s3_archive_decade.sh
+    ```
+
+4.  **Мониторинг:** Настройте ваш Prometheus (через `node_exporter` и `textfile_collector`) на сбор метрик из файлов `metrics.prom`, которые будут создаваться скриптами. Путь к каталогам с файлами метрик должен быть указан в конфигурации `node_exporter`.
