@@ -1,0 +1,200 @@
+﻿### Список метрик для мониторинга в Zabbix
+
+#### 1. **Недоступность kube-apiserver через LB**
+- **Описание**: Проверка доступности API Kubernetes через внешний балансировщик.
+- **Метод**: HTTP-запрос от Zabbix Server к `https://<LB_IP>/healthz`.
+- **Порог**: Ошибка HTTP-статуса (не 200) или время ответа >2 секунды.
+- **Скрипт**: Не требуется (Zabbix Web Scenario или Simple Check).
+
+#### 2. **Проблемы сетевой связности между узлами**
+- **Описание**: Проверка связи между worker-нодами и master/ingress нодами.
+- **Метод**: 
+  - На worker-нодах: скрипт проверяет доступность портов (6443 для API, 10250 для kubelet) на других нодах.
+  - Пример скрипта:
+    ```bash
+    #!/bin/bash
+    NODES=("master1" "master2" "master3" "ingress1" "ingress2")
+    PORT=6443
+    for node in "${NODES[@]}"; do
+      timeout 5 bash -c "echo > /dev/tcp/$node/$PORT" 2>/dev/null
+      if [ $? -ne 0 ]; then
+        echo "Connection to $node on port $PORT failed"
+        exit 1
+      fi
+    done
+    ```
+- **Порог**: Ошибка при недоступности хотя бы одного узла.
+- **Zabbix Agent**: Активный агент с пользовательским скриптом.
+
+#### 3. **Отказ одного master**
+- **Описание**: Проверка здоровья компонентов master-нод (etcd, kube-apiserver).
+- **Метод**: 
+  - На master-нодах: скрипт использует `kubectl get componentstatuses` и проверяет статус `controller-manager`, `scheduler`, `etcd`.
+  - Пример скрипта:
+    ```bash
+    #!/bin/bash
+    kubectl get componentstatuses | grep -v "Healthy" | grep -v "NAME" | awk '{print $2}' | grep -v "Healthy"
+    ```
+- **Порог**: Наличие не-Healthy статусов.
+- **Zabbix Agent**: Активный агент с пользовательским скриптом.
+
+#### 4. **Отказ одной из нод etcd**
+- **Описание**: Проверка здоровья кластера etcd.
+- **Метод**: 
+  - На master-нодах: скрипт использует `etcdctl` для проверки членов кластера.
+  - Пример скрипта:
+    ```bash
+    #!/bin/bash
+    etcdctl --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+            --cert=/etc/kubernetes/pki/etcd/server.crt \
+            --key=/etc/kubernetes/pki/etcd/server.key \
+            member list | grep -v "started" | grep -v "healthy"
+    ```
+- **Порог**: Ошибка при наличии неактивных членов или не-healthy статуса.
+- **Zabbix Agent**: Активный агент с пользовательским скриптом.
+
+#### 5. **Истекают сроки сертификатов**
+- **Описание**: Проверка срока действия сертификатов Kubernetes.
+- **Метод**: 
+  - На master-нодах: скрипт проверяет сертификаты в `/etc/kubernetes/pki/`.
+  - Пример скрипта:
+    ```bash
+    #!/bin/bash
+    find /etc/kubernetes/pki/ -name "*.crt" -exec openssl x509 -in {} -text -noout \; | grep "Not After" | awk -F': ' '{print $2}' | date -f - +%s | awk -v now=$(date +%s) '{if ($1 - now < 86400*30) print "Expiring soon"}'
+    ```
+- **Порог**: Алерт за 30 дней до истечения.
+- **Zabbix Agent**: Активный агент с пользовательским скриптом.
+
+#### 6. **Недоступность корпоративных DNS-серверов**
+- **Описание**: Проверка доступности внешних DNS.
+- **Метод**: 
+  - На всех нодах: скрипт использует `dig` или `nslookup`.
+  - Пример скрипта:
+    ```bash
+    #!/bin/bash
+    dig @<DNS_SERVER> example.com +short | grep -q "IP"
+    ```
+- **Порог**: Ошибка при недоступности DNS.
+- **Zabbix Agent**: Активный агент с пользовательским скриптом.
+
+#### 7. **Недоступность корпоративных LDAP-серверов**
+- **Описание**: Проверка доступности LDAP.
+- **Метод**: 
+  - На всех нодах: скрипт использует `ldapsearch`.
+  - Пример скрипта:
+    ```bash
+    #!/bin/bash
+    ldapsearch -x -H ldap://<LDAP_SERVER> -b "dc=example,dc=com" | grep -q "result: 0 Success"
+    ```
+- **Порог**: Ошибка при недоступности LDAP.
+- **Zabbix Agent**: Активный агент с пользовательским скриптом.
+
+#### 8. **Недоступность корпоративного репозитория контейнеров**
+- **Описание**: Проверка доступности registry.
+- **Метод**: 
+  - На всех нодах: скрипт использует `curl` для проверки доступности `/v2/`.
+  - Пример скрипта:
+    ```bash
+    #!/bin/bash
+    curl -k -s -o /dev/null -w "%{http_code}" https://<REGISTRY>/v2/ | grep -q "200"
+    ```
+- **Порог**: Ошибка HTTP-статуса (не 200).
+- **Zabbix Agent**: Активный агент с пользовательским скриптом.
+
+#### 9. **Срабатывание OOM Killer**
+- **Описание**: Проверка наличия событий OOM Killer.
+- **Метод**: 
+  - На всех нодах: скрипт проверяет логи `/var/log/messages` или `dmesg`.
+  - Пример скрипта:
+    ```bash
+    #!/bin/bash
+    dmesg | grep -i "oom\|kill" | tail -n 10 | grep -v "No trials"
+    ```
+- **Порог**: Обнаружение строк с "OOM" или "Killed process".
+- **Zabbix Agent**: Активный агент с пользовательским скриптом.
+
+---
+
+### Шаблоны Zabbix (YAML)
+
+#### **Шаблон для Master-нод** (`Template_K8s_Master`)
+```yaml
+template: Template_K8s_Master
+applications:
+  - Kubernetes Master
+items:
+  - name: Check Component Statuses
+    key: userparameter=k8s.component.statuses,/etc/zabbix/scripts/check_components.sh
+    applications:
+      - Kubernetes Master
+  - name: Check Etcd Health
+    key: userparameter=k8s.etcd.health,/etc/zabbix/scripts/check_etcd.sh
+    applications:
+      - Kubernetes Master
+  - name: Check Certificates Expiry
+    key: userparameter=k8s.cert.expiry,/etc/zabbix/scripts/check_certs.sh
+    applications:
+      - Kubernetes Master
+```
+
+#### **Шаблон для Worker/Ingress-нод** (`Template_K8s_Worker_Ingress`)
+```yaml
+template: Template_K8s_Worker_Ingress
+applications:
+  - Kubernetes Worker/Ingress
+items:
+  - name: Check Network Connectivity
+    key: userparameter=k8s.network.connectivity,/etc/zabbix/scripts/check_network.sh
+    applications:
+      - Kubernetes Worker/Ingress
+  - name: Check OOM Killer
+    key: userparameter=k8s.oom.events,/etc/zabbix/scripts/check_oom.sh
+    applications:
+      - Kubernetes Worker/Ingress
+```
+
+#### **Шаблон для всех нод** (`Template_K8s_Common`)
+```yaml
+template: Template_K8s_Common
+applications:
+  - Kubernetes Common
+items:
+  - name: Check DNS Availability
+    key: userparameter=k8s.dns.availability,/etc/zabbix/scripts/check_dns.sh
+    applications:
+      - Kubernetes Common
+  - name: Check LDAP Availability
+    key: userparameter=k8s.ldap.availability,/etc/zabbix/scripts/check_ldap.sh
+    applications:
+      - Kubernetes Common
+  - name: Check Container Registry
+    key: userparameter=k8s.registry.availability,/etc/zabbix/scripts/check_registry.sh
+    applications:
+      - Kubernetes Common
+```
+
+#### **Шаблон для LB-серверов** (`Template_LB`)
+```yaml
+template: Template_LB
+applications:
+  - Load Balancer
+items:
+  - name: Check Kube API via LB
+    key: http["https://<LB_IP>/healthz",,,200]
+    applications:
+      - Load Balancer
+```
+
+---
+
+### Рекомендации
+1. **Пороги**: Установите гибкие пороги (например, повторение алертов 3 раза подряд) для минимизации ложных срабатываний.
+2. **Скрипты**: Разместите скрипты в `/etc/zabbix/scripts/` и настройте права на выполнение.
+3. **Zabbix Agent**: Убедитесь, что в конфигурации `zabbix_agentd.conf` разрешены пользовательские параметры (`EnableRemoteCommands=1`).
+
+Каждый шаблон применяется к соответствующему типу хостов:
+- `Template_K8s_Master` → Master-ноды.
+- `Template_K8s_Worker_Ingress` → Worker и Ingress-ноды.
+- `Template_K8s_Common` → Все ноды.
+- `Template_LB` → LB-серверы.
+

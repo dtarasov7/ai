@@ -1,0 +1,233 @@
+﻿### **Список метрик для мониторинга Kubernetes-кластера в Zabbix 6.4**  
+(исключены инфраструктурные метрики хостов, включены только связанные с кластером, сервисами и конфигурацией)
+
+---
+
+# **1. Недоступность Kube API через LB**
+**Цель**: Убедиться, что внешние сервисы (например, дежурная смена) могут попасть в Kube API через балансировщик.
+
+- **Способ получения данных**:  
+  - Использовать `zabbix agent` для проверки доступности Kube API (через `tcpconnect` или `ping` в кластере с актуальным IP/наименованием).  
+  - Для проверки AUTH-тулдинг при вызове может потребоваться `curl` с аутентификацией.  
+  - Если Kube API доступен через DNS (например, `kube-api`), можно также проверить доступность через `tcpconnect` или соединение по SSH.  
+
+- **Рекомендуемые пороги**:  
+  - Таймаут: 30 секунды.  
+  - Повтор: 3 раза.  
+  - Опасность: если соединение прерывается более 3 раз подряд (при высокой важности закладываю алерт при 3р, если больше 5 и т.д.).
+
+- **Шаблон Zabbix (YAML)**:
+```yaml
+# Хост: Kube-API (записывается в Zabbix через IP или DNS-имя, настроенное в LB)
+- name: "Check Kube API Availability through LB"
+  type: agent
+  key: "kube-api.ping"
+  value_type: numeric
+  delay: 60s
+  history: 7d
+  trends: 7d
+  description: "Проверяет доступность Kube API (через LB)"
+  expression: "{host:kube-api.ping.last()} != 0"  # При значении 0 — недоступен
+  alerts:
+    - level: warning
+      triggers:
+        - name: "Kube API через LB недоступен"
+          expression: "{host:kube-api.ping.last()} = 0"
+          severity: warning
+          description: "Kube API не доступен через внешний балансировщик"
+```
+
+**Примечание**: Записывать в Zabbix как отдельный **хост** (например, "`kube-api-external`") с IP/именем из LB и настроить проверку-скрипт `ping` или `tcpconnect` с учетом образованных через LB.
+
+---
+
+# **2. Проблемы сетевой связанности между узлами**
+
+- **Способ получения данных**:  
+  - Проверка доступности между master-узлами и между etcd-узлами (например, через `ssh`-проверку, если есть прямая связь).  
+  - Если доступ к ssh заблокирован, можно использовать `zabbix agent` для отправки таймеров к определенным IP-адресам в кластере (например, `icmpping`, `tcpconnect`).
+
+- **Скрипт для проверки связанности между узлами**:
+```bash
+#!/bin/bash
+# Проверяем связь между master-узлами по SSH (если доступ есть)
+# Можно расширить список IP-адресов узлов
+for ip in `cat /etc/kubernetes/manifests/master_ips`; do
+    ssh -o ConnectTimeout=5 -o ExitOnForwardFailure=yes root@$ip "echo 'SSH OK' > /dev/null"
+    if [ $? -ne 0 ]; then
+        echo "1"
+        exit 1
+    fi
+done
+echo "0"
+```
+*(см. пометку: файл `/etc/kubernetes/manifests/master_ips` должен содержать IP-адреса master-узлов)*
+
+**Рекомендуемые пороги**:  
+- Один ложный срабатывания (например, 1 раз) — предупреждение  
+- Три неудачи подряд — критичность
+
+- **Шаблон Zabbix (YAML)**:
+```yaml
+# Хост: "Communication between master nodes"
+- name: "Check SSH connection between master nodes"
+  type: agent
+  key: "network.ping.master_nodes"
+  value_type: numeric
+  delay: 60s
+  history: 7d
+  trends: 7d
+  description: "Проверяет связанность между master-узлами через SSH"
+  expression: "{host:network.ping.master_nodes.last()} != 0"  # 0 = ошибка
+  alerts:
+    - level: warning
+      triggers:
+        - name: "Проблемы связанности master-узлов"
+          expression: "{host:network.ping.master_nodes.last()} = 0"
+          severity: warning
+          description: "Деактивная связь между одним или несколькими master-узлами"
+```
+
+---
+
+# **3. Проблемы сетевой связанности между подами на разных узлах**
+
+- **Способ получения данных**:  
+  - Проверка на основе `kubelet` API метрики, например, `kubelet node status`.  
+  - Можно использовать `tcpconnect` к нужным подам (если они имеют известное имя или DNS).  
+  - Либо использовать инструменты типа `nc`, `telnet`, `arp`.
+
+- **Пример скрипта**:  
+Тестирование подключений по SSH или TCP к контейнерам (если предоставляется доступ к контейнеру):
+```bash
+#!/bin/bash
+# Пример скрипта для проверки доступности к подам (использует контейнер guestbook)
+PORT=53  # Например, для kubelet
+IP=$1
+tcpconnect -t 5 -p $PORT $IP
+RC=$?
+echo $RC
+```
+
+**Запускается:**  
+Замкнута через SSH на worker-узлах при подключении к подам узлов контроллера.
+
+**Важно**: Убедиться, что отдельные проверки узлов и полномасштабный набор узлов приводят к надежным количественныя терминологичесям.
+
+**Рекомендуемые пороги**:  
+- 1 ошибка — предупреждение  
+- 2+ ошибки подряд — критичность
+
+- **Шаблон Zabbix (YAML)**:
+```yaml
+# Хост: "Pod communication between nodes"
+- name: "Check communication between pods on different nodes"
+  type: agent
+  key: "pod.tcpconnect"
+  value_type: numeric
+  delay: 30s
+  history: 7d
+  trends: 7d
+  description: "Проверяет TCP-соединение между подами на разных узлах"
+  expression: "{host:pod.tcpconnect.last()} != 0"
+  alerts:
+    - level: warning
+      triggers:
+        - name: "Проблемы с TCP-соединением между подами"
+          expression: "{host:pod.tcpconnect.last()} = 0"
+          severity: warning 
+          description: "Проблема с сетевой связью между подами на разных узлах"
+```
+
+---
+
+# **4. Отказ одного или нескольких master-узлов**
+
+- **Способ получения данных**:  
+  - Запросы к API Kube через `kubectl` или специальные скрипты.  
+  - Можно использовать API K8s для проверки состояний узлов.
+
+**Пример скрипта**:
+```bash
+#!/bin/bash
+# Проверка состояния master-узлов через kubelet API
+HOSTNAME=$1
+STATUS=$(curl -k -s --insecure --header "Authorization: Bearer $(cat /var/run/secrets/kubernetes.io/serviceaccount/token)" https://$HOSTNAME:6443/healthz)
+if [ "$STATUS" != "ok" ]; then
+    echo 1
+else
+    echo 0
+fi
+```
+
+**Важно**: Скрипт đòiран доступ к kubelet API и инсталляции Secret токена.
+
+- **Рекомендуемые пороги**:  
+  - 1 фейл — предупреждение  
+  - 2+ фейл — критичность
+
+- **Шаблон Zabbix (YAML)**:
+```yaml
+# Хосты: master-1, master-2, master-3
+- name: "Check Master Node Status"
+  type: agent
+  key: "master.status.$HOSTNAME"
+  value_type: numeric
+  delay: 60s
+  history: 7d
+  trends: 7d
+  description: "Проверяет статус master-узла $HOSTNAME"
+  expression: "{host:master.status.*.last()} != 0"
+  alerts:
+    - level: warning
+      triggers:
+        - name: "Отказ одного master"
+          expression: "{host:master.status.*.last()} = 1"
+          severity: warning
+          description: "Узел $HOSTNAME оказался недоступен"
+```
+
+---
+
+# **5. Отказ одного или нескольких etcd-узлов**
+
+- **Способ получения данных**:  
+  - Проверка через `kubectl` или SSH к узлам, где находится etcd (например, через `etcdctl`).  
+  - Проверка состояния кластера через etcd API.  
+
+**Пример скрипта**:
+```bash
+#!/bin/bash
+# Проверка работы etcd через etcdctl
+ETCDCTL="etcdctl --endpoints=http://$HOSTNAME:2379 --cacert=/etc/kubernetes/ssl/ca.pem --cert=/etc/kubernetes/ssl/etcd.pem --key=/etc/kubernetes/ssl/etcd.key"
+HEALTH=$($ETCDCTL endpoint health)
+if echo "$HEALTH" | grep -q "unhealthy"; then
+    echo 1
+else
+    echo 0
+fi
+```
+
+Скрипт подходит для etcd узлов, где есть certificate, pods и токены.
+
+- **Рекомендуемые пороги**:  
+  - 1 фейл — Warning  
+  - 2+ фейлов – Critical
+
+- **Шаблон Zabbix (YAML)**:
+```yaml
+# Хосты: etcd1, etcd2, etcd3
+- name: "Check etcd Health"
+  type: agent
+  key: "etcd.health.$HOSTNAME"
+  value_type: numeric
+  delay: 60s
+  history: 7d
+  trends: 7d
+  description: "Проверяет состояние etcd-узла $HOSTNAME"
+  expression: "{host:etcd.health.*.last()} != 0"
+  alerts:
+    - level: warning
+      triggers:
+        - name: "etcd node $HOSTNAME unhealthy"
+          expression: "{host:etcd.health.*.last()} =

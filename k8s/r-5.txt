@@ -1,0 +1,234 @@
+﻿gpt-4.1-2025-04-14
+
+Отличное, комплексное задание для production-кластера! Вот структурированное решение для мониторинга в Zabbix 6.4, учитывая заявленные требования и ограничения, специфику Zabbix Agent 1, и разумный уровень сигнала/шума.
+
+---
+
+## 1. Список метрик (без инфраструктурных!)
+
+### 1.1 Доступность и компоненты кластера
+
+1. **Доступность kube api через lb**  
+   - **Метрика:** HTTPS-ping (TCP-check + cert expiration).
+   - **Как получать:** через zabbix agent userparameter + скрипт.
+2. **Сетевых связанность между узлами кластера**  
+   - **Метрика:** ICMP Ping (между всеми нодами, agent active items)
+   - **Как получать:** Через zabbix agent "simple check" или userparameter с ping.
+3. **Связанность между подами на разных узлах**  
+   - **Метрика:** Специальный DaemonSet с curl/ping к подам на соседних нодах (сложно, но через скрипт можно).
+   - **Как получать:** userparameter, вызывающий скрипт в контейнере (или на хосте через hostNetwork pod).
+4. **Число доступных master-нод (kube-аписерверов)**  
+   - **Метрика:** HTTPS пинги к каждому мастеру.
+   - **Как получать:** Через zabbix agent на балансировщиках (userparameter + curl).
+5. **Работа всех etcd членов**  
+   - **Метрика:** etcd health check для каждого члена.
+   - **Как получать:** Через zabbix agent на мастерах (userparameter + etcdctl).
+6. **Срок действия ключевых сертификатов (kube-apiserver, etcd, ingress)**  
+   - **Метрика:** Days left for certs.
+   - **Как получать:** Через zabbix agent на соответствующем хосте (userparameter + openssl).
+7. **Корпоративные сервисы (DNS, LDAP, контейнерный registry)**  
+   - **Метрики:** TCP port check + simple request (e.g. на 53/tcp, 389/tcp, curl registry).
+   - **Как получать:** Через zabbix agent на мастерах/ингрессах/воркерах.
+8. **Срабатывание OOM killer**  
+   - **Метрика:** Последние срабатывания OOM.
+   - **Как получать:** Через zabbix agent на всех хостах (userparameter + dmesg/grep или journalctl).
+
+---
+
+## 2. Перечень userparameter и скриптов
+
+### 2.1 UserParameter (выдержки для agentd.conf)
+
+```ini
+# 1. Проверка kube-apiserver через LB (URL)
+UserParameter=k8s.api.lb.status,curl -sk -m 5 https://<LB_HOST>:6443/healthz | grep -cq ok && echo 1 || echo 0
+UserParameter=k8s.api.lb.cert_expiry,echo | openssl s_client -servername <LB_HOST> -connect <LB_HOST>:6443 2>/dev/null | \
+sudo openssl x509 -noout -dates | grep notAfter | sed 's/.*=//' | xargs -I{} date -d {} +%s | \
+awk -v now=$(date +%s) '{print int( ($1-now)/86400 ) }'
+
+# 2. Пинг других нод
+UserParameter=ping.toother[*],ping -c1 -W1 $1 | grep -q '1 received' && echo 1 || echo 0
+
+# 3. Подсетевой DaemonSet: супервизор на worker-node, curl с hostNetwork между подами разных нод (указать IP другого DaemonSet pod)
+UserParameter=k8s.net.check[*],curl -s --max-time 2 http://$1:5000/alive >/dev/null && echo 1 || echo 0
+
+# 4. Проверка etcd здоровья для local etcd на мастере
+UserParameter=etcd.local.health,sudo ETCDCTL_API=3 etcdctl --endpoints=https://127.0.0.1:2379 --cacert=/etc/kubernetes/pki/etcd/ca.crt --cert=/etc/kubernetes/pki/etcd/server.crt --key=/etc/kubernetes/pki/etcd/server.key endpoint health --write-out=json | grep -q '"health":true' && echo 1 || echo 0
+
+# 5. Срок действия ETCD сертификата
+UserParameter=etcd.cert_expiry,openssl x509 -noout -enddate -in /etc/kubernetes/pki/etcd/server.crt | sed 's/.*=//' | xargs -I{} date -d {} +%s | awk -v now=$(date +%s) '{print int(($1-now)/86400)}'
+
+# 6. Проверка DNS/LADP/Registry (пример)
+UserParameter=ldap_alive,timeout 2 bash -c "cat < /dev/null > /dev/tcp/ldap.mycorp.internal/389" && echo 1 || echo 0
+UserParameter=dns_alive,timeout 2 bash -c "cat < /dev/null > /dev/tcp/dns.mycorp.internal/53" && echo 1 || echo 0
+UserParameter=registry_alive,curl -s --max-time 2 https://registry.mycorp.internal/v2/_catalog | grep repositories && echo 1 || echo 0
+
+# 7. Срабатывание OOM killer
+UserParameter=oom.last,sudo dmesg | grep -E -i 'oom-killer|Memory cgroup out of memory' | tail -n 1 | wc -l
+```
+
+---
+
+## 3. Рекомендуемые пороги/триггеры
+
+| Метрика | Описание | OK value | Warning | Critical |
+|---------|----------|----------|---------|----------|
+| k8s.api.lb.status | API LB доступен | 1 | -- | 0 |
+| k8s.api.lb.cert_expiry | дней до истечения | >30 | ≤30 | ≤7 |
+| ping.toother[X] | ICMP Ping | 1 | 0 | 0 |
+| k8s.net.check[IP] | Пинг пода | 1 | 0 | 0 |
+| etcd.local.health | etcd жив | 1 | 0 | 0 |
+| etcd.cert_expiry | дней до истечения | >30 | ≤30 | ≤7 |
+| ldap_alive | LDAP TCP check | 1 | 0 | 0 |
+| dns_alive | DNS TCP check | 1 | 0 | 0 |
+| registry_alive | Registry alive | 1 | 0 | 0 |
+| oom.last | Последний OOM | 0 | 1 | 1 |
+
+### Более точно озвучу для мастеров/etcd:
+- Если 1 из 3 мастеров недоступен (или etcd unhealthy) — Warning.
+- Если 2+ из 3 недоступны — Critical.
+
+---
+
+## 4. Шаблон Zabbix (YAML пример)
+
+### Общее замечание  
+- Для разных типов узлов (masters, ingress, lb, worker) — разные шаблоны!
+
+#### **Пример шаблона для LB (api входная точка)**
+
+```yaml
+zabbix_export:
+  version: '6.4'
+  templates:
+  - template:
+      name: 'K8S - External LB Health'
+      groups:
+        - name: 'Linux servers'
+      items:
+        - name: 'K8S API через LB доступность'
+          key: k8s.api.lb.status
+          type: ZABBIX_AGENT
+          applications:
+            - 'K8S'
+          delay: 60
+        - name: 'K8S API cert expiry (days left)'
+          key: k8s.api.lb.cert_expiry
+          type: ZABBIX_AGENT
+          applications:
+            - 'K8S'
+          delay: 3600
+      triggers:
+        - description: 'K8S API через LB недоступен'
+          expression: '{K8S - External LB Health:k8s.api.lb.status.last()}=0'
+          severity: HIGH
+        - description: 'K8S API через LB: cert истекает через 7 дней'
+          expression: '{K8S - External LB Health:k8s.api.lb.cert_expiry.last()}<=7'
+          severity: HIGH
+        - description: 'K8S API через LB: cert истекает через 30 дней'
+          expression: '{K8S - External LB Health:k8s.api.lb.cert_expiry.last()}<=30'
+          severity: WARNING
+```
+
+#### **Пример шаблона для мастеров и т.д. далее по аналогии**
+
+```yaml
+zabbix_export:
+  version: '6.4'
+  templates:
+  - template:
+      name: 'K8S - Master Node'
+      groups:
+        - name: 'Kubernetes cluster'
+      items:
+        - name: 'ETCD local health'
+          key: etcd.local.health
+          type: ZABBIX_AGENT
+          applications:
+            - 'ETCD'
+        - name: 'ETCD cert days left'
+          key: etcd.cert_expiry
+          type: ZABBIX_AGENT
+          applications:
+            - 'ETCD'
+        - name: 'Пинг до других мастеров'
+          key: 'ping.toother[IP]'
+          type: ZABBIX_AGENT
+          applications:
+            - 'Network'
+        - name: 'LDAP alive'
+          key: ldap_alive
+        - name: 'DNS alive'
+          key: dns_alive
+        - name: 'Registry alive'
+          key: registry_alive
+        - name: 'OOM killer last'
+          key: oom.last
+      triggers:
+        - description: 'ETCD локально не отвечает'
+          expression: '{K8S - Master Node:etcd.local.health.last()}=0'
+          severity: HIGH
+        - description: 'Истекает срок ETCD cert (<7 дни)'
+          expression: '{K8S - Master Node:etcd.cert_expiry.last()}<=7'
+          severity: HIGH
+        - description: 'Истекает срок ETCD cert (<30 дни)'
+          expression: '{K8S - Master Node:etcd.cert_expiry.last()}<=30'
+          severity: WARNING
+        - description: 'Нет сетевой связанности с мастером X'
+          expression: '{K8S - Master Node:ping.toother[IP].last()}=0'
+          severity: HIGH
+        - description: 'Корпоративный Registry недоступен'
+          expression: '{K8S - Master Node:registry_alive.last()}=0'
+          severity: HIGH
+        - description: 'LDAP недоступен'
+          expression: '{K8S - Master Node:ldap_alive.last()}=0'
+          severity: WARNING
+        - description: 'DNS недоступен'
+          expression: '{K8S - Master Node:dns_alive.last()}=0'
+          severity: WARNING
+        - description: 'Сработал OOM killer'
+          expression: '{K8S - Master Node:oom.last.diff()}=1'
+          severity: WARNING
+```
+
+#### Аналогично делается шаблон для worker/ingress (без etcd health, но с сетевыми, LDAP, OOM, API-LB-check для самодиагностики).
+
+
+---
+
+## 5. К каким узлам применять эти шаблоны
+
+| Шаблон                       | Узлы-применения                           |
+|------------------------------|-------------------------------------------|
+| K8S - External LB Health     | LB (оба сервера с keepalived)             |
+| K8S - Master Node            | Все master-узлы                           |
+| K8S - Ingress Node           | Все ingress-узлы                          |
+| K8S - Worker Node            | Все worker-узлы                           |
+
+---
+
+## 6. Вопросы по автоматизации  
+Для части скриптов (cert expiry, etcd health) на zabbix агентах потребуется root-доступ или sudo для соответствующих команд.  
+Рекомендуется использовать sudoers с запретом password для изолированных команд.
+
+---
+
+## 7. Важные примечания  
+- Тестируйте ping/curl от конкретных серверов в проде: методы зависят от iptables, selinux, etc.
+- Если хотите расширить метрики (например, кол-во notReady pod-ов или CrashLoopBackOff по node), требуется доступ к k8s api — реализуется sudo+kubectl и userparameter или zabbix external script с сервисным kubeconfig.
+
+---
+
+## 8. Дополнительные проверки (по желанию)  
+- 'kubectl get nodes': статус notReady — можно добавить на мастерах, если есть доступ к kubectl.
+- 'kubectl get pods --all-namespaces': количество CrashLoopBackOff.
+- 'kubectl get componentstatus' — if you want, но часть уже видно по системным сервисам.
+
+---
+
+### Итог
+
+**Такой мониторинг позволит вашей дежурной смене оперативно реагировать на инфраструктурные и критичные для k8s инциденты, минимизируя излишний шум.**
+
+Если нужно готовый YAML-файл для импорта, напишите — внесу все ключевые проверки под ваш naming.  
+Если есть пожелания по автообнаружению мастеров/ingress/worker — уточняйте.

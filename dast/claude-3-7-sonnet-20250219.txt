@@ -1,0 +1,117 @@
+﻿# DAST тестирование Ceph RadosGW (S3)
+
+DAST (Dynamic Application Security Testing) для Ceph RadosGW можно выполнить несколькими способами. Вот подробный план проведения такого тестирования:
+
+## 1. Подготовка окружения
+
+Перед началом тестирования рекомендуется:
+- Создать отдельную тестовую среду (если возможно)
+- Убедиться, что у вас есть необходимые доступы (S3 ключи)
+- Создать резервные копии данных
+
+## 2. Инструменты для DAST тестирования S3
+
+### 2.1. OWASP ZAP
+```bash
+# Установка
+docker pull owasp/zap2docker-stable
+
+# Запуск сканирования
+docker run -t owasp/zap2docker-stable zap-baseline.py -t http://your-radosgw-endpoint:port
+```
+
+### 2.2. S3Scanner
+```bash
+# Установка
+git clone https://github.com/sa7mon/S3Scanner.git
+cd S3Scanner
+pip install -r requirements.txt
+
+# Использование
+python s3scanner.py --endpoint-url=http://your-radosgw-endpoint:port --bucket-name your-bucket
+```
+
+### 2.3. AWS CLI для проверки конфигурации
+```bash
+# Настройка профиля для вашего Ceph
+aws configure --profile ceph-test
+# Введите ваши credentials и endpoint URL
+
+# Тестирование доступа к бакетам
+aws --profile ceph-test --endpoint-url=http://your-radosgw-endpoint:port s3 ls
+```
+
+## 3. Специфичные тесты для RadosGW
+
+### 3.1. Проверка политик доступа
+```bash
+# Проверка публичного доступа к бакету
+aws --profile ceph-test --endpoint-url=http://your-radosgw-endpoint:port s3api get-bucket-policy --bucket your-bucket
+
+# Тест на публичный доступ без авторизации
+curl -v http://your-radosgw-endpoint:port/your-bucket/
+```
+
+### 3.2. Fuzzing S3 API
+Используйте инструменты для fuzzing API, например, [API Fuzzer](https://github.com/Fuzzapi/API-fuzzer):
+```bash
+docker run -it --rm -v $(pwd):/data api-fuzzer -f /data/s3-api.json -o /data/results
+```
+
+### 3.3. Тестирование на DoS-уязвимости
+```bash
+# Инструмент slowloris для тестирования отказоустойчивости
+git clone https://github.com/gkbrk/slowloris.git
+cd slowloris
+python slowloris.py your-radosgw-endpoint
+```
+
+## 4. Комплексное сканирование с помощью Nuclei
+
+```bash
+# Установка Nuclei
+GO111MODULE=on go get -v github.com/projectdiscovery/nuclei/v2/cmd/nuclei
+
+# Загрузка шаблонов
+nuclei -update-templates
+
+# Сканирование
+nuclei -u http://your-radosgw-endpoint:port -t cves/ -t vulnerabilities/
+```
+
+## 5. Тестирование аутентификации и авторизации
+
+```bash
+# Создание временных учетных записей с разными уровнями доступа
+radosgw-admin user create --uid=test-user --display-name="Test User"
+
+# Попытки доступа с неверными учетными данными
+aws --profile ceph-test --endpoint-url=http://your-radosgw-endpoint:port s3 ls --aws-access-key-id=INCORRECT --aws-secret-access-key=INCORRECT
+```
+
+## 6. Проверка шифрования и защиты данных
+
+```bash
+# Проверка SSL/TLS конфигурации
+nmap --script ssl-enum-ciphers -p 443 your-radosgw-endpoint
+
+# Тестирование соединения через незащищенный протокол
+curl -v http://your-radosgw-endpoint:port
+```
+
+## 7. Анализ результатов
+
+После проведения тестов:
+1. Составьте отчет о найденных уязвимостях
+2. Классифицируйте их по степени риска (CVSS)
+3. Разработайте план устранения проблем
+4. Обновите конфигурацию и повторите тесты
+
+## Дополнительные рекомендации
+
+- Проводите тестирование регулярно
+- Следите за CVE, связанными с Ceph
+- Обновляйте Ceph до последних версий
+- Проверяйте конфигурации на соответствие best practices
+
+Важно: проводите все тесты с разрешения владельцев системы и в выделенных для тестирования временных окнах, чтобы минимизировать влияние на рабочую среду.

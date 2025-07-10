@@ -1,0 +1,239 @@
+﻿### Список метрик и методы их получения
+
+#### 1. **Недоступность kube-apiserver через балансировщик нагрузки (LB)**  
+**Метод**: Проверка через `curl` к `/healthz` endpoint на LB.  
+**Скрипт (Zabbix agent)**:  
+```bash
+#!/bin/bash
+LB_URL="https://<lb-host>:6443/healthz"
+TIMEOUT=5
+curl -k --silent --connect-timeout $TIMEOUT $LB_URL | grep -q "ok" && echo 1 || echo 0
+```
+**Порог**: Алерт при ответе ≠ `1` в течение 5 минут.  
+**Критичность**: High.  
+
+---
+
+#### 2. **Проблемы сетевой связности между узлами**  
+**Метод**: ICMP-пинг или TCP-проверка (порт 2379/2380 для etcd, 6443 для API).  
+**Скрипт (Zabbix agent)**:  
+```bash
+#!/bin/bash
+NODES=("master1" "master2" "master3" "ingress1" "ingress2")
+for node in "${NODES[@]}"; do
+    ping -c 3 $node > /dev/null || echo "Node $node unreachable"
+done
+```
+**Порог**: Алерт при ≥3 неудачных попыток пинга.  
+**Критичность**: High.  
+
+---
+
+#### 3. **Проблемы сетевой связности между подами на разных узлах**  
+**Метод**: Проверка TCP-соединения между случайными подами.  
+**Скрипт (Zabbix agent)**:  
+```bash
+#!/bin/bash
+PODS=$(kubectl get pods -A -o wide | awk '{print $7, $8}' | grep -v "IP" | sort -u)
+for pod in $PODS; do
+    ip=$(echo $pod | awk '{print $1}')
+    nc -zvw 3 $ip 80 || echo "Pod $ip unreachable"
+done
+```
+**Порог**: Алерт при ≥1 непрошедшей проверке.  
+**Критичность**: Medium.  
+
+---
+
+#### 4. **Отказ одного или нескольких master-узлов**  
+**Метод**: Проверка статуса узлов через Kubernetes API.  
+**API-запрос**:  
+```bash
+kubectl get nodes -l node-role.kubernetes.io/control-plane | grep -v "Ready"
+```
+**Порог**: Алерт при количестве неготовых мастеров > 0.  
+**Критичность**: Critical (если все мастера недоступны), High (если один из трёх).  
+
+---
+
+#### 5. **Отказ узлов etcd**  
+**Метод**: Проверка здоровья etcd через API.  
+**API-запрос**:  
+```bash
+ETCDCTL_API=3 etcdctl --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+--cert=/etc/kubernetes/pki/etcd/healthcheck-client.crt \
+--key=/etc/kubernetes/pki/etcd/healthcheck-client.key \
+--endpoints=https://127.0.0.1:2379 endpoint health
+```
+**Порог**: Алерт при любом `unhealthy`.  
+**Критичность**: Critical.  
+
+---
+
+#### 6. **Истечение срока действия сертификатов**  
+**Метод**: Проверка срока действия сертификатов через `openssl`.  
+**Скрипт (Zabbix agent)**:  
+```bash
+#!/bin/bash
+CERT_PATH="/etc/kubernetes/pki/apiserver.crt"
+DAYS_LEFT=$(openssl x509 -in $CERT_PATH -text -noout | grep "Not After" | awk '{print $4}')
+if [[ $(date -d "$DAYS_LEFT" +%s) -lt $(date -d "+30 days" +%s) ]]; then
+    echo "Certificate expires in <30 days"
+fi
+```
+**Порог**: Алерт за 30 дней до истечения.  
+**Критичность**: Medium.  
+
+---
+
+#### 7. **Недоступность корпоративных DNS-серверов**  
+**Метод**: Проверка DNS-запросов через `nslookup`.  
+**Скрипт (Zabbix agent)**:  
+```bash
+#!/bin/bash
+DNS_SERVERS=("dns1.example.com" "dns2.example.com")
+for dns in "${DNS_SERVERS[@]}"; do
+    nslookup kubernetes.default.svc.cluster.local $dns > /dev/null || echo "DNS $dns unreachable"
+done
+```
+**Порог**: Алерт при недоступности всех DNS.  
+**Критичность**: High.  
+
+---
+
+#### 8. **Недоступность корпоративных LDAP-серверов**  
+**Метод**: Проверка TCP-соединения на порт 389/636.  
+**Скрипт (Zabbix agent)**:  
+```bash
+#!/bin/bash
+LDAP_SERVERS=("ldap1.example.com" "ldap2.example.com")
+for ldap in "${LDAP_SERVERS[@]}"; do
+    nc -zvw 3 $ldap 636 > /dev/null || echo "LDAP $ldap unreachable"
+done
+```
+**Порог**: Алерт при недоступности всех LDAP.  
+**Критичность**: Medium.  
+
+---
+
+#### 9. **Недоступность корпоративного репозитория контейнеров**  
+**Метод**: Проверка доступа к registry через `curl`.  
+**Скрипт (Zabbix agent)**:  
+```bash
+#!/bin/bash
+REGISTRY="registry.example.com"
+curl -k --silent https://$REGISTRY/v2/ > /dev/null || echo "Registry unreachable"
+```
+**Порог**: Алерт при недоступности.  
+**Критичность**: High.  
+
+---
+
+#### 10. **Срабатывание OOM Killer**  
+**Метод**: Поиск записей в логах ядра.  
+**Скрипт (Zabbix agent)**:  
+```bash
+#!/bin/bash
+dmesg | grep -i "oom\|kill" | grep -v "pattern" || echo 1
+```
+**Порог**: Алерт при наличии записей.  
+**Критичность**: High.  
+
+---
+
+### Дополнительные проверки
+
+#### 11. **Проверка статуса Ingress-контроллера (nginx)**  
+**Метод**: Проверка статуса пода `nginx-ingress`.  
+**API-запрос**:  
+```bash
+kubectl get pods -n istio-system -l app=nginx-ingress | grep -v "Running"
+```
+**Порог**: Алерт при неготовом поде.  
+**Критичность**: Medium.  
+
+#### 12. **Проверка здоровья Istio Control Plane**  
+**Метод**: Проверка статуса подов Istio.  
+**API-запрос**:  
+```bash
+kubectl get pods -n istio-system | grep -v "Running\|Completed" | wc -l
+```
+**Порог**: Алерт при количестве неготовых подов > 0.  
+**Критичность**: High.  
+
+---
+
+### Шаблоны Zabbix (YAML)
+
+#### Шаблон для проверки API и сертификатов  
+**Применяется**: LB-серверы, master-узлы  
+```yaml
+- name: K8s API and Certificates
+  items:
+    - key: kube_api_health
+      script: /usr/local/bin/check_kube_api.sh
+      interval: 1m
+    - key: cert_expiry
+      script: /usr/local/bin/check_cert.sh
+      interval: 1h
+```
+
+#### Шаблон для сетевых проверок  
+**Применяется**: Все узлы  
+```yaml
+- name: Network Connectivity
+  items:
+    - key: node_connectivity
+      script: /usr/local/bin/check_node_connectivity.sh
+      interval: 5m
+    - key: pod_connectivity
+      script: /usr/local/bin/check_pod_connectivity.sh
+      interval: 5m
+```
+
+#### Шаблон для проверки etcd и мастера  
+**Применяется**: Master-узлы  
+```yaml
+- name: Master and etcd Health
+  items:
+    - key: etcd_health
+      script: /usr/local/bin/check_etcd.sh
+      interval: 1m
+    - key: master_node_status
+      script: kubectl get nodes -l node-role.kubernetes.io/control-plane
+      interval: 1m
+```
+
+#### Шаблон для внешних зависимостей  
+**Применяется**: Все узлы  
+```yaml
+- name: External Dependencies
+  items:
+    - key: dns_health
+      script: /usr/local/bin/check_dns.sh
+      interval: 5m
+    - key: registry_health
+      script: /usr/local/bin/check_registry.sh
+      interval: 5m
+```
+
+#### Шаблон для OOM и Ingress  
+**Применяется**: Worker и Ingress-узлы  
+```yaml
+- name: OOM and Ingress
+  items:
+    - key: oom_killer
+      script: /usr/local/bin/check_oom.sh
+      interval: 1m
+    - key: ingress_status
+      script: kubectl get pods -n istio-system -l app=nginx-ingress
+      interval: 1m
+```
+
+---
+
+### Примечания  
+- Убедитесь, что скрипты имеют права на выполнение (`chmod +x`).  
+- Используйте `nc` вместо `telnet` для TCP-проверок (более надежно).  
+- Для `kubectl` на LB-серверах настройте конфиг с минимальными привилегиями.  
+- Для Zabbix agent v1 используйте простые скрипты без сложных зависимостей.

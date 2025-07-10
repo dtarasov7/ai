@@ -1,0 +1,395 @@
+﻿Вот комплексный список метрик для мониторинга Kubernetes кластера через Zabbix:
+
+## Основные метрики
+
+### 1. Доступность Kubernetes API через LB
+**Способ получения:** Zabbix Agent (скрипт)
+**Применение:** LB узлы
+
+```bash
+#!/bin/bash
+# /usr/local/bin/check_k8s_api.sh
+timeout 5 curl -k -s --max-time 5 https://your-k8s-api:6443/healthz > /dev/null 2>&1
+if [ $? -eq 0 ]; then
+    echo 1
+else
+    echo 0
+fi
+```
+
+**Конфиг zabbix_agentd.conf:**
+```
+UserParameter=k8s.api.health,/usr/local/bin/check_k8s_api.sh
+```
+
+**Пороги:** 0 = недоступен (High priority)
+
+### 2. Статус узлов кластера
+**Способ получения:** Zabbix Agent (скрипт)
+**Применение:** Master узлы
+
+```bash
+#!/bin/bash
+# /usr/local/bin/check_k8s_nodes.sh
+kubectl get nodes --no-headers 2>/dev/null | awk '{
+    if ($2 == "Ready") ready++; 
+    total++
+} END {
+    if (total > 0) print ready"/"total; 
+    else print "0/0"
+}'
+```
+
+**Конфиг zabbix_agentd.conf:**
+```
+UserParameter=k8s.nodes.status,/usr/local/bin/check_k8s_nodes.sh
+UserParameter=k8s.nodes.ready,/usr/local/bin/check_k8s_nodes.sh | cut -d'/' -f1
+UserParameter=k8s.nodes.total,/usr/local/bin/check_k8s_nodes.sh | cut -d'/' -f2
+```
+
+**Пороги:** 
+- Если ready < total - Warning
+- Если ready < total*0.7 - High priority
+
+### 3. Статус etcd кластера
+**Способ получения:** Zabbix Agent (скрипт)
+**Применение:** Master узлы
+
+```bash
+#!/bin/bash
+# /usr/local/bin/check_etcd_health.sh
+ETCD_ENDPOINTS="https://master1:2379,https://master2:2379,https://master3:2379"
+ETCD_CERT="/etc/kubernetes/pki/etcd/peer.crt"
+ETCD_KEY="/etc/kubernetes/pki/etcd/peer.key"
+ETCD_CA="/etc/kubernetes/pki/etcd/ca.crt"
+
+timeout 5 etcdctl --endpoints=$ETCD_ENDPOINTS \
+    --cert=$ETCD_CERT --key=$ETCD_KEY --cacert=$ETCD_CA \
+    endpoint health --cluster 2>/dev/null | grep -c "is healthy"
+```
+
+**Конфиг zabbix_agentd.conf:**
+```
+UserParameter=k8s.etcd.healthy_members,/usr/local/bin/check_etcd_health.sh
+```
+
+**Пороги:**
+- 3 healthy = OK
+- 2 healthy = Warning
+- 1 healthy = High priority
+- 0 healthy = Disaster
+
+### 4. Сетевая связность между узлами
+**Способ получения:** Zabbix Agent (скрипт)
+**Применение:** Все узлы
+
+```bash
+#!/bin/bash
+# /usr/local/bin/check_node_connectivity.sh
+NODES=$(kubectl get nodes -o jsonpath='{.items[*].status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null)
+success=0
+total=0
+
+for node in $NODES; do
+    if [ "$node" != "$(hostname -I | awk '{print $1}')" ]; then
+        total=$((total + 1))
+        if timeout 3 ping -c 1 -W 1 $node > /dev/null 2>&1; then
+            success=$((success + 1))
+        fi
+    fi
+done
+
+if [ $total -gt 0 ]; then
+    echo "scale=2; $success * 100 / $total" | bc
+else
+    echo "100"
+fi
+```
+
+**Конфиг zabbix_agentd.conf:**
+```
+UserParameter=k8s.nodes.connectivity,/usr/local/bin/check_node_connectivity.sh
+```
+
+**Пороги:**
+- < 90% = Warning
+- < 70% = High priority
+
+### 5. Сетевая связность между подами
+**Способ получения:** Zabbix Agent (скрипт)
+**Применение:** Worker узлы
+
+```bash
+#!/bin/bash
+# /usr/local/bin/check_pod_connectivity.sh
+kubectl run connectivity-test --image=busybox --rm -it --restart=Never \
+    --timeout=30s -- /bin/sh -c "
+    for i in \$(seq 1 3); do
+        if nslookup kubernetes.default.svc.cluster.local > /dev/null 2>&1; then
+            echo 1
+            exit 0
+        fi
+        sleep 2
+    done
+    echo 0
+    " 2>/dev/null || echo 0
+```
+
+**Конфиг zabbix_agentd.conf:**
+```
+UserParameter=k8s.pods.connectivity,/usr/local/bin/check_pod_connectivity.sh
+```
+
+**Пороги:** 0 = проблемы связности (High priority)
+
+### 6. Срок действия сертификатов
+**Способ получения:** Zabbix Agent (скрипт)
+**Применение:** Master узлы
+
+```bash
+#!/bin/bash
+# /usr/local/bin/check_k8s_certs.sh
+CERT_PATHS="/etc/kubernetes/pki/apiserver.crt /etc/kubernetes/pki/etcd/server.crt"
+min_days=365
+
+for cert in $CERT_PATHS; do
+    if [ -f "$cert" ]; then
+        days=$(openssl x509 -in "$cert" -noout -enddate | cut -d= -f2 | xargs -I {} date -d "{}" +%s)
+        now=$(date +%s)
+        days_left=$(( (days - now) / 86400 ))
+        if [ $days_left -lt $min_days ]; then
+            min_days=$days_left
+        fi
+    fi
+done
+
+echo $min_days
+```
+
+**Конфиг zabbix_agentd.conf:**
+```
+UserParameter=k8s.certs.min_days,/usr/local/bin/check_k8s_certs.sh
+```
+
+**Пороги:**
+- < 30 дней = Warning
+- < 7 дней = High priority
+
+### 7. Доступность корпоративных DNS
+**Способ получения:** Zabbix Agent (скрипт)
+**Применение:** Все узлы
+
+```bash
+#!/bin/bash
+# /usr/local/bin/check_corp_dns.sh
+DNS_SERVERS="192.168.1.10 192.168.1.11"  # Замените на ваши DNS
+TEST_DOMAIN="corp.example.com"
+
+for dns in $DNS_SERVERS; do
+    if timeout 5 nslookup $TEST_DOMAIN $dns > /dev/null 2>&1; then
+        echo 1
+        exit 0
+    fi
+done
+echo 0
+```
+
+**Конфиг zabbix_agentd.conf:**
+```
+UserParameter=k8s.dns.corporate,/usr/local/bin/check_corp_dns.sh
+```
+
+**Пороги:** 0 = недоступен (High priority)
+
+### 8. Доступность корпоративных LDAP
+**Способ получения:** Zabbix Agent (скрипт)
+**Применение:** Master узлы
+
+```bash
+#!/bin/bash
+# /usr/local/bin/check_ldap.sh
+LDAP_SERVERS="ldap1.corp.com:389 ldap2.corp.com:389"
+
+for server in $LDAP_SERVERS; do
+    if timeout 5 nc -z ${server/:/ } > /dev/null 2>&1; then
+        echo 1
+        exit 0
+    fi
+done
+echo 0
+```
+
+**Конфиг zabbix_agentd.conf:**
+```
+UserParameter=k8s.ldap.available,/usr/local/bin/check_ldap.sh
+```
+
+**Пороги:** 0 = недоступен (High priority)
+
+### 9. Доступность корпоративного registry
+**Способ получения:** Zabbix Agent (скрипт)
+**Применение:** All узлы
+
+```bash
+#!/bin/bash
+# /usr/local/bin/check_registry.sh
+REGISTRY="registry.corp.com:5000"
+
+timeout 10 docker pull $REGISTRY/hello-world:latest > /dev/null 2>&1
+if [ $? -eq 0 ]; then
+    echo 1
+else
+    echo 0
+fi
+```
+
+**Конфиг zabbix_agentd.conf:**
+```
+UserParameter=k8s.registry.available,/usr/local/bin/check_registry.sh
+```
+
+**Пороги:** 0 = недоступен (High priority)
+
+### 10. OOM Killer events
+**Способ получения:** Zabbix Agent (скрипт)
+**Применение:** Все узлы
+
+```bash
+#!/bin/bash
+# /usr/local/bin/check_oom.sh
+journalctl --since "5 minutes ago" | grep -c "Killed process" || echo 0
+```
+
+**Конфиг zabbix_agentd.conf:**
+```
+UserParameter=k8s.oom.events,/usr/local/bin/check_oom.sh
+```
+
+**Пороги:** > 0 = Warning
+
+## Дополнительные метрики
+
+### 11. Статус Ingress контроллера
+**Причина добавления:** Критически важен для доступности приложений
+**Способ получения:** Zabbix Agent (скрипт)
+**Применение:** Ingress узлы
+
+```bash
+#!/bin/bash
+# /usr/local/bin/check_ingress.sh
+kubectl get pods -n ingress-nginx -l app.kubernetes.io/name=ingress-nginx \
+    --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l
+```
+
+**Конфиг zabbix_agentd.conf:**
+```
+UserParameter=k8s.ingress.running_pods,/usr/local/bin/check_ingress.sh
+```
+
+**Пороги:** < 1 = High priority
+
+### 12. Статус системных подов
+**Причина добавления:** Критически важные системные компоненты
+**Способ получения:** Zabbix Agent (скрипт)
+**Применение:** Master узлы
+
+```bash
+#!/bin/bash
+# /usr/local/bin/check_system_pods.sh
+kubectl get pods -n kube-system --no-headers 2>/dev/null | \
+    awk '{if ($3 != "Running" && $3 != "Completed") failed++} END {print failed+0}'
+```
+
+**Конфиг zabbix_agentd.conf:**
+```
+UserParameter=k8s.system.failed_pods,/usr/local/bin/check_system_pods.sh
+```
+
+**Пороги:** > 0 = Warning, > 3 = High priority
+
+### 13. Доступность Istio
+**Причина добавления:** Критически важен для service mesh
+**Способ получения:** Zabbix Agent (скрипт)
+**Применение:** Master узлы
+
+```bash
+#!/bin/bash
+# /usr/local/bin/check_istio.sh
+kubectl get pods -n istio-system -l app=istiod --field-selector=status.phase=Running \
+    --no-headers 2>/dev/null | wc -l
+```
+
+**Конфиг zabbix_agentd.conf:**
+```
+UserParameter=k8s.istio.running_pods,/usr/local/bin/check_istio.sh
+```
+
+**Пороги:** < 1 = High priority
+
+### 14. Статус Keepalived
+**Причина добавления:** Критически важен для HA балансировщика
+**Способ получения:** Zabbix Agent (скрипт)
+**Применение:** LB узлы
+
+```bash
+#!/bin/bash
+# /usr/local/bin/check_keepalived.sh
+if pgrep keepalived > /dev/null; then
+    echo 1
+else
+    echo 0
+fi
+```
+
+**Конфиг zabbix_agentd.conf:**
+```
+UserParameter=lb.keepalived.running,/usr/local/bin/check_keepalived.sh
+```
+
+**Пороги:** 0 = High priority
+
+### 15. Количество готовых подов в критичных namespace
+**Причина добавления:** Мониторинг готовности приложений
+**Способ получения:** Zabbix Agent (скрипт)
+**Применение:** Master узлы
+
+```bash
+#!/bin/bash
+# /usr/local/bin/check_critical_pods.sh
+CRITICAL_NS="default production"
+total=0
+ready=0
+
+for ns in $CRITICAL_NS; do
+    pods=$(kubectl get pods -n $ns --no-headers 2>/dev/null | wc -l)
+    ready_pods=$(kubectl get pods -n $ns --field-selector=status.phase=Running \
+        --no-headers 2>/dev/null | wc -l)
+    total=$((total + pods))
+    ready=$((ready + ready_pods))
+done
+
+if [ $total -gt 0 ]; then
+    echo "scale=2; $ready * 100 / $total" | bc
+else
+    echo "100"
+fi
+```
+
+**Конфиг zabbix_agentd.conf:**
+```
+UserParameter=k8s.critical_pods.ready_percent,/usr/local/bin/check_critical_pods.sh
+```
+
+**Пороги:** < 80% = Warning, < 50% = High priority
+
+## Шаблоны Zabbix
+
+### Шаблон для Load Balancer узлов
+
+```yaml
+zabbix_export:
+  version: '6.4'
+  templates:
+    - uuid: lb-template-uuid
+      template: Template_K8s_LoadBalancer
+      name: Kubernetes Load Balancer

@@ -1,0 +1,174 @@
+﻿# Мониторинг Kubernetes кластера через Zabbix 6.4
+
+## Основные метрики для мониторинга Kubernetes кластера
+
+### 1. Доступность Kubernetes API
+
+**Метрика**: Доступность kube-apiserver через LB
+
+**Способ получения**: Zabbix agent через скрипт
+
+**Скрипт** (разместить в `/etc/zabbix/scripts/check_kube_api.sh`):
+```bash
+#!/bin/bash
+curl -k -s --max-time 5 https://<LB_IP>:6443/healthz
+exit $?
+```
+
+**Пороги**: 
+- Предупреждение: Нет (бинарная проверка)
+- Критично: Код ответа не равен 0
+
+**Применение**: На серверах LB
+
+### 2. Состояние кластера Kubernetes
+
+**Метрика**: Статус компонентов control plane
+
+**Способ получения**: Zabbix agent через скрипт
+
+**Скрипт** (разместить в `/etc/zabbix/scripts/check_k8s_components.sh`):
+```bash
+#!/bin/bash
+COMPONENT=$1
+export KUBECONFIG=/etc/kubernetes/admin.conf
+
+component_status=$(kubectl get componentstatuses | grep "$COMPONENT" | awk '{print $2}')
+if [ "$component_status" == "Healthy" ]; then
+    echo 0
+else
+    echo 1
+fi
+```
+
+**Пороги**:
+- Предупреждение: Нет
+- Критично: Значение 1 (компонент нездоров)
+
+**Применение**: На master-узлах
+
+### 3. Доступность etcd
+
+**Метрика**: Статус кластера etcd
+
+**Способ получения**: Zabbix agent через скрипт
+
+**Скрипт** (разместить в `/etc/zabbix/scripts/check_etcd_health.sh`):
+```bash
+#!/bin/bash
+ENDPOINTS="https://master1:2379,https://master2:2379,https://master3:2379"
+CERT=/etc/kubernetes/pki/etcd/server.crt
+KEY=/etc/kubernetes/pki/etcd/server.key
+CACERT=/etc/kubernetes/pki/etcd/ca.crt
+
+health=$(ETCDCTL_API=3 etcdctl --endpoints=$ENDPOINTS --cacert=$CACERT --cert=$CERT --key=$KEY endpoint health | grep -c 'is healthy')
+echo $health
+```
+
+**Пороги**:
+- Предупреждение: < 2 (меньше двух узлов healthy)
+- Критично: < 1 (ни одного здорового узла)
+
+**Применение**: На master-узлах
+
+### 4. Срок действия сертификатов
+
+**Метрика**: Дни до истечения срока действия сертификатов
+
+**Способ получения**: Zabbix agent через скрипт
+
+**Скрипт** (разместить в `/etc/zabbix/scripts/check_k8s_certs.sh`):
+```bash
+#!/bin/bash
+CERT_PATH=$1
+END_DATE=$(openssl x509 -in $CERT_PATH -noout -enddate | cut -d= -f2)
+END_EPOCH=$(date -d "$END_DATE" +%s)
+NOW_EPOCH=$(date +%s)
+DAYS_LEFT=$(( ($END_EPOCH - $NOW_EPOCH) / 86400 ))
+echo $DAYS_LEFT
+```
+
+**Пороги**:
+- Предупреждение: < 30 (меньше 30 дней до истечения)
+- Критично: < 7 (меньше 7 дней до истечения)
+
+**Применение**: На master-узлах
+
+### 5. Сетевая связность между узлами
+
+**Метрика**: Проверка сетевой связности между узлами
+
+**Способ получения**: Zabbix agent через скрипт
+
+**Скрипт** (разместить в `/etc/zabbix/scripts/check_node_connectivity.sh`):
+```bash
+#!/bin/bash
+TARGET_NODE=$1
+ping -c 1 -W 2 $TARGET_NODE > /dev/null 2>&1
+echo $?
+```
+
+**Пороги**:
+- Предупреждение: Нет
+- Критично: Значение не равно 0 (нет связи)
+
+**Применение**: На всех узлах кластера
+
+### 6. Сетевая связность между подами
+
+**Метрика**: Проверка сетевой связности между подами на разных узлах
+
+**Способ получения**: Zabbix agent через скрипт
+
+**Скрипт** (разместить в `/etc/zabbix/scripts/check_pod_connectivity.sh`):
+```bash
+#!/bin/bash
+export KUBECONFIG=/etc/kubernetes/admin.conf
+
+# Создаем тестовые поды если их нет
+kubectl get pod network-test-1 -n kube-system &>/dev/null
+if [ $? -ne 0 ]; then
+  kubectl run network-test-1 --image=busybox -n kube-system -- sleep infinity
+  sleep 10
+fi
+
+kubectl get pod network-test-2 -n kube-system &>/dev/null
+if [ $? -ne 0 ]; then
+  kubectl run network-test-2 --image=busybox -n kube-system -- sleep infinity
+  sleep 10
+fi
+
+# Получаем IP первого пода
+POD1_IP=$(kubectl get pod network-test-1 -n kube-system -o jsonpath='{.status.podIP}')
+
+# Проверяем связность из второго пода
+RESULT=$(kubectl exec -n kube-system network-test-2 -- ping -c 1 -W 2 $POD1_IP)
+echo $?
+```
+
+**Пороги**:
+- Предупреждение: Нет
+- Критично: Значение не равно 0 (нет связи)
+
+**Применение**: На одном из master-узлов
+
+### 7. Доступность корпоративных DNS серверов
+
+**Метрика**: Проверка доступности DNS серверов
+
+**Способ получения**: Zabbix agent через скрипт
+
+**Скрипт** (разместить в `/etc/zabbix/scripts/check_dns.sh`):
+```bash
+#!/bin/bash
+DNS_SERVER=$1
+TEST_DOMAIN=$2
+dig @$DNS_SERVER $TEST_DOMAIN +short +time=2 +tries=1 > /dev/null 2>&1
+echo $?
+```
+
+**Пороги**:
+- Предупреждение: Нет
+- Критично: Значение не равно 0 (DNS недоступен)
+
+**Применение**: На всех

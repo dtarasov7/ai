@@ -1,0 +1,477 @@
+﻿Отличная задача. Комплексный подход к мониторингу критически важен, особенно когда речь идет о передаче ответственности дежурной смене, которая не является экспертами в Kubernetes.
+
+Цель — создать высокоуровневую систему оповещения, которая сигнализирует о реальных проблемах, а не о временных флуктуациях.
+
+Вот развернутый план мониторинга, адаптированный под ваши условия (Zabbix 6.4, Zabbix Agent v1) и с фокусом на минимизацию ложных срабатываний.
+
+### Общая стратегия
+
+Мы будем использовать гибридный подход:
+1.  **Zabbix Server (HTTP Agent):** Для всех проверок, которые можно выполнить через Kubernetes API. Это наиболее предпочтительный способ, так как он не требует установки скриптов на узлы и работает централизованно. Zabbix 6.4 отлично это умеет.
+2.  **Zabbix Agent (UserParameter):** Для проверок, которые требуют выполнения команд непосредственно на хосте (например, проверка истечения сертификатов на файловой системе, проверка доступности внешних систем с узла, поиск OOM Killer в логах). Учитывая использование Zabbix Agent v1, мы будем полагаться на `UserParameter` и простые shell-скрипты.
+
+### Предварительные требования
+
+1.  **ServiceAccount для Zabbix:** В Kubernetes нужно создать `ServiceAccount`, `ClusterRole` и `ClusterRoleBinding`, чтобы Zabbix мог с правами "только на чтение" обращаться к API.
+    ```yaml
+    # zabbix-reader.yaml
+    apiVersion: v1
+    kind: ServiceAccount
+    metadata:
+      name: zabbix-reader
+      namespace: kube-system
+    ---
+    apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRole
+    metadata:
+      name: zabbix-reader-role
+    rules:
+    - apiGroups: [""]
+      resources: ["nodes", "pods", "componentstatuses", "persistentvolumeclaims", "namespaces", "services", "endpoints"]
+      verbs: ["get", "list", "watch"]
+    - apiGroups: ["apps"]
+      resources: ["daemonsets", "deployments", "statefulsets"]
+      verbs: ["get", "list", "watch"]
+    - apiGroups: ["certificates.k8s.io"]
+      resources: ["certificatesigningrequests"]
+      verbs: ["get", "list"]
+    ---
+    apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRoleBinding
+    metadata:
+      name: zabbix-reader-binding
+    subjects:
+    - kind: ServiceAccount
+      name: zabbix-reader
+      namespace: kube-system
+    roleRef:
+      kind: ClusterRole
+      name: zabbix-reader-role
+      apiGroup: rbac.authorization.k8s.io
+    ```
+2.  **Получение токена:** После применения манифеста, нужно получить токен для этого ServiceAccount.
+    ```bash
+    # Для K8s 1.24+
+    kubectl create token zabbix-reader -n kube-system --duration=8760h 
+    # Для старых версий
+    # SECRET_NAME=$(kubectl get sa zabbix-reader -n kube-system -o jsonpath='{.secrets[0].name}')
+    # TOKEN=$(kubectl get secret $SECRET_NAME -n kube-system -o jsonpath='{.data.token}' | base64 --decode)
+    ```
+    Этот токен будет использоваться в Zabbix в макросе `{$K8S.API.TOKEN}`.
+3.  **Sudo для агента:** На хостах, где будут выполняться скрипты, пользователю `zabbix` нужны будут права на выполнение `kubectl` и других команд.
+    В файле `/etc/sudoers.d/zabbix-agent` прописать:
+    ```
+    zabbix ALL=(ALL) NOPASSWD: /usr/bin/kubectl, /usr/bin/journalctl, /usr/bin/openssl, /usr/bin/nc
+    ```
+4.  **Утилиты на хостах:** Убедитесь, что на master-узлах установлен `kubectl` и `openssl`, а на всех узлах `nc` (netcat) и `jq`.
+
+---
+
+### Список метрик и проверок
+
+Для каждой проверки будет указан метод, пороги и детали реализации.
+
+#### 1. Доступность кластера и его основных компонентов
+
+| Метрика/Проверка | Метод получения | Порог и Уровень критичности |
+| :--- | :--- | :--- |
+| **1.1. Доступность Kube API через LB** | Zabbix Server (HTTP) | `nodata(3m)` -> **Disaster**. Сигнализирует о полной недоступности кластера извне. |
+| **1.2. Работоспособность Kube API** | Zabbix Server (HTTP) | `last() != "ok"` -> **High**. API отвечает, но сообщает о своей неработоспособности. |
+| **1.3. Состояние компонентов Control Plane** | Zabbix Server (HTTP) | Если хотя бы 1 компонент (`etcd-0`, `controller-manager`, `scheduler`) не `Healthy` -> **High**. |
+| **1.4. Отказ одного master-узла** | Zabbix Server (HTTP) | 1 из 3 master в состоянии `NotReady` -> **Warning**. Кластер работает, но потерял избыточность. |
+| **1.5. Отказ двух и более master-узлов** | Zabbix Server (HTTP) | >=2 из 3 master в состоянии `NotReady` -> **Disaster**. Кластер неработоспособен. |
+| **1.6. Работоспособность кластера etcd** | Zabbix Server (HTTP) | 1 из 3 нод etcd нездорова -> **High**. Риск потери кворума. |
+| **1.7. Потеря кворума etcd** | Zabbix Server (HTTP) | >=2 из 3 нод etcd нездоровы -> **Disaster**. Control plane не работает, кластер в состоянии "только чтение". |
+
+#### 2. Проблемы с сетью и зависимостями
+
+| Метрика/Проверка | Метод получения | Порог и Уровень критичности |
+| :--- | :--- | :--- |
+| **2.1. Связанность между узлами кластера** | Zabbix Agent (Скрипт) | `last() > 0` -> **Warning**. Проблема с физической сетью или firewall. |
+| **2.2. Связанность между подами (CNI)** | Zabbix Agent (Скрипт) | `last() > 0` -> **High**. Проблема с overlay-сетью (Calico, Flannel и т.д.). Влияет на работу приложений. |
+| **2.3. Доступность корпоративного DNS** | Zabbix Agent (Скрипт) | `last() = 0` -> **Warning**. Проблемы с разрешением внутренних имен. |
+| **2.4. Доступность корпоративного LDAP** | Zabbix Agent (Скрипт) | `last() = 0` -> **Warning**. Могут быть проблемы с аутентификацией пользователей в приложениях. |
+| **2.5. Доступность репозитория контейнеров** | Zabbix Agent (Скрипт) | `last() = 0` -> **High**. Новые поды не смогут стартовать, проблемы с редеплоем. |
+
+#### 3. Состояние узлов и приложений
+
+| Метрика/Проверка | Метод получения | Порог и Уровень критичности |
+| :--- | :--- | :--- |
+| **3.1. Истечение срока сертификатов API Server** | Zabbix Agent (Скрипт) | < 30 дней -> **Warning**. < 7 дней -> **High**. |
+| **3.2. Срабатывание OOM Killer на узле**| Zabbix Agent (Скрипт) | `last() > 0` -> **Warning**. Сигнализирует о нехватке памяти у приложений или на узле. |
+| **3.3. PVC в статусе не `Bound`** | Zabbix Server (HTTP) | `last() > 0` -> **High**. Приложения не могут получить доступ к хранилищу. |
+| **3.4. Проблемы с Ingress Controller** | Zabbix Server (HTTP) | Кол-во готовых подов < 2 -> **High**. Входящий трафик в приложения может быть нарушен. |
+
+---
+
+### Реализация проверок и скрипты
+
+#### 1. Проверки через Zabbix Server (HTTP Agent)
+
+Эти проверки настраиваются на фиктивном хосте в Zabbix, например "K8s-Cluster-API", или прямо на хосте Zabbix-сервера.
+
+*   **1.1. Доступность Kube API через LB:**
+    *   **Тип:** Simple check
+    *   **Ключ:** `net.tcp.service[https,{$K8S.LB.IP},443]`
+    *   **Макросы на хосте:** `{$K8S.LB.IP}` - VIP-адрес вашего балансировщика.
+
+*   **1.2. Работоспособность Kube API:**
+    *   **Тип:** HTTP agent
+    *   **URL:** `https://{$K8S.LB.IP}/livez` (для K8s 1.16+; для старых версий - `/healthz`)
+    *   **Заголовки:** `Authorization: Bearer {$K8S.API.TOKEN}`
+    *   **Проверка:** Ожидаемый код ответа `200`. Искать строку `ok` в теле.
+
+*   **1.3-1.7, 3.3, 3.4:** Эти проверки удобнее всего реализовать через один `master item` типа HTTP Agent, который забирает данные с API, и несколько `dependent items`, которые парсят JSON.
+    *   **Master Item `k8s.get.nodes`:**
+        *   **Тип:** HTTP Agent
+        *   **URL:** `https://{$K8S.API.URL}/api/v1/nodes`
+        *   **Заголовки:** `Authorization: Bearer {$K8S.API.TOKEN}`
+        *   **Макросы:** `{$K8S.API.URL}` (адрес API, можно через LB), `{$K8S.API.TOKEN}` (токен).
+    *   **Dependent Item 1.4/1.5 (Количество NotReady master-узлов):**
+        *   **Preprocessing:** `JSONPath` -> `$.items[?(@.metadata.labels['node-role.kubernetes.io/master']=='')].status.conditions[?(@.type=='Ready')].status`
+        *   Далее `Count` с параметром `False` (считаем количество не готовых).
+    *   **Аналогично создаются dependent items для etcd, PVC и подов ingress-контроллера, используя соответствующие эндпоинты API (`/api/v1/componentstatuses`, `/api/v1/persistentvolumeclaims`, `/api/v1/namespaces/ingress-nginx/pods`).**
+
+#### 2. Проверки через Zabbix Agent (Скрипты)
+
+Эти скрипты размещаются на узлах кластера (например, в `/etc/zabbix/scripts/`).
+В `zabbix_agentd.conf` добавляются строки `UserParameter`.
+
+*   **2.1. Связанность между узлами кластера (netcheck_nodes.sh)**
+    *   Скрипт выполняется на **каждом master-узле**.
+    ```bash
+    #!/bin/bash
+    # /etc/zabbix/scripts/netcheck_nodes.sh
+    UNREACHABLE_COUNT=0
+    # Получаем IP всех узлов кластера, исключая свой собственный
+    ALL_IPS=$(sudo /usr/bin/kubectl get nodes -o jsonpath='{.items[*].status.addresses[?(@.type=="InternalIP")].address}')
+    MY_IP=$(hostname -i)
+
+    for ip in $ALL_IPS; do
+      if [ "$ip" != "$MY_IP" ]; then
+        # Проверяем доступность по ICMP (ping)
+        ping -c 1 -W 1 "$ip" &>/dev/null
+        if [ $? -ne 0 ]; then
+          ((UNREACHABLE_COUNT++))
+        fi
+      fi
+    done
+    echo $UNREACHABLE_COUNT
+    ```
+    *   **UserParameter:** `UserParameter=k8s.node.unreachable,sudo /etc/zabbix/scripts/netcheck_nodes.sh`
+
+*   **2.2. Связанность между подами (CNI)**
+    *   **Подготовка:** Нужно развернуть `DaemonSet`, который будет слушать на известном порту на каждом узле. Это эталонное приложение для проверки сети.
+        ```yaml
+        # netchecker-ds.yaml
+        apiVersion: apps/v1
+        kind: DaemonSet
+        metadata:
+          name: netchecker-agent-hostport
+          namespace: kube-system
+        spec:
+          selector: { matchLabels: { app: netchecker-agent-hostport } }
+          template:
+            metadata: { labels: { app: netchecker-agent-hostport } }
+            spec:
+              hostNetwork: true # Важно!
+              containers:
+              - name: netchecker-agent
+                image: k8s.gcr.io/e2e-test-images/agnhost:2.29
+                args: ["netexec", "--http-port=8080"]
+                ports:
+                - containerPort: 8080
+                  hostPort: 8080 # Открываем порт на хосте
+                  protocol: TCP
+        ```
+    *   **Скрипт `netcheck_cni.sh` (выполнять на каждом узле кластера: master, worker, ingress)**
+    ```bash
+    #!/bin/bash
+    # /etc/zabbix/scripts/netcheck_cni.sh
+    UNREACHABLE_COUNT=0
+    # Получаем IP всех подов нашего DaemonSet
+    POD_IPS=$(sudo /usr/bin/kubectl get pods -n kube-system -l app=netchecker-agent-hostport -o jsonpath='{.items[*].status.podIP}')
+    MY_IP=$(hostname -i | awk '{print $1}') # Получаем IP хоста, чтобы не проверять самого себя
+    MY_POD_IP=$(sudo /usr/bin/kubectl get pods -n kube-system -l app=netchecker-agent-hostport --field-selector spec.nodeName=$(hostname) -o jsonpath='{.items[0].status.podIP}')
+
+
+    for ip in $POD_IPS; do
+        if [ "$ip" != "$MY_POD_IP" ]; then
+            # Проверяем доступность по HTTP
+            curl --connect-timeout 1 -s "http://$ip:8080/hostname" >/dev/null
+            if [ $? -ne 0 ]; then
+                ((UNREACHABLE_COUNT++))
+            fi
+        fi
+    done
+    echo $UNREACHABLE_COUNT
+    ```
+    *   **UserParameter:** `UserParameter=k8s.pod.unreachable,sudo /etc/zabbix/scripts/netcheck_cni.sh`
+
+*   **2.3, 2.4, 2.5. Проверка внешних зависимостей (check_external.sh)**
+    *   Скрипт выполняется на **каждом master узле**.
+    ```bash
+    #!/bin/bash
+    # /etc/zabbix/scripts/check_external.sh
+    # $1 - тип проверки (dns, ldap, registry)
+    # $2 - хост
+    # $3 - порт (опционально)
+
+    TYPE=$1
+    HOST=$2
+    PORT=$3
+
+    case $TYPE in
+      "dns")
+        # Проверяем, что резолвится
+        dig +short "$HOST" | grep -E '^[0-9]{1,3}\.[0-9]{1,3}\.' &>/dev/null
+        echo $? # 0 - успех, 1 - провал
+        ;;
+      "ldap"|"registry")
+        # Проверяем TCP-соединение
+        nc -z -w 2 "$HOST" "$PORT" &>/dev/null
+        if [ $? -eq 0 ]; then echo 1; else echo 0; fi # 1 - успех, 0 - провал
+        ;;
+      *)
+        echo 0 # Неизвестный тип проверки
+        exit 1
+        ;;
+    esac
+    ```
+    *   **UserParameter:** `UserParameter=k8s.external.check[*],/etc/zabbix/scripts/check_external.sh $1 $2 $3`
+    *   **Примеры ключей в Zabbix:**
+        *   `k8s.external.check[dns,your-corp-dns.domain]`
+        *   `k8s.external.check[ldap,your-ldap-server,389]`
+        *   `k8s.external.check[registry,your-registry,443]`
+    *   **Важно:** Нужно настроить 3 разных item'а для 3 проверок. Триггеры сработают, если результат будет `0`.
+
+*   **3.1. Истечение срока сертификатов (check_cert.sh)**
+    *   Скрипт выполняется на **каждом master узле**.
+    ```bash
+    #!/bin/bash
+    # /etc/zabbix/scripts/check_cert.sh
+    # $1 - путь к файлу сертификата
+    CERT_FILE=$1
+
+    if [ ! -f "$CERT_FILE" ]; then
+      echo "0" # Файл не найден, это проблема
+      exit 1
+    fi
+
+    # Получаем дату истечения в секундах с начала эпохи
+    end_date_s=$(sudo /usr/bin/openssl x509 -in "$CERT_FILE" -noout -enddate | cut -d= -f 2)
+    end_date_s=$(date -d "$end_date_s" +%s)
+    now_s=$(date +%s)
+    # Считаем, сколько дней осталось
+    days_left=$(( (end_date_s - now_s) / 86400 ))
+
+    echo $days_left
+    ```
+    *   **UserParameter:** `UserParameter=k8s.cert.daysleft[*],sudo /etc/zabbix/scripts/check_cert.sh $1`
+    *   **Ключ в Zabbix:** `k8s.cert.daysleft[/etc/kubernetes/pki/apiserver.crt]`
+
+*   **3.2. Срабатывание OOM Killer (check_oom.sh)**
+    *   Скрипт выполняется на **каждом узле кластера**.
+    ```bash
+    #!/bin/bash
+    # /etc/zabbix/scripts/check_oom.sh
+    # Ищет OOM события за последние 5 минут
+    sudo /usr/bin/journalctl -k --since "5 minutes ago" | grep -i "OOM-killer" | wc -l
+    ```
+    *   **UserParameter:** `UserParameter=system.oom.count,sudo /etc/zabbix/scripts/check_oom.sh`
+
+---
+
+### Шаблоны Zabbix (формат YAML 6.4)
+
+#### Шаблон: `K8s Master Nodes`
+**Применять к:** Хостам master-узлов в Zabbix.
+
+```yaml
+zabbix_export:
+  version: '6.4'
+  templates:
+    - uuid: 2a8f8b7e8c3a4d6f8a8e3d0d3c0b0f1a
+      name: 'K8s Master Nodes'
+      groups:
+        - name: 'Templates/Kubernetes'
+      items:
+        # --- Проверки зависимостей ---
+        - name: 'External: Corporate DNS availability'
+          type: ZABBIX_AGENT
+          key: k8s.external.check[dns,{$CORP.DNS.HOST}]
+          delay: 2m
+          triggers:
+            - uuid: 1a1b1c1d1e1f2a2b2c2d2e2f3a3b3c3d
+              expression: 'last()=0'
+              name: 'Corporate DNS {$CORP.DNS.HOST} is unavailable from {HOST.NAME}'
+              priority: WARNING
+              
+        - name: 'External: Corporate LDAP availability'
+          type: ZABBIX_AGENT
+          key: k8s.external.check[ldap,{$CORP.LDAP.HOST},{$CORP.LDAP.PORT}]
+          delay: 2m
+          triggers:
+            - uuid: 2a2b2c2d2e2f3a3b3c3d3e3f4a4b4c4d
+              expression: 'last()=0'
+              name: 'Corporate LDAP {$CORP.LDAP.HOST} is unavailable from {HOST.NAME}'
+              priority: WARNING
+
+        - name: 'External: Corporate Registry availability'
+          type: ZABBIX_AGENT
+          key: k8s.external.check[registry,{$CORP.REGISTRY.HOST},{$CORP.REGISTRY.PORT}]
+          delay: 5m
+          triggers:
+            - uuid: 3a3b3c3d3e3f4a4b4c4d4e4f5a5b5c5d
+              expression: 'last()=0'
+              name: 'Corporate Registry {$CORP.REGISTRY.HOST} is unavailable from {HOST.NAME}'
+              priority: HIGH
+
+        # --- Проверки сертификатов ---
+        - name: 'K8s: API Server certificate expiration'
+          type: ZABBIX_AGENT
+          key: k8s.cert.daysleft[/etc/kubernetes/pki/apiserver.crt]
+          delay: 6h
+          units: days
+          triggers:
+            - uuid: 4a4b4c4d4e4f5a5b5c5d5e5f6a6b6c6d
+              expression: 'last()<30'
+              name: 'K8s API Server certificate on {HOST.NAME} expires in less than 30 days'
+              priority: WARNING
+            - uuid: 5a5b5c5d5e5f6a6b6c6d6e6f7a7b7c7d
+              expression: 'last()<7'
+              name: 'K8s API Server certificate on {HOST.NAME} expires in less than 7 days'
+              priority: HIGH
+              dependencies:
+                - name: 'K8s API Server certificate on {HOST.NAME} expires in less than 30 days'
+
+      macros:
+        - macro: '{$CORP.DNS.HOST}'
+          value: 'dc1.mycompany.com'
+        - macro: '{$CORP.LDAP.HOST}'
+          value: 'ldap.mycompany.com'
+        - macro: '{$CORP.LDAP.PORT}'
+          value: '389'
+        - macro: '{$CORP.REGISTRY.HOST}'
+          value: 'registry.mycompany.com'
+        - macro: '{$CORP.REGISTRY.PORT}'
+          value: '443'
+```
+
+#### Шаблон: `K8s Common Node Checks`
+**Применять к:** **Всем** хостам кластера (master, worker, ingress).
+
+```yaml
+zabbix_export:
+  version: '6.4'
+  templates:
+    - uuid: b8f7a6c5b4d3e2f1a09f8e7d6c5b4a3a
+      name: 'K8s Common Node Checks'
+      groups:
+        - name: 'Templates/Kubernetes'
+      items:
+        # --- OOM Killer ---
+        - name: 'System: OOM Killer events in last 5m'
+          type: ZABBIX_AGENT
+          key: system.oom.count
+          delay: 5m
+          triggers:
+            - uuid: 6a6b6c6d6e6f7a7b7c7d7e7f8a8b8c8d
+              expression: 'last()>0'
+              name: 'OOM Killer detected on {HOST.NAME}'
+              priority: WARNING
+        
+        # --- CNI Pod-to-Pod check ---
+        - name: 'K8s: Unreachable Pods (CNI check)'
+          type: ZABBIX_AGENT
+          key: 'k8s.pod.unreachable'
+          delay: 3m
+          triggers:
+            - uuid: 7a7b7c7d7e7f8a8b8c8d8e8f9a9b9c9d
+              expression: 'last()>0'
+              name: 'Pod-to-Pod network connectivity issue detected from {HOST.NAME}'
+              priority: HIGH
+```
+
+#### Шаблон: `K8s Cluster Health (via API)`
+**Применять к:** Одному "виртуальному" хосту в Zabbix, который представляет весь кластер, или к хосту самого Zabbix Server.
+
+```yaml
+zabbix_export:
+  version: '6.4'
+  templates:
+    - uuid: c9e8d7f6e5d4c3b2a19f8e7d6c5b4a3a
+      name: 'K8s Cluster Health (via API)'
+      groups:
+        - name: 'Templates/Kubernetes'
+      items:
+        - name: 'K8s API: Liveness probe'
+          type: HTTP_AGENT
+          key: k8s.api.livez
+          delay: 1m
+          url: 'https://{$K8S.API.URL}/livez?verbose'
+          headers:
+            - name: Authorization
+              value: 'Bearer {$K8S.API.TOKEN}'
+          retrieve_mode: BOTH
+          triggers:
+            - uuid: 8a8b8c8d8e8f9a9b9c9d9e9fa0a1a2a3
+              expression: 'nodata(3m)=1'
+              name: 'Kube API is unavailable at {$K8S.API.URL}'
+              priority: DISASTER
+
+        - name: 'K8s Health: etcd-0 status'
+          type: DEPENDENT_ITEM
+          key: k8s.health.etcd0
+          master_item:
+            key: k8s.api.livez
+          preprocessing:
+            - type: JSONPATH
+              params: '$.healthz[?(@.name=="etcd-0")].health'
+          triggers:
+            - uuid: 9a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9
+              expression: 'last()<>true'
+              name: 'ETCD-0 member is unhealthy'
+              priority: HIGH
+              
+        # ... Добавить аналогичные dependent items для etcd-1, etcd-2, controller-manager, scheduler ...
+
+        # --- Master Nodes Count ---
+        - name: 'K8s API: Get Nodes'
+          type: HTTP_AGENT
+          key: k8s.api.get.nodes
+          delay: 2m
+          url: 'https://{$K8S.API.URL}/api/v1/nodes'
+          headers:
+            - name: Authorization
+              value: 'Bearer {$K8S.API.TOKEN}'
+
+        - name: 'K8s Nodes: Unready Masters count'
+          type: DEPENDENT_ITEM
+          key: k8s.nodes.masters.unready
+          master_item:
+            key: k8s.api.get.nodes
+          preprocessing:
+            - type: JSONPATH
+              params: >-
+                $.items[?(@.metadata.labels['node-role.kubernetes.io/master']=='')].status.conditions[?(@.type=='Ready')].status
+            - type: COUNT_VALUES
+              params: 'False,exact'
+          triggers:
+            - uuid: a0a1a2a3a4a5a6a7a8a9b0b1b2b3b4b5
+              expression: 'last()=1'
+              name: 'One K8s master node is NotReady'
+              priority: WARNING
+            - uuid: b0b1b2b3b4b5c0c1c2c3c4c5d0d1d2d3
+              expression: 'last()>=2'
+              name: 'CRITICAL: Multiple K8s master nodes are NotReady. Cluster is degraded.'
+              priority: DISASTER
+      macros:
+        - macro: '{$K8S.API.TOKEN}'
+          value: 'your_very_long_token_here'
+          type: SECRET_TEXT
+        - macro: '{$K8S.API.URL}'
+          value: 'your_api_lb_vip_or_hostname:6443'
+```
+
+Этот набор проверок и шаблонов даст дежурной смене четкое представление о здоровье кластера, не перегружая их деталями. В случае срабатывания триггера, они получат понятное сообщение (`Corporate Registry unavailable`, `One K8s master node is NotReady`) и смогут эскалировать проблему на команду поддержки Kubernetes с уже имеющейся первичной информацией.
