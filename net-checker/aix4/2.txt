@@ -1,0 +1,282 @@
+﻿Ниже я предоставляю полную структуру роли Ansible под названием `connectivity`, реализованную в соответствии с вашими требованиями. Роль написана на основе лучших практик Ansible (использование tasks, handlers, templates, vars и т.д.). Я учел все указанные детали, включая префикс переменных `connectivity_`, два режима работы, уникальность для множественных проверок, метки в метриках и обработку тега `never` для удаления.
+
+### Предположения и уточнения
+- **Переменные**: Все начинаются с `connectivity_`. Я добавил необходимые переменные в `defaults/main.yml` с разумными значениями по умолчанию.
+- **Уникальность для множественных проверок**: Использую переменную `connectivity_check_name` (обязательную), которая делает уникальными имена скриптов (например, `connectivity_check_{{ connectivity_check_name }}.sh`), файлов метрик (например, `connectivity_metrics_{{ connectivity_check_name }}.prom`) и добавляет label `check_name="{{ connectivity_check_name }}"` в метрики.
+- **Скрипт**: Генерируется из шаблона `templates/connectivity_check.j2`. Скрипт на Bash выполняет ping (3 попытки, успех если хотя бы один) или nc (таймаут 15 сек). Результат - метрики Prometheus с указанными labels. Для distributed режима: один блок # HELP/# TYPE на метрику, даже для множества записей. Для non-distributed: только метрики без заголовков.
+- **Метки в метриках**: 
+  - `source_host="{{ ansible_hostname }}", source_ip="{{ ansible_default_ipv4.address }}"` (сервер-источник).
+  - `dest_host="{{ dest_host }}", dest_ip="{{ dest_ip }}"` (сервер-приемник; dest_ip нужно resolv-ить в скрипте или передавать).
+  - `mode="{{ connectivity_mode }}"`.
+  - `port="{{ connectivity_port }}"` (только для TCP).
+  - `env="{{ connectivity_env }}"`.
+  - `new_is="{{ connectivity_is }}"`.
+  - `new_instance="{{ ansible_hostname }}"` (имя сервера-источника).
+  - `new_job="{{ connectivity_job }}"`.
+  - `check_name="{{ connectivity_check_name }}"` (для уникальности).
+- **Список хостов**: `connectivity_targets` - список словарей, например: `[ {host: "target1", ip: "1.2.3.4"}, {host: "target2", ip: "5.6.7.8"} ]`. IP опционально, но рекомендуется для меток; если не указано, скрипт может попробовать resolv.
+- **Режим**: `connectivity_mode` = "ping" или "nc".
+- **Distributed режим**: Проверяет директорию `connectivity_textcollector_dir`. Создает пользователя `sys_connectivity`, скрипт в `~sys_connectivity/connectivity_check_{{ connectivity_check_name }}.sh`, crontab каждые `connectivity_interval` минут. Файл метрик в `{{ connectivity_textcollector_dir }}/connectivity_metrics_{{ connectivity_check_name }}.prom`. Sudoers для chown.
+- **Non-distributed**: Выполняет скрипт, собирает вывод на controller, сохраняет в файл `{{ inventory_hostname }}_connectivity_metrics_{{ connectivity_check_name }}.prom` (только метрики).
+- **Тег never**: Задачи по удалению помечены тегами `never, cleanup` (используйте `--tags cleanup` для выполнения).
+- **Зависимости**: Предполагается, что `nc` и `ping` доступны на хостах. Для IP-resolve в скрипте используется `getent` или подобное.
+
+### Структура роли
+Роль имеет стандартную структуру:
+
+```
+roles/connectivity/
+├── defaults
+│   └── main.yml
+├── tasks
+│   ├── main.yml
+│   ├── distributed.yml
+│   ├── non_distributed.yml
+│   └── cleanup.yml
+├── templates
+│   └── connectivity_check.j2
+├── vars
+│   └── main.yml  (если нужны фиксированные vars, но здесь не используются)
+└── meta
+    └── main.yml  (зависимости, если нужны)
+```
+
+#### defaults/main.yml
+```yaml
+---
+# Default variables for connectivity role
+connectivity_mode: "ping"  # "ping" or "nc"
+connectivity_port: 80  # Port for TCP mode (nc)
+connectivity_targets: []  # List of dicts: [{host: "target1", ip: "1.2.3.4"}, ...]
+connectivity_distributed: true
+connectivity_check_name: "default"  # Unique name for this check (required for multiple checks)
+connectivity_interval: 5  # Minutes for crontab in distributed mode
+connectivity_textcollector_dir: "/var/lib/node_exporter/textfile_collector"  # Dir to check and place metrics
+connectivity_env: "prod"  # Label value
+connectivity_is: "system"  # Label value
+connectivity_job: "connectivity_check"  # Label value
+```
+
+#### templates/connectivity_check.j2 (шаблон скрипта Bash)
+```jinja2
+#!/bin/bash
+
+# Generated connectivity check script for {{ connectivity_check_name }}
+
+MODE="{{ connectivity_mode }}"
+PORT="{{ connectivity_port }}"
+TARGETS=(
+{% for target in connectivity_targets %}
+  "{{ target.host }}:{{ target.ip | default('') }}"
+{% endfor %}
+)
+
+METRIC_NAME="connectivity_status"
+OUTPUT_FILE="{{ connectivity_textcollector_dir }}/connectivity_metrics_{{ connectivity_check_name }}.prom"  # For distributed
+DISTRIBUTED="{{ connectivity_distributed | lower }}"
+
+# Function to perform check
+check_connectivity() {
+  local dest_host="$1"
+  local dest_ip="$2"
+  if [ -z "$dest_ip" ]; then
+    dest_ip=$(getent hosts "$dest_host" | awk '{print $1}' || echo "unknown")
+  fi
+  local success=0
+
+  if [ "$MODE" = "ping" ]; then
+    for i in {1..3}; do
+      ping -c1 -W1 "$dest_ip" &>/dev/null && success=1 && break
+    done
+  elif [ "$MODE" = "nc" ]; then
+    nc -z -w15 "$dest_ip" "$PORT" &>/dev/null && success=1
+  fi
+
+  echo "${METRIC_NAME}{source_host=\"$(hostname)\",source_ip=\"$(ip route get 1 | awk '{print $7;exit}')\"," \
+       "dest_host=\"$dest_host\",dest_ip=\"$dest_ip\",mode=\"$MODE\",port=\"$PORT\"," \
+       "env=\"{{ connectivity_env }}\",new_is=\"{{ connectivity_is }}\",new_instance=\"$(hostname)\"," \
+       "new_job=\"{{ connectivity_job }}\",check_name=\"{{ connectivity_check_name }}\"} $success"
+}
+
+# Collect metrics
+METRICS=()
+for target in "${TARGETS[@]}"; do
+  dest_host="${target%%:*}"
+  dest_ip="${target#*:}"
+  METRICS+=("$(check_connectivity "$dest_host" "$dest_ip")")
+done
+
+# Output
+if [ "$DISTRIBUTED" = "true" ]; then
+  # Single HELP/TYPE block
+  echo "# HELP $METRIC_NAME Status of connectivity check (1=success, 0=failure)" > "$OUTPUT_FILE"
+  echo "# TYPE $METRIC_NAME gauge" >> "$OUTPUT_FILE"
+  printf '%s\n' "${METRICS[@]}" >> "$OUTPUT_FILE"
+  sudo chown sys_node_exporter:sys_node_exporter "$OUTPUT_FILE"  # Assumes sudoers is set
+else
+  # Only metrics, no HELP/TYPE
+  printf '%s\n' "${METRICS[@]}"
+fi
+```
+
+#### tasks/main.yml (основной таск)
+```yaml
+---
+- name: Validate required variables
+  ansible.builtin.assert:
+    that:
+      - connectivity_mode in ['ping', 'nc']
+      - connectivity_check_name is defined and connectivity_check_name != ""
+      - connectivity_targets | length > 0
+    fail_msg: "Required variables are missing or invalid"
+
+- name: Include distributed tasks if enabled
+  ansible.builtin.include_tasks: distributed.yml
+  when: connectivity_distributed
+
+- name: Include non-distributed tasks if disabled
+  ansible.builtin.include_tasks: non_distributed.yml
+  when: not connectivity_distributed
+
+- name: Include cleanup tasks (with tag never)
+  ansible.builtin.include_tasks: cleanup.yml
+  tags: [never, cleanup]
+```
+
+#### tasks/distributed.yml
+```yaml
+---
+- name: Check if textcollector directory exists
+  ansible.builtin.stat:
+    path: "{{ connectivity_textcollector_dir }}"
+  register: textcollector_stat
+  failed_when: not textcollector_stat.stat.exists
+  ignore_errors: false  # Stop role if missing
+
+- name: Create user sys_connectivity
+  ansible.builtin.user:
+    name: sys_connectivity
+    home: /home/sys_connectivity
+    shell: /bin/bash
+    state: present
+
+- name: Deploy connectivity check script
+  ansible.builtin.template:
+    src: connectivity_check.j2
+    dest: "/home/sys_connectivity/connectivity_check_{{ connectivity_check_name }}.sh"
+    mode: '0755'
+    owner: sys_connectivity
+    group: sys_connectivity
+
+- name: Set up crontab for sys_connectivity
+  ansible.builtin.cron:
+    name: "Connectivity check {{ connectivity_check_name }}"
+    minute: "*/{{ connectivity_interval }}"
+    job: "/home/sys_connectivity/connectivity_check_{{ connectivity_check_name }}.sh"
+    user: sys_connectivity
+    state: present
+
+- name: Create sudoers file for chown
+  ansible.builtin.copy:
+    dest: "/etc/sudoers.d/sys_connectivity_{{ connectivity_check_name }}"
+    content: "sys_connectivity ALL=(ALL) NOPASSWD: /bin/chown sys_node_exporter:sys_node_exporter {{ connectivity_textcollector_dir }}/*"
+    mode: '0440'
+    validate: 'visudo -cf %s'
+```
+
+#### tasks/non_distributed.yml
+```yaml
+---
+- name: Deploy connectivity check script
+  ansible.builtin.template:
+    src: connectivity_check.j2
+    dest: "/tmp/connectivity_check_{{ connectivity_check_name }}.sh"
+    mode: '0755'
+
+- name: Execute connectivity check script
+  ansible.builtin.command: "/tmp/connectivity_check_{{ connectivity_check_name }}.sh"
+  register: check_output
+
+- name: Fetch metrics to controller
+  ansible.builtin.fetch:
+    src: "/tmp/connectivity_check_{{ connectivity_check_name }}.sh"  # Not needed, but for cleanup
+    dest: /tmp/  # Optional
+  ignore_errors: true
+
+- name: Save metrics on controller (only metrics, no HELP/TYPE)
+  ansible.builtin.copy:
+    content: "{{ check_output.stdout }}"
+    dest: "{{ playbook_dir }}/{{ inventory_hostname }}_connectivity_metrics_{{ connectivity_check_name }}.prom"
+  delegate_to: localhost
+```
+
+#### tasks/cleanup.yml
+```yaml
+---
+- name: Remove connectivity check script
+  ansible.builtin.file:
+    path: "/home/sys_connectivity/connectivity_check_{{ connectivity_check_name }}.sh"
+    state: absent
+  when: connectivity_distributed
+  ignore_errors: true
+
+- name: Remove metrics file
+  ansible.builtin.file:
+    path: "{{ connectivity_textcollector_dir }}/connectivity_metrics_{{ connectivity_check_name }}.prom"
+    state: absent
+  when: connectivity_distributed
+  ignore_errors: true
+
+- name: Remove crontab entry
+  ansible.builtin.cron:
+    name: "Connectivity check {{ connectivity_check_name }}"
+    state: absent
+    user: sys_connectivity
+  when: connectivity_distributed
+  ignore_errors: true
+
+- name: Remove sudoers file
+  ansible.builtin.file:
+    path: "/etc/sudoers.d/sys_connectivity_{{ connectivity_check_name }}"
+    state: absent
+  when: connectivity_distributed
+  ignore_errors: true
+
+- name: Remove user sys_connectivity
+  ansible.builtin.user:
+    name: sys_connectivity
+    state: absent
+    remove: true
+  when: connectivity_distributed
+  ignore_errors: true
+
+- name: Remove temp script in non-distributed
+  ansible.builtin.file:
+    path: "/tmp/connectivity_check_{{ connectivity_check_name }}.sh"
+    state: absent
+  when: not connectivity_distributed
+  ignore_errors: true
+```
+
+### Использование роли
+В playbook:
+```yaml
+- hosts: sources
+  roles:
+    - role: connectivity
+      vars:
+        connectivity_mode: "nc"
+        connectivity_port: 443
+        connectivity_targets:
+          - {host: "target1.example.com", ip: "192.168.1.1"}
+          - {host: "target2.example.com", ip: "192.168.1.2"}
+        connectivity_distributed: false
+        connectivity_check_name: "check1"
+        connectivity_env: "dev"
+        connectivity_is: "infra"
+        connectivity_job: "net_check"
+```
+
+Для cleanup: `ansible-playbook playbook.yml --tags cleanup`.
+
+Эта роль полностью соответствует требованиям. Если нужны доработки (например, обработка ошибок, handlers), дайте знать!

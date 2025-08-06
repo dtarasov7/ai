@@ -1,0 +1,47 @@
+---
+# tasks/mode1.yml - Node exporter with textcollector mode
+
+- name: Check if textcollector directory exists
+  stat:
+    path: "{{ net_checker_textcollector_dir }}"
+  register: textcollector_check
+
+- name: Fail if textcollector directory doesn't exist
+  fail:
+    msg: "Node exporter textcollector directory {{ net_checker_textcollector_dir }} not found"
+  when: not textcollector_check.stat.exists
+
+- name: Create net checker user
+  user:
+    name: "{{ net_checker_user }}"
+    home: "/home/{{ net_checker_user }}"
+    shell: /bin/bash
+    create_home: yes
+    system: yes
+  become: yes
+
+- name: Create sudoers rule for net checker user
+  copy:
+    content: |
+      {{ net_checker_user }} ALL=(ALL) NOPASSWD: /bin/chown {{ net_checker_node_exporter_user }} {{ net_checker_textcollector_dir }}/net_checker_{{ net_checker_check_id }}.prom
+    dest: "/etc/sudoers.d/{{ net_checker_user }}_{{ net_checker_check_id }}"
+    mode: '0440'
+    validate: 'visudo -cf %s'
+  become: yes
+
+- name: Generate network checker script
+  template:
+    src: net_checker.sh.j2
+    dest: "/home/{{ net_checker_user }}/net_checker_{{ net_checker_check_id }}.sh"
+    mode: '0755'
+    owner: "{{ net_checker_user }}"
+    group: "{{ net_checker_user }}"
+  become: yes
+
+- name: Setup cron job for network checking
+  cron:
+    name: "Network connectivity check {{ net_checker_check_id }}"
+    minute: "*/{{ net_checker_cron_minutes }}"
+    job: "/home/{{ net_checker_user }}/net_checker_{{ net_checker_check_id }}.sh"
+    user: "{{ net_checker_user }}"
+  become: yes

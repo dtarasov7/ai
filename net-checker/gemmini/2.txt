@@ -1,0 +1,454 @@
+﻿Отличная задача! Это хороший пример комплексной роли, которая сочетает в себе настройку системы, генерацию скриптов и управление выполнением задач.
+
+Ниже представлено полное решение, разбитое на файлы, как и должно быть в структуре роли Ansible.
+
+### Структура роли
+
+Создайте следующую структуру каталогов и файлов:
+
+```
+connectivity/
+├── README.md
+├── defaults/
+│   └── main.yml
+├── tasks/
+│   ├── adhoc.yml
+│   ├── distributed.yml
+│   ├── main.yml
+│   └── teardown.yml
+├── templates/
+│   ├── check_script.sh.j2
+│   └── sudoers_connectivity.j2
+└── vars/
+    └── main.yml
+```
+
+### Содержимое файлов
+
+---
+
+#### `connectivity/README.md`
+Это важный файл для описания роли, её переменных и примеров использования.
+
+```markdown
+# Ansible Role: connectivity
+
+Эта роль предназначена для проверки сетевой связанности между хостами с генерацией метрик в формате Prometheus.
+
+## Описание
+
+Роль может работать в двух режимах, управляемых переменной `connectivity_distributed`:
+
+1.  **Распределенный режим (`connectivity_distributed: true`)**:
+    *   На целевых хостах (источниках проверки) создается пользователь `sys_connectivity`.
+    *   Устанавливается cron-задача для периодического запуска скрипта проверки.
+    *   Скрипт генерирует файл с метриками в директории `textfile_collector` для `node-exporter`.
+    *   Требуется, чтобы `node-exporter` с `textfile_collector` уже был установлен.
+
+2.  **Ad-hoc режим (`connectivity_distributed: false`)**:
+    *   Скрипт проверки временно загружается на хост-источник, выполняется один раз.
+    *   Результат (метрики) сохраняется на управляющем хосте Ansible в локальный файл.
+
+## Требования
+
+*   Для *распределенного режима*: на целевых хостах должен быть установлен `node-exporter` с включенным модулем `textfile_collector`.
+*   На целевых хостах должны быть утилиты `ping` и `nc` (netcat).
+
+## Переменные роли
+
+Все переменные должны иметь префикс `connectivity_`.
+
+### Основные переменные
+
+*   `connectivity_check_name` (Обязательная): Уникальное имя для конкретной проверки. Используется для имен файлов, скриптов и в метках, чтобы избежать конфликтов. Например: `"postgres_replication_check"`.
+*   `connectivity_targets`: (Обязательная): Список хостов, к которым нужно проверить доступность.
+    ```yaml
+    connectivity_targets:
+      - { name: "db-01.example.com", ip: "10.0.1.10" }
+      - { name: "db-02.example.com", ip: "10.0.1.11" }
+    ```
+*   `connectivity_mode`: Режим проверки. `icmp` (по умолчанию) или `tcp`.
+*   `connectivity_tcp_port`: Порт для проверки в режиме `tcp`. (Обязательно, если `connectivity_mode: tcp`).
+*   `connectivity_distributed`: Режим работы роли. `true` или `false` (по умолчанию).
+
+### Переменные для меток Prometheus
+
+*   `connectivity_env`: Значение для метки `env` (по умолчанию: `production`).
+*   `connectivity_is`: Значение для метки `is` (по умолчанию: `main`).
+*   `connectivity_job`: Значение для метки `job` (по умолчанию: `connectivity_check`).
+
+### Переменные для распределенного режима
+
+*   `connectivity_cron_minute`: Расписание для cron. (по умолчанию: `*/5` - каждые 5 минут).
+*   `connectivity_textfile_collector_dir`: Директория для text-файлов node-exporter. (по умолчанию: `/var/lib/node_exporter/textfile_collector`).
+*   `connectivity_user`: Пользователь для запуска скрипта. (по умолчанию: `sys_connectivity`).
+*   `connectivity_node_exporter_user`: Пользователь, от имени которого работает node-exporter. (по умолчанию: `sys_node_exporter`).
+
+## Задачи для удаления (Teardown)
+
+Для удаления всех созданных в распределенном режиме ресурсов (пользователя, cron, sudo, файлов) запустите плейбук с тегом `teardown`.
+
+```bash
+ansible-playbook your_playbook.yml --tags "teardown"
+```
+
+## Пример Плейбука
+
+### Ad-hoc режим
+
+```yaml
+- name: Check connectivity ad-hoc
+  hosts: monitoring_servers
+  roles:
+    - role: connectivity
+      vars:
+        connectivity_check_name: "webservers_http_check"
+        connectivity_mode: tcp
+        connectivity_tcp_port: 80
+        connectivity_targets:
+          - { name: "web-01", ip: "192.168.1.50" }
+          - { name: "web-02", ip: "192.168.1.51" }
+```
+
+### Распределенный режим
+
+```yaml
+- name: Setup distributed connectivity check
+  hosts: monitoring_servers
+  roles:
+    - role: connectivity
+      vars:
+        connectivity_check_name: "databases_ping_check"
+        connectivity_distributed: true
+        connectivity_mode: icmp
+        connectivity_targets:
+          - { name: "db-01", ip: "10.0.1.10" }
+          - { name: "db-02", ip: "10.0.1.11" }
+        connectivity_env: "production"
+        connectivity_is: "database"
+        connectivity_job: "db_availability"
+        connectivity_cron_minute: "*/2"
+```
+
+```
+
+---
+
+#### `connectivity/defaults/main.yml`
+Здесь определены все переменные роли со значениями по умолчанию.
+
+```yaml
+---
+# defaults file for connectivity role
+
+# General settings
+connectivity_check_name: "default_check"  # Уникальное имя проверки (ВАЖНО изменить)
+connectivity_mode: icmp                   # Режим проверки: icmp или tcp
+connectivity_tcp_port: 80                 # Порт для проверки в режиме tcp
+connectivity_distributed: false           # Режим работы роли (false: ad-hoc, true: distributed)
+connectivity_targets: []                  # Список целевых хостов. Пример: [{name: "host1", ip: "1.1.1.1"}]
+
+# Prometheus labels
+connectivity_env: "production"
+connectivity_is: "main"
+connectivity_job: "connectivity_check"
+
+# Settings for distributed mode
+connectivity_cron_minute: "*/5"
+connectivity_textfile_collector_dir: "/var/lib/node_exporter/textfile_collector"
+connectivity_user: "sys_connectivity"
+connectivity_node_exporter_user: "sys_node_exporter"
+```
+
+---
+
+#### `connectivity/vars/main.yml`
+Внутренние переменные, которые вычисляются на основе переменных из `defaults`.
+
+```yaml
+---
+# vars file for connectivity role
+
+# Имена файлов и скриптов будут уникальными благодаря connectivity_check_name
+connectivity_script_name: "check_{{ connectivity_check_name }}.sh"
+connectivity_metrics_filename: "connectivity_{{ connectivity_check_name }}.prom"
+connectivity_sudoers_filename: "95-connectivity-{{ connectivity_check_name }}"
+
+connectivity_script_remote_path: "/home/{{ connectivity_user }}/{{ connectivity_script_name }}"
+connectivity_metrics_remote_path: "{{ connectivity_textfile_collector_dir }}/{{ connectivity_metrics_filename }}"
+```
+
+---
+
+#### `connectivity/templates/check_script.sh.j2`
+Шаблон bash-скрипта, который будет выполнять всю работу на целевых хостах.
+
+```jinja2
+#!/bin/bash
+set -e
+set -o pipefail
+
+# --- Static configuration from Ansible ---
+MODE="{{ connectivity_mode }}"
+TCP_PORT="{{ connectivity_tcp_port }}"
+CHECK_NAME="{{ connectivity_check_name }}"
+ENV="{{ connectivity_env }}"
+IS="{{ connectivity_is }}"
+JOB="{{ connectivity_job }}"
+SOURCE_HOST="{{ ansible_fqdn }}"
+SOURCE_IP="{{ ansible_default_ipv4.address }}"
+NEW_INSTANCE="{{ inventory_hostname }}"
+METRIC_NAME="connectivity_check_status"
+
+# --- Dynamic configuration for distributed mode ---
+{% if connectivity_distributed %}
+OUTPUT_FILE="{{ connectivity_metrics_remote_path }}"
+TMP_OUTPUT_FILE=$(mktemp)
+# Используем sudo для смены владельца и перемещения файла
+SUDO_CMD="/usr/bin/sudo"
+CHOWN_USER="{{ connectivity_node_exporter_user }}"
+{% else %}
+# В ad-hoc режиме вывод идет в stdout
+TMP_OUTPUT_FILE="/dev/stdout"
+{% endif %}
+
+# For multiple metrics with the same name, HELP and TYPE should be written only once.
+# В ad-hoc режиме заголовки не нужны.
+{% if connectivity_distributed %}
+cat << EOF > "${TMP_OUTPUT_FILE}"
+# HELP ${METRIC_NAME} Network connectivity status (1 = UP, 0 = DOWN).
+# TYPE ${METRIC_NAME} gauge
+EOF
+{% endif %}
+
+check_target() {
+    local target_host=$1
+    local target_ip=$2
+    local result=0
+
+    echo "INFO: Checking target ${target_host} (${target_ip}) via ${MODE}" >&2
+
+    if [[ "${MODE}" == "icmp" ]]; then
+        # -c 3: 3 packets, -W 1: wait 1 sec for reply. Success if at least one packet returns.
+        ping -c 3 -W 1 "${target_ip}" > /dev/null 2>&1
+        result=$?
+    elif [[ "${MODE}" == "tcp" ]]; then
+        # -z: zero-I/O mode (scanning), -w 15: timeout 15s
+        nc -z -w 15 "${target_ip}" "${TCP_PORT}" > /dev/null 2>&1
+        result=$?
+    else
+        echo "ERROR: Unknown mode '${MODE}'" >&2
+        exit 1
+    fi
+
+    local status=0
+    if [[ ${result} -eq 0 ]]; then
+        status=1
+        echo "INFO: Target ${target_host} is UP" >&2
+    else
+        echo "INFO: Target ${target_host} is DOWN" >&2
+    fi
+
+    # Append metric to the output file
+    # Формируем строку с метками
+    LABELS="check_name=\"${CHECK_NAME}\""
+    LABELS="${LABELS},env=\"${ENV}\""
+    LABELS="${LABELS},is=\"${IS}\""
+    LABELS="${LABELS},job=\"${JOB}\""
+    LABELS="${LABELS},instance=\"${NEW_INSTANCE}\"" # new_instance == source_host name
+    LABELS="${LABELS},source_host=\"${SOURCE_HOST}\""
+    LABELS="${LABELS},source_ip=\"${SOURCE_IP}\""
+    LABELS="${LABELS},target_host=\"${target_host}\""
+    LABELS="${LABELS},target_ip=\"${target_ip}\""
+    LABELS="${LABELS},mode=\"${MODE}\""
+    if [[ "${MODE}" == "tcp" ]]; then
+        LABELS="${LABELS},port=\"${TCP_PORT}\""
+    fi
+
+    echo "${METRIC_NAME}{${LABELS}} ${status}" >> "${TMP_OUTPUT_FILE}"
+}
+
+# --- Main execution loop ---
+{% for target in connectivity_targets %}
+check_target "{{ target.name }}" "{{ target.ip }}"
+{% endfor %}
+
+# --- Final steps for distributed mode ---
+{% if connectivity_distributed %}
+echo "INFO: Atomically updating metrics file at ${OUTPUT_FILE}" >&2
+# Сначала меняем владельца, потом перемещаем - это атомарная операция
+${SUDO_CMD} chown "${CHOWN_USER}:${CHOWN_USER}" "${TMP_OUTPUT_FILE}"
+${SUDO_CMD} mv "${TMP_OUTPUT_FILE}" "${OUTPUT_FILE}"
+# mktemp создает временные файлы, которые автоматически удаляются при выходе,
+# но mv переименовывает его, так что удалять ничего не нужно.
+echo "INFO: Done." >&2
+{% endif %}
+
+```
+
+---
+
+#### `connectivity/templates/sudoers_connectivity.j2`
+Шаблон для файла в `/etc/sudoers.d/`, разрешающего смену владельца файла метрик.
+
+```jinja2
+# This file is managed by Ansible.
+# Allow user {{ connectivity_user }} to change ownership of its metrics files
+# in the textfile collector directory.
+{{ connectivity_user }} ALL=(ALL) NOPASSWD: /usr/bin/chown {{ connectivity_node_exporter_user }}:{{ connectivity_node_exporter_user }} {{ connectivity_metrics_remote_path }}, /usr/bin/chown {{ connectivity_node_exporter_user }}:{{ connectivity_node_exporter_user }} /tmp/tmp.*, /bin/mv /tmp/tmp.* {{ connectivity_metrics_remote_path }}
+```
+*Примечание: Добавлены права на `mv` и временные файлы в `/tmp` для более безопасного обновления файла метрик.*
+
+---
+
+#### `connectivity/tasks/main.yml`
+Главный файл задач, который определяет, какой режим (distributed или ad-hoc) использовать.
+
+```yaml
+---
+# tasks file for connectivity role
+
+- name: Assert that mandatory variables are defined
+  ansible.builtin.assert:
+    that:
+      - connectivity_check_name is defined and connectivity_check_name != 'default_check'
+      - connectivity_targets is defined and connectivity_targets | length > 0
+    msg: "Переменные 'connectivity_check_name' и 'connectivity_targets' должны быть определены."
+
+- name: Include tasks for distributed mode
+  ansible.builtin.include_tasks: distributed.yml
+  when: connectivity_distributed
+
+- name: Include tasks for ad-hoc mode
+  ansible.builtin.include_tasks: adhoc.yml
+  when: not connectivity_distributed
+
+- name: Include teardown tasks (only runs with --tags teardown)
+  ansible.builtin.include_tasks: teardown.yml
+  when: connectivity_distributed
+  tags:
+    - never
+    - teardown
+```
+
+---
+
+#### `connectivity/tasks/distributed.yml`
+Задачи для распределенного режима.
+
+```yaml
+---
+- name: Distributed | Check if node_exporter textfile collector directory exists
+  ansible.builtin.stat:
+    path: "{{ connectivity_textfile_collector_dir }}"
+  register: textcollector_dir
+
+- name: Distributed | Fail if textfile collector directory does not exist
+  ansible.builtin.fail:
+    msg: "Директория {{ connectivity_textfile_collector_dir }} не существует. Установите node-exporter с модулем textcollector."
+  when: not textcollector_dir.stat.exists or not textcollector_dir.stat.isdir
+
+- name: Distributed | Create user '{{ connectivity_user }}' for running checks
+  ansible.builtin.user:
+    name: "{{ connectivity_user }}"
+    shell: /bin/bash
+    system: true
+    create_home: true
+
+- name: Distributed | Create sudoers file for '{{ connectivity_user }}'
+  ansible.builtin.template:
+    src: sudoers_connectivity.j2
+    dest: "/etc/sudoers.d/{{ connectivity_sudoers_filename }}"
+    owner: root
+    group: root
+    mode: '0440'
+    validate: 'visudo -cf %s'
+
+- name: Distributed | Template the check script to the remote host
+  ansible.builtin.template:
+    src: check_script.sh.j2
+    dest: "{{ connectivity_script_remote_path }}"
+    owner: "{{ connectivity_user }}"
+    group: "{{ connectivity_user }}"
+    mode: '0750'
+
+- name: Distributed | Set up cron job for the check script
+  ansible.builtin.cron:
+    name: "Connectivity Check - {{ connectivity_check_name }}"
+    minute: "{{ connectivity_cron_minute.split('/')[1] | default('*') if '/' in connectivity_cron_minute else connectivity_cron_minute }}"
+    hour: "{{ connectivity_cron_minute.split('/')[0] if '/' in connectivity_cron_minute else '*' }}"
+    user: "{{ connectivity_user }}"
+    job: "{{ connectivity_script_remote_path }}"
+    cron_file: "ansible_connectivity_{{ connectivity_check_name }}" # Unique crontab file in /etc/cron.d
+```
+*Примечание: Используется `cron_file`, чтобы создавать отдельный файл в `/etc/cron.d/`. Это более надежно, чем редактировать crontab пользователя.*
+
+---
+
+#### `connectivity/tasks/adhoc.yml`
+Задачи для ad-hoc режима.
+
+```yaml
+---
+- name: Ad-hoc | Template the check script to a temporary location
+  ansible.builtin.template:
+    src: check_script.sh.j2
+    dest: "/tmp/{{ connectivity_script_name }}"
+    mode: '0755'
+
+- name: Ad-hoc | Execute the check script
+  ansible.builtin.command:
+    cmd: "/tmp/{{ connectivity_script_name }}"
+  register: script_result
+  changed_when: false # Эта команда только собирает данные
+
+- name: Ad-hoc | Clean up the temporary script
+  ansible.builtin.file:
+    path: "/tmp/{{ connectivity_script_name }}"
+    state: absent
+
+- name: Ad-hoc | Save metrics to a local file on the Ansible host
+  ansible.builtin.copy:
+    content: "{{ script_result.stdout }}"
+    dest: "./{{ inventory_hostname }}-{{ connectivity_metrics_filename }}"
+  delegate_to: localhost
+  when: script_result.stdout | length > 0
+```
+*Примечание: Заголовки `# HELP` и `# TYPE` не будут сохранены, так как шаблон `check_script.sh.j2` не генерирует их, если `connectivity_distributed: false`.*
+
+---
+
+#### `connectivity/tasks/teardown.yml`
+Задачи для удаления всего, что было создано в распределенном режиме.
+
+```yaml
+---
+- name: Teardown | Remove cron job file
+  ansible.builtin.file:
+    path: "/etc/cron.d/ansible_connectivity_{{ connectivity_check_name }}"
+    state: absent
+
+- name: Teardown | Remove the check script
+  ansible.builtin.file:
+    path: "{{ connectivity_script_remote_path }}"
+    state: absent
+
+- name: Teardown | Remove the metrics file
+  ansible.builtin.file:
+    path: "{{ connectivity_metrics_remote_path }}"
+    state: absent
+
+- name: Teardown | Remove the sudoers file
+  ansible.builtin.file:
+    path: "/etc/sudoers.d/{{ connectivity_sudoers_filename }}"
+    state: absent
+
+- name: Teardown | Remove the user '{{ connectivity_user }}'
+  ansible.builtin.user:
+    name: "{{ connectivity_user }}"
+    state: absent
+    remove: true # Удаляем домашнюю директорию
+```
+
+---
+Эта структура полностью соответствует вашему заданию, обеспечивает гибкость, отказоустойчивость и идемпотентность. Не забудьте протестировать роль на стенде перед применением в production.

@@ -1,0 +1,57 @@
+---
+# tasks/cleanup.yml - Cleanup tasks (tagged with 'never')
+
+- name: Remove cron job
+  cron:
+    name: "Network connectivity check {{ net_checker_check_id }}"
+    user: "{{ net_checker_user }}"
+    state: absent
+  become: yes
+  ignore_errors: yes
+
+- name: Remove script file
+  file:
+    path: "/home/{{ net_checker_user }}/net_checker_{{ net_checker_check_id }}.sh"
+    state: absent
+  become: yes
+  ignore_errors: yes
+
+- name: Remove metrics file
+  file:
+    path: "{{ net_checker_textcollector_dir }}/net_checker_{{ net_checker_check_id }}.prom"
+    state: absent
+  become: yes
+  ignore_errors: yes
+
+- name: Remove sudoers rule
+  file:
+    path: "/etc/sudoers.d/{{ net_checker_user }}_{{ net_checker_check_id }}"
+    state: absent
+  become: yes
+  ignore_errors: yes
+
+- name: Check if user has other cron jobs
+  shell: "crontab -l -u {{ net_checker_user }} 2>/dev/null | grep -v '^#' | wc -l"
+  register: user_cron_count
+  become: yes
+  ignore_errors: yes
+  changed_when: false
+
+- name: Check if user has other scripts
+  find:
+    paths: "/home/{{ net_checker_user }}"
+    patterns: "net_checker_*.sh"
+  register: user_scripts
+  become: yes
+  ignore_errors: yes
+
+- name: Remove user if no other jobs exist
+  user:
+    name: "{{ net_checker_user }}"
+    state: absent
+    remove: yes
+  become: yes
+  when: 
+    - user_cron_count.stdout | default('1') | int == 0
+    - user_scripts.files | length == 0
+  ignore_errors: yes

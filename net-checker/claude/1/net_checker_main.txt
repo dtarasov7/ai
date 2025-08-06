@@ -1,0 +1,43 @@
+---
+# tasks/main.yml
+- name: Validate required variables
+  fail:
+    msg: "Required variable {{ item }} is not defined"
+  when: vars[item] is not defined
+  loop:
+    - net_checker_mode
+    - net_checker_target_hosts
+    - net_checker_env
+    - net_checker_is
+    - net_checker_job
+    - net_checker_work_mode
+
+- name: Validate mode
+  fail:
+    msg: "net_checker_mode must be 'icmp' or 'tcp'"
+  when: net_checker_mode not in ['icmp', 'tcp']
+
+- name: Validate work mode
+  fail:
+    msg: "net_checker_work_mode must be 1 or 2"
+  when: net_checker_work_mode not in [1, 2]
+
+- name: Validate TCP port when mode is tcp
+  fail:
+    msg: "net_checker_tcp_port must be defined when mode is tcp"
+  when: net_checker_mode == 'tcp' and net_checker_tcp_port is not defined
+
+# Cleanup tasks (tagged with 'never')
+- include_tasks: cleanup.yml
+  tags: never
+
+# Mode 1: Node exporter with textcollector
+- include_tasks: mode1.yml
+  when: net_checker_work_mode == 1
+  tags: 
+    - never
+    - cleanup
+
+# Mode 2: Execute and collect results locally
+- include_tasks: mode2.yml
+  when: net_checker_work_mode == 2

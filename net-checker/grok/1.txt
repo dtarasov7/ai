@@ -1,0 +1,226 @@
+﻿Below is an Ansible role named `net-checker` designed to check network connectivity between hosts using either ICMP (ping) or TCP (nc), with results output as Prometheus metrics. The role supports two modes of operation: one using `node-exporter` with a text collector and another where results are collected on the Ansible host. All variables are prefixed with `net_checker_`, and the role ensures that multiple independent checks can run on the same server by using unique identifiers.
+
+### Role Structure
+The role includes:
+- `tasks/main.yml`: Defines the main tasks.
+- `templates/net_checker_script.j2`: Bash script template for connectivity checks.
+- `vars/main.yml`: Placeholder for role-specific variables (optional).
+
+### Variables
+All variables start with `net_checker_`:
+- `net_checker_mode`: `"node_exporter"` or `"ansible_host"` - determines the operation mode.
+- `net_checker_protocol`: `"icmp"` or `"tcp"` - specifies the protocol.
+- `net_checker_tcp_port`: Port number for TCP checks (required if protocol is `"tcp"`).
+- `net_checker_hosts`: List of hostnames to check connectivity to.
+- `net_checker_check_id`: Unique identifier for each check to differentiate scripts, files, and metrics.
+- `net_checker_textcollector_dir`: Directory for text collector in `node_exporter` mode (e.g., `/var/lib/node_exporter/textcollector`).
+- `net_checker_script_name`: Base name for the script (e.g., `net_checker`).
+- `net_checker_metric_file_prefix`: Base name for the metric file (e.g., `net_checker`).
+- `net_checker_cron_interval`: Interval in minutes for cron job in `node_exporter` mode.
+- `net_checker_env`: Environment label for metrics.
+- `net_checker_is`: IS label for metrics.
+- `net_checker_job`: Job label for metrics.
+- `net_checker_results_dir`: Directory on the Ansible host to save results in `ansible_host` mode.
+
+### Functionality
+#### Common Features
+- A bash script is generated from a template and uploaded to the target host.
+- The script checks connectivity to the hosts in `net_checker_hosts` using the specified protocol.
+- Metrics include labels for source server (name and IP), destination server (name and IP), protocol, port (if applicable), `env`, `is`, `instance` (source server name), `job`, and `check_id`.
+- The `net_checker_check_id` ensures uniqueness for script names, metric files, and metric labels across multiple checks.
+
+#### Mode 1: `node_exporter`
+- Verifies the existence of `net_checker_textcollector_dir`; fails if absent.
+- Creates a user `sys_net_checker`.
+- Uploads the script to the user’s home directory (e.g., `/home/sys_net_checker/net_checker_<check_id>.sh`).
+- Sets up a cron job to run the script every `net_checker_cron_interval` minutes.
+- The script outputs metrics to a file in `net_checker_textcollector_dir` (e.g., `net_checker_<check_id>.prom`).
+- Configures a sudoers rule so `sys_net_checker` can change the metric file’s owner to `sys_node_exporter`.
+- Cleanup tasks (tagged `never`) remove the script, metric file, cron job, sudoers rule, and user.
+
+#### Mode 2: `ansible_host`
+- Uploads the script to a temporary location (e.g., `/tmp/net_checker_<check_id>.sh`).
+- Executes the script and captures the output.
+- Saves the output to a file on the Ansible host with the target server’s name as a prefix (e.g., `<results_dir>/<hostname>_<check_id>.prom`).
+- Removes the script after execution.
+- Cleanup (tagged `never`) removes the script if it exists.
+
+### Implementation
+
+```yaml
+---
+- name: Validate required variables
+  fail:
+    msg: "Missing required variable {{ item }}"
+  when: vars[item] is not defined
+  loop:
+    - net_checker_mode
+    - net_checker_protocol
+    - net_checker_hosts
+    - net_checker_check_id
+    - net_checker_env
+    - net_checker_is
+    - net_checker_job
+  tags: always
+
+- name: Set script and metric file paths for node_exporter mode
+  set_fact:
+    script_path: "/home/sys_net_checker/{{ net_checker_script_name }}_{{ net_checker_check_id }}.sh"
+    metric_file: "{{ net_checker_textcollector_dir }}/{{ net_checker_metric_file_prefix }}_{{ net_checker_check_id }}.prom"
+  when: net_checker_mode == 'node_exporter'
+
+- name: Set script path for ansible_host mode
+  set_fact:
+    script_path: "/tmp/{{ net_checker_script_name }}_{{ net_checker_check_id }}.sh"
+  when: net_checker_mode == 'ansible_host'
+
+- block:
+    - name: Check if textcollector directory exists
+      stat:
+        path: "{{ net_checker_textcollector_dir }}"
+      register: textcollector_dir
+      failed_when: not textcollector_dir.stat.exists
+
+    - name: Create user sys_net_checker
+      user:
+        name: sys_net_checker
+        state: present
+
+    - name: Upload script for node_exporter mode
+      template:
+        src: net_checker_script.j2
+        dest: "{{ script_path }}"
+        mode: '0755'
+        owner: sys_net_checker
+
+    - name: Set up cron job
+      cron:
+        name: "Net checker for {{ net_checker_check_id }}"
+        minute: "*/{{ net_checker_cron_interval }}"
+        user: sys_net_checker
+        job: "{{ script_path }} > {{ metric_file }} 2>/dev/null && sudo /bin/chown sys_node_exporter {{ metric_file }}"
+        state: present
+
+    - name: Create sudoers file
+      copy:
+        content: "sys_net_checker ALL=(ALL) NOPASSWD: /bin/chown sys_node_exporter {{ net_checker_textcollector_dir }}/{{ net_checker_metric_file_prefix }}_*.prom"
+        dest: /etc/sudoers.d/net_checker_{{ net_checker_check_id }}
+        mode: '0440'
+  when: net_checker_mode == 'node_exporter'
+
+- block:
+    - name: Upload script for ansible_host mode
+      template:
+        src: net_checker_script.j2
+        dest: "{{ script_path }}"
+        mode: '0755'
+
+    - name: Run script and capture output
+      shell: "{{ script_path }}"
+      register: script_output
+
+    - name: Save output to file on Ansible host
+      local_action:
+        module: copy
+        content: "{{ script_output.stdout }}"
+        dest: "{{ net_checker_results_dir }}/{{ inventory_hostname }}_{{ net_checker_check_id }}.prom"
+
+    - name: Remove script file
+      file:
+        path: "{{ script_path }}"
+        state: absent
+  when: net_checker_mode == 'ansible_host'
+
+- block:
+    - name: Remove script file
+      file:
+        path: "{{ script_path }}"
+        state: absent
+
+    - name: Remove metric file
+      file:
+        path: "{{ metric_file }}"
+        state: absent
+      when: net_checker_mode == 'node_exporter'
+
+    - name: Remove cron job
+      cron:
+        name: "Net checker for {{ net_checker_check_id }}"
+        state: absent
+      when: net_checker_mode == 'node_exporter'
+
+    - name: Remove sudoers file
+      file:
+        path: /etc/sudoers.d/net_checker_{{ net_checker_check_id }}
+        state: absent
+      when: net_checker_mode == 'node_exporter'
+
+    - name: Remove user sys_net_checker
+      user:
+        name: sys_net_checker
+        state: absent
+      when: net_checker_mode == 'node_exporter'
+  tags: never
+```
+
+
+#!/bin/bash
+
+source_name="{{ inventory_hostname }}"
+source_ip="{{ ansible_default_ipv4.address }}"
+
+for dest_host in {{ net_checker_hosts | join(' ') }}; do
+  dest_ip=$(getent hosts $dest_host | awk '{print $1}' || echo "unknown")
+  if [ "$dest_ip" == "unknown" ]; then
+    echo "net_connectivity{source=\"$source_name\", source_ip=\"$source_ip\", dest=\"$dest_host\", dest_ip=\"unknown\", protocol=\"{{ net_checker_protocol }}\", port=\"{{ net_checker_tcp_port if net_checker_protocol == 'tcp' else 'N/A' }}\", env=\"{{ net_checker_env }}\", is=\"{{ net_checker_is }}\", instance=\"$source_name\", job=\"{{ net_checker_job }}\", check_id=\"{{ net_checker_check_id }}\"} 0"
+    continue
+  fi
+
+  if [ "{{ net_checker_protocol }}" == "icmp" ]; then
+    ping -c 1 $dest_ip > /dev/null 2>&1
+    result=$?
+  elif [ "{{ net_checker_protocol }}" == "tcp" ]; then
+    nc -z $dest_ip {{ net_checker_tcp_port }} > /dev/null 2>&1
+    result=$?
+  fi
+
+  if [ $result -eq 0 ]; then
+    echo "net_connectivity{source=\"$source_name\", source_ip=\"$source_ip\", dest=\"$dest_host\", dest_ip=\"$dest_ip\", protocol=\"{{ net_checker_protocol }}\", port=\"{{ net_checker_tcp_port if net_checker_protocol == 'tcp' else 'N/A' }}\", env=\"{{ net_checker_env }}\", is=\"{{ net_checker_is }}\", instance=\"$source_name\", job=\"{{ net_checker_job }}\", check_id=\"{{ net_checker_check_id }}\"} 1"
+  else
+    echo "net_connectivity{source=\"$source_name\", source_ip=\"$source_ip\", dest=\"$dest_host\", dest_ip=\"$dest_ip\", protocol=\"{{ net_checker_protocol }}\", port=\"{{ net_checker_tcp_port if net_checker_protocol == 'tcp' else 'N/A' }}\", env=\"{{ net_checker_env }}\", is=\"{{ net_checker_is }}\", instance=\"$source_name\", job=\"{{ net_checker_job }}\", check_id=\"{{ net_checker_check_id }}\"} 0"
+  fi
+done
+
+
+### Usage
+1. **Define Variables**: Set the required variables in your playbook or inventory.
+   Example:
+   ```yaml
+   net_checker_mode: "node_exporter"
+   net_checker_protocol: "tcp"
+   net_checker_tcp_port: 22
+   net_checker_hosts: ["host1.example.com", "host2.example.com"]
+   net_checker_check_id: "check1"
+   net_checker_textcollector_dir: "/var/lib/node_exporter/textcollector"
+   net_checker_script_name: "net_checker"
+   net_checker_metric_file_prefix: "net_checker"
+   net_checker_cron_interval: 5
+   net_checker_env: "prod"
+   net_checker_is: "network"
+   net_checker_job: "connectivity"
+   ```
+   For `ansible_host` mode, add `net_checker_results_dir` (e.g., `/var/results`).
+
+2. **Run the Role**: Apply the role to the target hosts using a playbook.
+   ```yaml
+   - hosts: all
+     roles:
+       - net-checker
+   ```
+
+3. **Cleanup**: To remove all created resources, run with the `never` tag:
+   ```bash
+   ansible-playbook playbook.yml --tags never
+   ```
+
+This role meets all specified requirements, ensuring robust network connectivity checks with proper metric output and cleanup functionality.

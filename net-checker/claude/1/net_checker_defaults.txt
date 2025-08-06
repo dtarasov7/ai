@@ -1,0 +1,30 @@
+---
+# defaults/main.yml
+
+# Основные переменные (обязательные)
+# net_checker_mode: icmp  # icmp или tcp
+# net_checker_target_hosts: []  # список хостов для проверки
+# net_checker_work_mode: 1  # 1 или 2
+# net_checker_env: ""  # окружение
+# net_checker_is: ""  # идентификатор is
+# net_checker_job: ""  # имя job
+
+# TCP порт (обязательно при mode: tcp)
+net_checker_tcp_port: 80
+
+# Режим 1: Node exporter настройки
+net_checker_textcollector_dir: "/var/lib/node_exporter/textfile_collector"
+net_checker_user: "sys_net_checker"
+net_checker_node_exporter_user: "sys_node_exporter"
+net_checker_cron_minutes: 5
+net_checker_script_name: "net_checker"
+
+# Режим 2: Локальное сохранение
+net_checker_local_results_dir: "./net_checker_results"
+
+# Общие настройки
+net_checker_timeout: 5
+net_checker_ping_count: 3
+
+# Уникальный идентификатор для различения проверок
+net_checker_check_id: "{{ net_checker_job | default('default') }}_{{ net_checker_mode }}_{{ net_checker_tcp_port | default('icmp') }}"

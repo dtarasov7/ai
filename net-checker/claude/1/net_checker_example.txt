@@ -1,0 +1,56 @@
+---
+# example_playbook.yml
+# Пример использования роли net-checker
+
+- name: Network connectivity check - Mode 1 (Node Exporter)
+  hosts: monitoring_agents
+  become: yes
+  roles:
+    - role: net-checker
+      vars:
+        # Основные параметры
+        net_checker_mode: icmp
+        net_checker_work_mode: 1
+        net_checker_env: production
+        net_checker_is: monitoring
+        net_checker_job: connectivity_check
+        
+        # Список хостов для проверки
+        net_checker_target_hosts:
+          - name: web1
+            ip: 192.168.1.10
+          - name: web2
+            ip: 192.168.1.11
+          - name: database
+            ip: 10.0.1.50
+          - external.example.com
+        
+        # Настройки выполнения
+        net_checker_cron_minutes: 3
+        net_checker_timeout: 10
+        net_checker_ping_count: 5
+
+- name: Network connectivity check - Mode 2 (Local collection)
+  hosts: web_servers
+  roles:
+    - role: net-checker
+      vars:
+        # TCP проверка портов
+        net_checker_mode: tcp
+        net_checker_tcp_port: 443
+        net_checker_work_mode: 2
+        net_checker_env: production
+        net_checker_is: web
+        net_checker_job: ssl_check
+        
+        # API эндпоинты
+        net_checker_target_hosts:
+          - name: api-gateway
+            ip: 10.0.2.100
+          - name: auth-service
+            ip: 10.0.2.101
+          - name: data-service
+            ip: 10.0.2.102
+        
+        # Локальная директория для результатов
+        net_checker_local_results_dir: ./connectivity_metrics

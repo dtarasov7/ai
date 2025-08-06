@@ -1,0 +1,32 @@
+---
+# tasks/mode2.yml - Execute and collect results locally
+
+- name: Create local results directory
+  file:
+    path: "{{ net_checker_local_results_dir }}"
+    state: directory
+    mode: '0755'
+  delegate_to: localhost
+  run_once: true
+
+- name: Generate network checker script
+  template:
+    src: net_checker.sh.j2
+    dest: "/tmp/net_checker_{{ net_checker_check_id }}.sh"
+    mode: '0755'
+
+- name: Execute network checker script
+  shell: "/tmp/net_checker_{{ net_checker_check_id }}.sh"
+  register: net_checker_output
+  changed_when: false
+
+- name: Save results to local file
+  copy:
+    content: "{{ net_checker_output.stdout }}"
+    dest: "{{ net_checker_local_results_dir }}/{{ inventory_hostname }}_{{ net_checker_check_id }}.prom"
+  delegate_to: localhost
+
+- name: Remove temporary script
+  file:
+    path: "/tmp/net_checker_{{ net_checker_check_id }}.sh"
+    state: absent
