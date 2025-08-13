@@ -1,0 +1,66 @@
+﻿@startuml
+skinparam monochrome true
+skinparam defaultFontName Arial
+
+cloud "Stretched L2 Network\n<10ms RTT" as l2_network {
+  rectangle "DC1" {
+    node haproxy1 #LightBlue
+    node haproxy2 #LightBlue
+    node master1 #Pink
+    node worker1 #LightGreen
+    node worker2 #LightGreen
+    
+    ' haproxy1 -> [hidden] haproxy2
+    ' worker1 -> [hidden] worker2
+  }
+  
+  rectangle "DC2" {
+    node haproxy3 #LightBlue
+    node haproxy4 #LightBlue
+    node master2 #Pink
+    node worker3 #LightGreen
+    node worker4 #LightGreen
+    
+    ' haproxy3 - [hidden] haproxy4
+    ' worker3 - [hidden] worker4
+  }
+  
+  rectangle "DC3" {
+    node master3 #Pink
+  }
+}
+
+database "Ceph Storage\n(external)" as ceph #LightGray
+
+node "VIP" as vip #Orange
+() "Internet" as internet
+
+' Connections
+internet --> vip
+vip --> l2_network : Floating IP
+
+haproxy1 --> worker1 : App Traffic
+haproxy1 --> worker2
+haproxy2 --> worker1
+haproxy2 --> worker2
+haproxy3 --> worker3
+haproxy3 --> worker4
+haproxy4 --> worker3
+haproxy4 --> worker4
+
+master1 -- master2 : etcd\nQuorum
+master1 -- master3
+master2 -- master3
+
+worker1 --> ceph : RBD/CephFS
+worker2 --> ceph
+worker3 --> ceph
+worker4 --> ceph
+
+' Legend
+legend top
+  <b>LEGEND</b>
+  |<#LightBlue> HAProxy (Ingress) | <#Pink> Master | <#LightGreen> Worker |
+  |<#Orange> VIP | <#LightGray> External Storage |
+endlegend
+@enduml

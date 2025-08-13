@@ -1,0 +1,101 @@
+@startuml
+title Катастрофоустойчивый k8s кластер с тремя ЦОД
+
+' Определяем стили для компонентов
+' skinparam clusterStyle rectangle
+' skinparam component {
+'   BackgroundColor LightBlue
+'   BorderColor DarkBlue
+' }
+
+actor user
+rectangle "servers" as srv
+
+cloud "Stretched L2 VLAN\n<20ms RTT" as l2_vlan_lb {
+' haproxy балансировщики в DC1 и DC2
+package "VIP Keepalived" as hap {
+portin h1
+portout i1
+portout i2
+portout i3
+portout i4
+' portout m1
+' portout m2
+' portout m3
+
+package "DC1" as dc1h {
+  rectangle "Haproxy 1" as hap1_dc1
+  rectangle "Haproxy 2" as hap2_dc1
+}
+
+package "DC2" as dc2h {
+  rectangle "Haproxy 1" as hap1_dc2
+  rectangle "Haproxy 2" as hap2_dc2
+}
+}
+}
+
+
+cloud "Stretched L2 VLAN\n<20ms RTT" as l2_vlan_k8s {
+
+package "k8s" as k8s {
+
+' DC3 только мастер ноды для кворума
+package "DC3" {
+  component "Master Node" as master_dc3
+}
+
+' k8s кластеры в DC1 и DC2 с ingress, master, worker нодами
+package "DC1" {
+  component "Worker Node(s)" as worker_dc1
+  component "System Node" as system_dc1
+  component "Ingress" as ingress_dc1
+  component "2 Master Nodes" as master_dc1
+  ingress_dc1 -down-> worker_dc1
+  ingress_dc1 -down-> system_dc1
+  ingress_dc1 -right-> master_dc1 #line:red
+}
+
+package "DC2" {
+  component "2 Master Nodes" as master_dc2
+  component "Worker Node(s)" as worker_dc2
+  component "Ingress" as ingress_dc2
+  component "System Node" as system_dc2
+  ingress_dc2 -down-> worker_dc2
+  ingress_dc2 -down-> worker_dc1
+  ingress_dc1 -down-> worker_dc2
+  ingress_dc2 -left-> master_dc2 #line:red
+  ingress_dc2 -down-> system_dc2
+  ingress_dc1 -down-> system_dc2
+  ingress_dc2 -down-> system_dc1
+}
+
+'  hap -> ingress_dc1 #line:blue;line.bold
+ ' hap -> ingress_dc2 #line:blue;line.bold
+'  hap ---> master_dc1 #line:red
+'  hap -right--> master_dc2 #line:red
+'  hap ---> master_dc3 #line:red
+  i2 -> ingress_dc1 #line:blue;line.bold
+  i2 -> ingress_dc2 #line:blue;line.bold
+  i1 ---> master_dc1 #line:red
+  i3 -right--> master_dc2 #line:red
+  i4 ---> master_dc3 #line:red
+
+}
+
+' Связь мастеров между DC1, DC2 и DC3 для k8s Control Plane и etcd кворума
+master_dc1 <-> master_dc2 #line:green;line.bold
+master_dc2 <--> master_dc3 #line:green;line.bold 
+master_dc1 <---> master_dc3 #line:green;line.bold
+}
+
+' Ceph как внешний storage для Persistent Volumes
+package "External Storage" as ext {
+  [Ceph Cluster] as ceph
+}
+
+k8s -down--> ext : "PV (csi-nfs csi-ceph)"
+
+user -down-> h1
+srv -down-> h1
+@enduml

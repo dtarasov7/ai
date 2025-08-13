@@ -1,0 +1,100 @@
+﻿@startuml
+!define RECTANGLE class
+
+title Катастрофоустойчивый Kubernetes кластер с тремя ЦОД
+
+package "External Traffic" {
+  [Internet] as internet
+  [VIP 192.168.1.100] as vip
+}
+
+package "Data Center 1 (DC1)" as dc1 {
+  rectangle "HAProxy Servers" {
+    [HAProxy-1] as haproxy1
+    [HAProxy-2] as haproxy2
+  }
+  
+  rectangle "Kubernetes Masters" {
+    [K8s Master-1] as master1
+  
+  }
+  
+  rectangle "Kubernetes Workers" {
+    [K8s Worker-1] as worker1
+    
+    [Ingress Controller-1] as ingress1
+  }
+  
+}
+
+package "Data Center 2 (DC2)" as dc2 {
+  rectangle "HAProxy Servers 2" {
+    [HAProxy-3] as haproxy3
+    [HAProxy-4] as haproxy4
+  }
+  
+  rectangle "Kubernetes Masters 2" {
+    [K8s Master-2] as master2
+  
+  }
+  
+  rectangle "Kubernetes Workers 2" {
+    [K8s Worker-2] as worker2
+    
+    [Ingress Controller-2] as ingress2
+  }
+
+}
+
+package "Data Center 3 (DC3)" as dc3 {
+  rectangle "Kubernetes Masters 3" {
+    [K8s Master-3] as master3
+   
+  }
+  
+  note right of master3 : Только master для кворума\nНет worker nodes
+}
+
+package "External Storage" {
+  database "Ceph Cluster" as ceph {
+  }
+}
+
+' External connections
+internet --> vip : "HTTP/HTTPS Traffic"
+vip --> haproxy1 : "Load Balance"
+vip --> haproxy2
+vip --> haproxy3
+vip --> haproxy4
+
+
+' HAProxy to Ingress
+haproxy1 --> ingress1 : "Backend"
+haproxy1 --> ingress2 : "Backend"
+haproxy2 --> ingress1 : "Backend"
+haproxy2 --> ingress2 : "Backend"
+haproxy3 --> ingress1 : "Backend"
+haproxy3 --> ingress2 : "Backend"
+haproxy4 --> ingress1 : "Backend"
+haproxy4 --> ingress2 : "Backend"
+
+' Ingress to Workers
+ingress1 --> worker1 : "Route to Pods"
+ingress1 --> worker2
+
+
+' K8s cluster connections
+master1 <--> master2 : "K8s API"
+master1 <--> master3 : "K8s API"
+master2 <--> master3 : "K8s API"
+
+master1 --> worker1 : "Control"
+master1 --> worker2 : "Control"
+
+' Ceph connections
+dc1 --> ceph : "Persistent Volumes"
+dc2 --> ceph
+dc3 --> ceph
+
+note bottom : Архитектура обеспечивает:\n- Отказоустойчивость на уровне ЦОД\n- Кворум etcd (3 мастера)\n- Балансировка нагрузки без GSLB\n- Внешнее хранилище Ceph\n- L2 связность между ЦОД
+@enduml

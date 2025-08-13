@@ -1,0 +1,75 @@
+﻿@startuml
+title Катастрофоустойчивый k8s кластер с тремя ЦОД
+
+' Определяем стили для компонентов
+skinparam clusterStyle rectangle
+skinparam component {
+  BackgroundColor LightBlue
+  BorderColor DarkBlue
+}
+
+' haproxy балансировщики в DC1 и DC2
+package "VIP Keepalived" as hap {
+package "DC1" {
+  rectangle "Haproxy 1" as hap1_dc1
+  rectangle "Haproxy 2" as hap2_dc1
+}
+
+package "DC2" {
+  rectangle "Haproxy 1" as hap1_dc2
+  rectangle "Haproxy 2" as hap2_dc2
+}
+}
+package "k8s" as k8s {
+
+' DC3 только мастер ноды для кворума
+package "DC3 Kubernetes" {
+  component "Master Node" as master_dc3
+}
+
+' k8s кластеры в DC1 и DC2 с ingress, master, worker нодами
+package "DC1 Kubernetes" {
+  component "2 Master Nodes" as master_dc1
+  component "Worker Node(s)" as worker_dc1
+  component "Ingress" as ingress_dc1
+  ' ingress_dc1 --> worker_dc1
+  ' master_dc1 --> worker_dc1
+  ' hap1_dc1 --> ingress_dc1
+  ' hap2_dc1 --> ingress_dc1
+}
+
+package "DC2 Kubernetes" {
+  component "2 Master Nodes" as master_dc2
+  component "Worker Node(s)" as worker_dc2
+  component "Ingress" as ingress_dc2
+  ' ingress_dc2 --> worker_dc2
+  ' master_dc2 --> worker_dc2
+  ' hap1_dc2 --> ingress_dc2
+  ' hap2_dc2 --> ingress_dc2
+}
+
+
+  hap -down-> ingress_dc1
+  hap -down-> ingress_dc2
+  hap -down-> master_dc1
+  hap -down-> master_dc2
+  hap -down-> master_dc3
+}
+
+' Связь мастеров между DC1, DC2 и DC3 для k8s Control Plane и etcd кворума
+master_dc1 <-down-> master_dc2 : "etcd репликация"
+master_dc2 <-down-> master_dc3 : "etcd репликация"
+master_dc1 <-down-> master_dc3 : "etcd репликация"
+
+' Ceph как внешний storage для Persistent Volumes
+package "External Storage" {
+  [Ceph Cluster] as ceph
+}
+
+k8s -down-> ceph : "Persistent Volumes"
+' worker_dc1 --> ceph : "Persistent Volumes"
+' worker_dc2 --> ceph : "Persistent Volumes"
+' master_dc1 --> ceph : "Persistent Volumes"
+' master_dc2 --> ceph : "Persistent Volumes"
+' master_dc3 --> ceph : "Persistent Volumes"
+@enduml
