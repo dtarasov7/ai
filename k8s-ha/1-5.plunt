@@ -96,6 +96,6 @@ package "External Storage" as ext {
 
 k8s -down--> ext : "PV (csi-nfs csi-ceph)"
 
-user -down-> h1
-srv -down-> h1
+user -down-> hap
+srv -down-> hap
 @enduml
