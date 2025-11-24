@@ -1,0 +1,23 @@
+﻿1. opentelemetry collector
+Репозиторий
+https://github.com/open-telemetry/opentelemetry-collector
+https://github.com/open-telemetry/opentelemetry-collector-contrib
+
+Загрузка
+otel-contrib
+https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v0.137.0/otelcol-contrib_0.137.0_linux_amd64.tar.gz
+
+otelcol
+https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v0.137.0/otelcol_0.137.0_linux_amd64.tar.gz
+
+2. Data prepper
+Репозиторий
+https://github.com/opensearch-project/data-prepper
+Загрузка
+https://artifacts.opensearch.org/data-prepper/2.12.2/opensearch-data-prepper-jdk-2.12.2-linux-x64.tar.gz
+
+3. opentelemetry-javaagent
+Репозиторий
+https://github.com/open-telemetry/opentelemetry-java-instrumentation
+Бинарник
+https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases/download/v2.20.1/opentelemetry-javaagent.jar

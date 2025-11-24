@@ -1,0 +1,158 @@
+armeria_build_info(commit="55f5f7792df538a35a5e242dled77cfc96HaXMMTe Esc, чтобы выйти из полноэкранного режиг 
+armeria_executor_active_threads(name="blockingTaskExecutor ",serviceName="dataprepper"Л 0,0 
+armeria_executor_completed_tasks_total(name="blockingTaskExecutor",serviceName="dataprepper", J 0,0 
+armeria_executor_idle_seconds_count{name="blockingTaskExecutor",serviceName="dataprepper",} 0,0 
+armeria_executor_idle_seconds_max(name="blockingTaskExecutor",serviceName="dataprepper",J 0_0 
+armeria_executor_idle_seconds_sum(name="blockingTaskExecutor",serviceName="dataprepper",J 0,0 
+armeria_executor_pool_core_threads{name="blockingTaskExecutor",serviceName="dataprepper",} 200,0
+armeria_executor_pool_max_threads(name="blockingTaskExecutor",serviceName="dataprepper",} 2_147483647E9 
+armeria_executor_pool_size_threads(name="blockingTaskExecutor",serviceName="dataprepper",J 0_0 
+armeria_executor_queued_tasks{name="blockingTaskExecLitor",serviceName="dataprepper",} 0,0
+armeria_executor_queue_remaining_tasks(name="blockingTaskExecutor",serviceName="dataprepper",} 2_147483647E9 
+armeria_executor_scheduled_once_total(name="blockingTaskExecutor",serviceName="dataprepper",} 0_0 
+armeria_executor_scheduled_repetitively_total(name="blockingTaskExecutor",serviceName="dataprepper",} 0,0 
+armeria_executor_seconds_count(name="blockingTaskExecutor",serviceName="dataprepper",} 0_0 
+armeria_executor_seconds_max{name="blockingTaskExecutor",serviceName="dataprepper",J 0_0 
+armeria_executor_seconds_sum(name="blockingTaskExecutor",serviceName="dataprepper",} 0,0 
+armeria_server_connections_lifespan_seconds_count{protocol="hie",serviceName="dataprepper",} 11,0 
+armeria_server_connections_lifespan_seconds_count(protocol="h2c",serviceName="dataprepper",> 6,0 
+armeria_server_connections_lifespan_seconds_max{protocol="hlc",serviceName="dataprepper",} 0,0 
+armeria_server_connections_lifespan_seconds_max(protocol="h2c",serviceName="dataprepper",) 0,0 
+armeria_server_connections_lifespan_seconds(protocol="hlc",serviceName="dataprepper",quantile="0,0",J 0,0 
+armeria_server_connections_lifespan_seconds{protocol="hlc",serviceName="dataprepper",quantile="0,5",} 0,0 
+armeria_server_connections_lifespan_seconds(protocol="hlc",serviceName="dataprepper",quantile="0_75",J 0_0 
+armeria_server_connections_lifespan_seconds(protocol="hlc",serviceName="dataprepper",quantile="0_9",J 0_0 
+armeria_server_connections_lifespan_seconds(protocol="hlc",serviceName="dataprepper",quantile="0,95",J 0_0 
+armeria_server_connections_lifespan_seconds(protocol="hlc",serviceName="dataprepper",quantile="0_98",J 0_0 
+armeria_server_connections_lifespan_seconds(protocol="hlc",serviceName="dataprepper",quantile="0_99",J 0_0 
+armeria_server_connections_lifespan_seconds{protocol="hlc",serviceName="dataprepper",quantile="0,999",} 0_0 
+armeria_server_connections_lifespan_seconds(protocol = "hlc",serviceName="dataprepper",quantile="l _0",} 0_0 
+armeria_server_connections_lifespan_seconds(protocol="h2c",serviceName="dataprepper",quantile="0_0",J 0_0 
+armeria_server_connections_lifespan_seconds(protocol="h2c",serviceName="dataprepper",quantile="0,5",} 0_0 
+armeria_server_connections_lifespan_seconds(protocol="h2c",serviceName="dataprepper",quantile="0_75",J 0,0 
+armeria_server_connections_lifespan_seconds(protocol="h2c",serviceName="dataprepper",quantile="0_9",> 0_0 
+armeria_server_connections_lifespan_seconds{protocol="h2c",serviceName="dataprepper",quantile="0,95",J 0_0 
+armeria_server_connections_lifespan_seconds(protocol="h2c",serviceName="dataprepper",quantile="0_98",J 0_0 
+armeria_server_connections_lifespan_seconds(protocol="h2c",serviceName="dataprepper",quantile="0_99",J 0_0 
+armeria_server_connections_lifespan_seconds{protocol="h2c",serviceName="dataprepper",quantile="0,999",} 0_0 
+armeria_server_connections_lifespan_seconds(protocol="h2c",serviceName="dataprepper",quantile="l_0",} 0_0 
+armeria_server_connections_lifespan_seconds_sum{protocol="hlc",serviceName="dataprepper",} 98_654795361 
+armeria_server_connections_lifespan_seconds_sum{protocol="h2c",serviceName="dataprepper",} 75_017459098 
+armeria_server_connections(serviceName="dataprepper",J 0_0
+armeria_server_router_virtual_host_cache_estimated_size(hostnHaXMHTe Esc, чтобы _выйти из'гюлноэкранйого режима 
+armeria_server_router_virtual_host_cache_evictions_total(Hhu5tname_pjttern="*" ,serviceilame="datjprepper" > J 0_0 
+armeria_server_router_virtual_host_cache_evictions_weight_total(hostname_pattern="*",serviceName="dataprepper",} 0,0 
+armeria_server_router_virtual_host_cache_requests_total(hostname_pattern="*",result="hit",serviceName="dataprepper",} 0_ 
+armeria_server_router_virtual_host_cache_requests_total(hostname_pattern="*",result="miss",serviceName="dataprepper",} 1 
+core_peerForuarder_badRequests_total(serviceName="dataprepper",} 0_0 
+core_peerForuarder_clientRequestForwardingLatency_seconds_count(serviceName="dataprepper",) 0_0 
+core_peerForuarder_clientRequestForwardingLatency_seconds_max{serviceName="dataprepper",} 0_0 
+core_peerForuarder_clientRequestForwardingLatency_seconds_sum(serviceName="dataprepper",} 0_0 
+core_peerForuarder_requestsTooLarge_total
+core_peerForuarder_requests_total(serviceName="dataprepper", } 0_0 
+core_peerForuarder_requestsUnprocessable_total(serviceName="dataprepper",J 0_0 
+core_peerForuarder_requestTimeouts_total(serviceName="dataprepper",> 0_0 
+core_peerForuarder_serverRequestProcessingLatency_seconds_count(serviceName="dataprepper",} 0_0 
+core_peerForuarder_serverRequestProcessingLatency_seconds_max(serviceName="dataprepper",} 0_0 
+core_peerForuarder_serverRequestProcessingLatency_seconds_sum(serviceName="dataprepper", J 0_0 
+entry_pipeline_BlockingBuffer_bufferUsage(serviceName="dataprepper",} 0_0 
+entry_pipeline_BlockingBuffer_checkpointTimeElapsed_seconds_count(serviceName="dataprepper",} 5385978,0 
+entry_pipeline_BlockingBuffer_checkpointTimeElapsed_seconds_max(serviceName="dataprepper",} 5_93E-7 
+entry_pipe1ine_BlockingBuffer_checkpointTimeElapsed_seconds_sum{serviceName="dataprepper",} 0_526913091 
+entru_pipeline_BlockingBuffer_readTimeElapsed_seconds_count(serviceName="dataprepper",} 5385978,0 entrg_pipeline_BlockingBuffer_readTimeElapsed_seconds_max(serviceName="dataprepper", J 0_300326124 
+entry_pipe1ine_BlockingBuffer_readTimeElapsed_seconds_sum(serviceName="dataprepper",} 1616330_090803161 
+entry_pipeline_BlockingBuffer_recordsInBuffer(serviceName="dataprepper",} 0_0 
+entry_pipeline_BlockingBuffer_recordsInFlight(serviceName="dataprepper",} 0_0 
+entry_pipe1ine_BlockingBuffer_recordsRead_total(serviceName="dataprepper",} 0_0 
+entry_pipeline_BlockingBuffer_recordsWritten_total(serviceName="dataprepper",} 0_0 
+entry_pipeline_BlockingBuffer_writeTimeElapsed_seconds_count(serviceName="dataprepper", J 0_0 
+entry_pipe1ine_BlockingBuffer_writeTimeElapsed_seconds_max(serviceName="dataprepper",} 0_0 
+entry_pipeline_BlockingBuffer_writeTimeElapsed_seconds_sum(serviceName="dataprepper",} 0_0 
+entry_pipeline_BlockingBuffer_writeTimeouts_total(serviceName="dataprepper",J 0_0 
+entry_pipeline_otel_trace_source_badRequests_total(serviceName="dataprepper",} 0_0 
+entry_pipe1ine_otel_trace_source_internalServerError_totaHserviceName="dataprepper",} 0_0 
+entry_pipeline_otel_trace_source_payloadSize_countiserviceName="dataprepper",} 0_0 
+entry_pipeline_otel_trace_source_payloadSize_max(serviceName="dataprepper",} 0_0 [
+entry_pipeline_otel_trace_source_payloadSize_sum(serviceName="dataprepper",} 0_0 
+entry_pipeline_otel_trace_source_requestProcessDuration_seconds_count(serviceName="dataprepper",} 0_0 
+entry_pipeline_otel_trace_source_requestProcessDuration_seconds_max{serviceName="dataprepper",} 0_0 
+entry_pipeline_otel_trace_source_requestProcessDuration_seconds_sum(serviceName="dataprepper",} 0_0 
+entry_pipeline_otel_trace_source_requestsReceived_total(serviceName="dataprepper",} 0_0
+entry_pipeline_otel_trace_source_requestsTool_arge_total{serviceName="dataprepper",} 0_0 
+entry_pipeline_otel_trace_source_requestTimeouts_total(serviceName="dataprepper",} 0_0 
+entry_pipeline_otel_trace_source_successRequests_total(serviceName="dataprepper",} 0_0 
+entry_pipeline_recordsProcessed_total{serviceName="dataprepper",J 0_0 
+process_cpu_usage(serviceName="dataprepper",) 5_246039240373518E-4 
+raw_pipeline_BlockingBuffer_bufferUsage(serviceName="dataprepper",} 0_0 
+raw_pipeline_BlockingBuffer_checkpointTimeElapsed_seconds_count(serviceName="dataprepper",} 269383_0 
+raw_pipeline_BlockingBuffer_checkpointTimeElapsed_seconds_max{serviceName="dataprepper",} 4_18E-7 
+raw_pipeline_BlockingBuffer_checkpointTimeElapsed_seconds_sum(serviceName="dataprepper",J 0_050576901 
+raw_pipeline_BlockingBuffer_readTimeElapsed_seconds_count(serviceName="dataprepper",) 269383_0 
+raw_pipeline_BlockingBuffer_readTimeElapsed_seconds_max(serviceName="dataprepper",} 3_000212167 
+raw_pipeline_BlockingBuffer_readTimeElapsed_seconds_sum(serviceName="dataprepper",} 808175_60244526 
+raw_pipeline_BlockingBuffer_recordsInBuffer(serviceName="dataprepper",J 0_0 
+raw_pipeline_BlockingBuffer_recordsInFlight
+raw_pipeline_BlockingBuffer_recordsRead_total(serviceName= "dataprepper",} 0_0 
+raw_pipeline_BlockingBuffer_recordsWritten_total{serviceName="dataprepper",J 0_0 
+raw_pipeline_BlockingBuffer_WriteTimeElapsed_seconds_count(serviceName="dataprepper",} 0_0 
+raw_pipeline_BlockingBuffer_WriteTimeElapsed_seconds_max(serviceName="dataprepper",} 0_0 
+raw_pipeline_BlockingBuffer_WriteTimeElapsed_seconds_sum(serviceName= "dataprepper",} 0_0 
+raw_pipeline_BlockingBuffer_WriteTimeouts_total(serviceName="dataprepper",} 0_0 
+raw_pipeline_opensearch_bulkRequestErrors_total(serviceName="dataprepper",} 0_0
+raw_pipeline_opensearch_bulkRequestLatency_seconds_count(serviceName="dataprepper", J 0_0
+raw_pipeline_opensearch_bulkRequestLatency_seconds_max{serviceName="dataprepper",} 0_0 
+raw_pipeline_opensearch_buIkRequestLatency_seconds_sum(serviceName="dataprepper",} 0_0 
+raw_pipeline_opensearch_bulkRequestSizeBytes_count(serviceName="dataprepper",} 0_0 
+raw_pipeline_opensearch_bulkRequestSizeBytes_max{serviceName="dataprepper",} 0_0 
+raw_pipeline_opensearch_bulkRequestSizeBytes_sum{serviceName="dataprepper",) 0_0 
+raw_pipeline_opensearch_documentErrors_total(serviceName="dataprepper",} 0_0 
+raw_pipeline_opensearch_documentsSuccessFirstRttempt_total(serviceName="dataprepper",} 0_0 
+raw_pipeline_opensearch_documentsSuccess_total(serviceName="dataprepper",} 0_0 
+raw_pipeline_opensearch_recordsIn_total(serviceName="dataprepper",} 0_0 
+raw_pipeline_opensearch_timeElapsed_seconds_count(serviceName="dataprepper",} 0_0 
+raw_pipeline_opensearch_timeElapsed_seconds_max<serviceName="dataprepper",} 0_0 
+raw_pipeline_opensearch_timeElapsed_seconds_sum{serviceName="dataprepper",} 0_0 
+raw_pipeline_otel_trace_raw_recordsIn_total{serviceName="dataprepper",} 0_0 
+raw_pipeline_otel_trace_raw_recordsOut_total(serviceName="dataprepper",} 0_0 
+raw_pipeline_otel_trace_raw_timeElapsed_seconds_count{serviceName="dataprepper",} 269383_0 
+raw_pipeline_otel_trace_raw_timeElapsed_seconds_max(serviceName="dataprepper",} 7_2967E-5 
+raw_pipeline_otel_trace_raw_timeElapsed_seconds_sum{serviceName= "dataprepper", J 2_735227573 
+raw_pipeline_recordsProcessed_total(serviceName="dataprepper",} 0_0
+
+service_map_pipeline_BlockingBuffer_bufferllsage{serviceName="dataprepper",} 0_0 
+service_map_pipeline_BlockingBuffer_checkpointTimeElap5ed_seconds_count(serviceName="dataprepper",} 8073154_0 
+service_map_pipeline_BlockingBuffer_checkpointTimeElapsed_seconds_max(serviceName="dataprepper",} 1_3606E-5 
+service_map_pipeline_BlockingBuffer_checkpointTimeElapsed_seconds_sum{serviceNanie="dataprepper",} 0_920608603 
+service_map_pipeline_BlockingBuffer_readTimeElapsed_seconds_count(serviceName="dataprepper",} 8073154_0 
+service_map_pipeline_BlockingBuffer_readTimeElapsed_seconds_max(serviceName="dataprepper",} 0_100378386 
+service_map_pipeline_BlockingBuffer_readTimeElapsed_seconds_sum{serviceName="dataprepper",} 808111_210849202 
+service_map_pipeline_BlockingBuffer_recordsInBuffer(serviceName="dataprepper",J 0_0 
+service_map_pipeline_BlockingBuffer_records InFlight(serviceName="dataprepper",> 0_0 
+service_map_pipeline_BlockingBuffer_recordsRead_total{serviceName="dataprepper",} 0_0 
+service_map_pipeline_BlockingBuffer_recordsWritten_total(serviceName="dataprepper",J 0_0 
+service_map_pipeline_BlockingBuffer_writeTimeElapsed_seconds_count<serviceName="dataprepper",} 0_0 
+service_map_pipeline_BlockingBuffer_uriteTimeElapsed_seconds_max(serviceName="dataprepper",} 0_0 
+service_map_pipeline_BlockingBuffer_шгiteTimeElapsed_seconds_sum(serviceName="dataprepper",} 0_0 
+service_map_pipeline_BlockingBuffег_шгiteTimeouts_total(serviceName="dataprepper",} 0_0 
+service_map_pipeline_opensearch_bulkRequestErrors_total(serviceName="dataprepper",} 0_0 
+service_map_pipeline_opensearch_bulkRequestLatency_seconds_count{serviceName="dataprepper",} 0_0 
+service_map_pipeline_opensearch_bulkRequestLatency_seconds_max(serviceName="dataprepper",} 0_0 
+service_map_pipeline_opensearch_bulkRequestLatency_seconds_sum{serviceName="dataprepper",} 0_0 
+service_map_pipeline_opensearch_bulkRequestSizeBytes_count(serviceName="dataprepper",} 0_0 
+service_map_pipeline_opensearch_bulkRequestSizeBytes_max{serviceName="dataprepper",} 0_0 
+service_map_pipeline_opensearch_bulkRequestSizeBytes_sum(serviceName="dataprepper",J 0_0 
+service_map_pipeline_opensearch_documentErrors_total(serviceName="dataprepper",} 0_0 
+service_map_pipeline_opensearch_documentsSuccessFirstRttempt_total(serviceName="dataprepper",} 0_0 
+service_map_pipeline_opensearch_documentsSuccess_total(serviceName="dataprepper",} 0_0 
+service_map_pipeline_opensearch_records In_total<serviceName="dataprepper",} 0_0 
+service_map_pipeline_opensearch_timeElapsed_seconds_count(serviceName="dataprepper",} 0_0 
+service_map_pipeline_opensearch_timeElapsed_seconds_max(serviceName="dataprepper",} 0_0 
+service_map_pipeline_opensearch_timeElapsed_5econds_5um{serviceName="dataprepper",} 0_0 
+service_map_pipeline_recordsProcessed_total{serviceName="dataprepper",} 0_0 
+service_map_pipeline_service_map_stateful_recordsIn_total(serviceName="dataprepper",} 0_0 
+service_map_pipeline_service_map_stateful_recordsOut_total(serviceName="dataprepper",} 0_0 
+service_map_pipeline_service_map_stateful_spansDbSize(serviceName="dataprepper",) 0_0 
+service_map_pipeline_service_map_stateful_timeElapsed_seconds_count(serviceName="dataprepper",} 8073154_0 
+service_map_pipeline_service_map_stateful_timeElapsed_seconds_max{serviceName="dataprepper",) 1_97492E-4 
+service_map_pipeline_service_map_stateful_timeElapsed_seconds_sum(serviceName="dataprepper",} 7_691842905 
+service_map_pipeline_service_map_stateful_traceGroupDbSize(serviceName="dataprepper",1 0_0

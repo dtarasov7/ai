@@ -1,0 +1,185 @@
+﻿Отличная задача! Это стандартный сценарий для Data Prepper, и он решается с помощью комбинации процессора `route` и приемника/источника `pipeline`.
+
+Идея заключается в следующем:
+1.  **Основной конвейер (Pipeline)**: Принимает все трейсы от OTel Collector.
+2.  **Процессор `route`**: Внутри этого конвейера он анализирует поле `/span/attributes/application`.
+3.  **Маршрутизация**: В зависимости от значения (`dev`, `test`, `prod`), процессор добавляет к событию (трейсу) специальную метку-маршрут.
+4.  **Приемник `pipeline`**: Этот приемник в основном конвейере использует условия (`when`), чтобы проверить метку-маршрут и отправить трейс в соответствующий дочерний конвейер.
+5.  **Дочерние конвейеры**: Три отдельных конвейера (`dev-pipeline`, `test-pipeline`, `prod-pipeline`), каждый из которых принимает данные только из основного конвейера и отправляет их в свой конечный пункт назначения (например, в разные индексы OpenSearch).
+
+---
+
+### Конфигурационный файл `pipelines.yaml`
+
+Вот полный пример конфигурации для вашего случая.
+
+```yaml
+# pipelines.yaml
+
+# 1. Основной конвейер-маршрутизатор
+router-pipeline:
+  workers: 2 # Количество потоков для обработки
+  source:
+    otel_trace_source:
+      # Порт, на который OTel Collector будет отправлять трейсы
+      port: 21890 
+      ssl: false # В реальной среде установите в true и настройте сертификаты
+  processor:
+    - route:
+        routes:
+          # Условие для 'dev'
+          - route: "dev_route" # Название маршрута, которое будет добавлено в метаданные
+            when: "/span/attributes/application == 'dev'"
+          # Условие для 'test'
+          - route: "test_route"
+            when: "/span/attributes/application == 'test'"
+          # Условие для 'prod'
+          - route: "prod_route"
+            when: "/span/attributes/application == 'prod'"
+        # Вы можете добавить default_routes для трейсов, которые не подошли ни под одно условие
+        # default_routes:
+        #   - "unmatched_route" 
+  sink:
+    - pipeline:
+        name: "dev-pipeline" # Имя целевого конвейера
+        when: 'getMetadata("routes").contains("dev_route")' # Условие отправки
+    - pipeline:
+        name: "test-pipeline"
+        when: 'getMetadata("routes").contains("test_route")'
+    - pipeline:
+        name: "prod-pipeline"
+        when: 'getMetadata("routes").contains("prod_route")'
+    # Раскомментируйте, если используете default_routes
+    # - pipeline:
+    #     name: "unmatched-pipeline"
+    #     when: 'getMetadata("routes").contains("unmatched_route")'
+
+# 2. Конвейер для DEV окружения
+dev-pipeline:
+  source:
+    pipeline:
+      name: "router-pipeline" # Указываем, что источник - наш основной конвейер
+  buffer:
+    in_memory:
+      batch_size: 100
+  sink:
+    - opensearch:
+        hosts: [ "https://opensearch-node:9200" ]
+        # Имя пользователя и пароль для доступа к OpenSearch
+        username: "admin"
+        password: "my-strong-password"
+        # Динамическое имя индекса для DEV трейсов
+        index: "dev-traces-%{yyyy.MM.dd}" 
+        # Отключаем проверку сертификата для простоты, в проде настройте правильно
+        insecure: true 
+    # Для отладки можно использовать stdout
+    # - stdout:
+
+# 3. Конвейер для TEST окружения
+test-pipeline:
+  source:
+    pipeline:
+      name: "router-pipeline"
+  buffer:
+    in_memory:
+      batch_size: 100
+  sink:
+    - opensearch:
+        hosts: [ "https://opensearch-node:9200" ]
+        username: "admin"
+        password: "my-strong-password"
+        index: "test-traces-%{yyyy.MM.dd}"
+        insecure: true
+
+# 4. Конвейер для PROD окружения
+prod-pipeline:
+  source:
+    pipeline:
+      name: "router-pipeline"
+  buffer:
+    in_memory:
+      batch_size: 100
+  sink:
+    - opensearch:
+        hosts: [ "https://opensearch-node:9200" ]
+        username: "admin"
+        password: "my-strong-password"
+        index: "prod-traces-%{yyyy.MM.dd}"
+        insecure: true
+
+# 5. Опциональный конвейер для трейсов без нужного атрибута
+# unmatched-pipeline:
+#   source:
+#     pipeline:
+#       name: "router-pipeline"
+#   sink:
+#     - opensearch:
+#         hosts: [ "https://opensearch-node:9200" ]
+#         username: "admin"
+#         password: "my-strong-password"
+#         index: "unmatched-traces-%{yyyy.MM.dd}"
+#         insecure: true
+```
+
+### Пояснения к конфигурации
+
+1.  **`router-pipeline` (Конвейер-маршрутизатор)**
+    *   **`source: otel_trace_source`**: Принимает OTLP трейсы на порт `21890`. Ваш OTel Collector должен быть настроен на отправку данных на этот адрес и порт.
+    *   **`processor: - route:`**: Сердце нашей логики.
+        *   `when: "/span/attributes/application == 'dev'"`: Это выражение Data Prepper. Оно проверяет значение поля `application` внутри атрибутов спана. Путь `/span/attributes/application` является стандартным для доступа к данным внутри OTLP события в Data Prepper.
+        *   `route: "dev_route"`: Если условие выполняется, к трейсу добавляются метаданные с маршрутом `"dev_route"`.
+    *   **`sink: - pipeline:`**: Отправляет данные в другие конвейеры.
+        *   `name: "dev-pipeline"`: Указывает, в какой конвейер-получатель отправлять данные.
+        *   `when: 'getMetadata("routes").contains("dev_route")'`: Это условие проверяет, содержат ли метаданные трейса маршрут `"dev_route"`. Если да, то трейс отправляется в `dev-pipeline`.
+
+2.  **`dev-pipeline`, `test-pipeline`, `prod-pipeline` (Целевые конвейеры)**
+    *   **`source: pipeline:`**: Указывает, что этот конвейер получает данные из другого конвейера, в данном случае из `router-pipeline`.
+    *   **`sink: - opensearch:`**: Отправляет данные в OpenSearch.
+        *   **`index: "dev-traces-%{yyyy.MM.dd}"`**: Самое важное здесь — для каждого окружения мы используем свой шаблон индекса. Это разделяет данные на уровне хранилища, что очень удобно для анализа и настройки прав доступа.
+
+### Настройка OpenTelemetry Collector
+
+Убедитесь, что ваш `otelcol-config.yaml` настроен на отправку трейсов в Data Prepper. В секции `exporters` и `service` у вас должно быть что-то вроде этого:
+
+```yaml
+exporters:
+  otlp:
+    # Укажите адрес и порт, на котором слушает Data Prepper
+    endpoint: "data-prepper-host:21890" 
+    tls:
+      # Если ssl: false в Data Prepper, здесь должно быть insecure: true
+      insecure: true
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      # Убедитесь, что ваш otlp экспортер включен здесь
+      exporters: [logging, otlp] 
+```
+
+### Схема потока данных
+
+```
+                                      ┌──────────────────┐    ┌───────────────────┐
+                                      │   dev-pipeline   ├────► OpenSearch (Index)│
+                                      │ (source: pipeline) │    │ dev-traces-*      │
+                                      └──────────────────┘    └───────────────────┘
+                                              ▲
+                                              │ if 'dev'
+┌───────────┐      ┌────────────────────┐     │
+│           │      │                    │     │
+│ OTel      ├──────►  router-pipeline   ├─────┼── if 'test'
+│ Collector │      │(source: otel_trace)│     │
+│           │      │                    │     │
+└───────────┘      └────────────────────┘     ▼
+                                      ┌──────────────────┐    ┌───────────────────┐
+                                      │  test-pipeline   ├────► OpenSearch (Index)│
+                                      │ (source: pipeline) │    │ test-traces-*     │
+                                      └──────────────────┘    └───────────────────┘
+                                              |
+                                              ... и так далее для 'prod'
+```
+
+Эта конфигурация является надежным и масштабируемым способом маршрутизации данных в Data Prepper в зависимости от их содержимого.

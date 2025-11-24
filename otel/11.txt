@@ -1,0 +1,47 @@
+﻿#
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+from opentelemetry.sdk.resources import Resource, SERVICE_NAME
+from opentelemetry.trace import set_span_in_context
+
+# Общий endpoint OTel Collector
+OTLP_ENDPOINT = "localhost:4317"
+
+# Создаём общий exporter (можно использовать один для всех)
+exporter = OTLPSpanExporter(endpoint=OTLP_ENDPOINT, insecure=True)
+
+# Функция для создания трейсера с заданным именем сервиса
+def create_tracer(service_name: str):
+    resource = Resource(attributes={SERVICE_NAME: service_name})
+    provider = TracerProvider(resource=resource)
+    provider.add_span_processor(BatchSpanProcessor(exporter))
+    return provider.get_tracer(__name__)
+
+# Создаём трейсеры для каждого "микросервиса"
+frontend_tracer = create_tracer("frontend")
+auth_tracer = create_tracer("auth-service")
+db_tracer = create_tracer("database")
+
+# 1. Frontend: запускает корневой span
+with frontend_tracer.start_as_current_span("GET /login") as root_span:
+    root_span.set_attribute("http.method", "GET")
+    root_span.set_attribute("http.route", "/login")
+    
+    # Эмулируем вызов Auth Service
+    # Передаём контекст (trace_id, span_id) вручную через set_span_in_context
+    auth_context = trace.set_span_in_context(root_span)
+    
+    with auth_tracer.start_span("validate_token", context=auth_context) as auth_span:
+        auth_span.set_attribute("auth.type", "jwt")
+        
+        # Эмулируем вызов базы данных
+        db_context = trace.set_span_in_context(auth_span)
+        
+        with db_tracer.start_span("query_user", context=db_context) as db_span:
+            db_span.set_attribute("db.statement", "SELECT * FROM users WHERE id = ?")
+            db_span.set_attribute("db.system", "postgresql")
+            db_span.add_event("DB query executed")
+
+print("Тестовый трейс с цепочкой микросервисов отправлен!")

@@ -1,0 +1,13 @@
+﻿processors:
+  transform/traces:
+    trace_statements:
+      - context: span
+        statements:
+          - 'if trace_state == "" { replace_match(trace_state, nil) }'
+
+service:
+  pipelines:
+    traces:
+      receivers: [jaeger/otlp/etc]
+      processors: [transform/traces]
+      exporters: [otlp/data-prepper]

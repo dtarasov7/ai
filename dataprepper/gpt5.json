@@ -1,0 +1,472 @@
+﻿Ниже — готовый к импорту Grafana-дэшборд для метрик Data Prepper (через Prometheus). Он показывает входной/выходной поток записей, ошибки/дропы, латентность (p50/p95/p99), а также JVM/CPU/GC. Я заложил переменные для выбора точных имен метрик (т.к. в разных версиях Data Prepper/конфигурациях они могут отличаться). Если ваши имена другие — просто выберите их в выпадающих списках дэшборда.
+
+Что нужно заранее
+- Источник данных в Grafana: Prometheus.
+- Prometheus должен скрейпить Data Prepper по /metrics (обычно порт 4900).
+
+Пример scrape-конфига Prometheus
+- K8s (подставьте правильные селекторы/labels):
+```yaml
+- job_name: 'data-prepper'
+  metrics_path: /metrics
+  kubernetes_sd_configs:
+    - role: pod
+  relabel_configs:
+    - source_labels: [__meta_kubernetes_pod_label_app]
+      action: keep
+      regex: data-prepper
+    - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+      action: keep
+      regex: "true"
+    - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_port]
+      action: replace
+      target: __address__
+      regex: (.*)
+      replacement: $1
+```
+
+- Статический таргет:
+```yaml
+- job_name: 'data-prepper'
+  metrics_path: /metrics
+  static_configs:
+    - targets: ['data-prepper.my-namespace.svc:4900']  # или host:port
+```
+
+Импортируемый Grafana dashboard (JSON)
+- Импорт: Grafana → Dashboards → Import → вставьте JSON ниже.
+- При импорте выберите ваш Prometheus datasource.
+- На панели сверху выберите:
+  - job = ваш job (обычно data-prepper)
+  - instance = нужные инстансы (или All)
+  - in_metric/out_metric/failed_metric/dropped_metric/sink_* и duration_bucket_metric — если автопоиск имён не подхватил правильно.
+
+```json
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Up (per instance)",
+      "id": 1,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (instance) (up{job=\"$job\", instance=~\"$instance\"})"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "In rate (events/s)",
+      "id": 2,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(${in_metric}{job=\"$job\", instance=~\"$instance\"}[$__rate_interval]))"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "decimals": 2 },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "values": false }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Out rate (events/s)",
+      "id": 3,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(${out_metric}{job=\"$job\", instance=~\"$instance\"}[$__rate_interval]))"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "decimals": 2 },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "values": false }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Failed rate (events/s)",
+      "id": 4,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(${failed_metric}{job=\"$job\", instance=~\"$instance\"}[$__rate_interval]))"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "decimals": 2 },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "values": false }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Dropped rate (events/s)",
+      "id": 5,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(${dropped_metric}{job=\"$job\", instance=~\"$instance\"}[$__rate_interval]))"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "decimals": 2 },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "values": false }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Throughput by ${group_by} (in rate)",
+      "id": 6,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (${group_by}) (rate(${in_metric}{job=\"$job\", instance=~\"$instance\"}[$__rate_interval]))",
+          "legendFormat": "{{${group_by}}}"
+        }
+      ],
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "single" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Sink success vs failed (by ${group_by})",
+      "id": 7,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (${group_by}) (rate(${sink_success_metric}{job=\"$job\", instance=~\"$instance\"}[$__rate_interval]))",
+          "legendFormat": "success {{${group_by}}}"
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (${group_by}) (rate(${sink_failed_metric}{job=\"$job\", instance=~\"$instance\"}[$__rate_interval]))",
+          "legendFormat": "failed {{${group_by}}}"
+        }
+      ],
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Processing latency (p50/p95/p99) by ${group_by}",
+      "id": 8,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.50, sum by (le, ${group_by}) (rate(${duration_bucket_metric}{job=\"$job\", instance=~\"$instance\"}[$__rate_interval])))",
+          "legendFormat": "p50 {{${group_by}}}"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum by (le, ${group_by}) (rate(${duration_bucket_metric}{job=\"$job\", instance=~\"$instance\"}[$__rate_interval])))",
+          "legendFormat": "p95 {{${group_by}}}"
+        },
+        {
+          "refId": "C",
+          "expr": "histogram_quantile(0.99, sum by (le, ${group_by}) (rate(${duration_bucket_metric}{job=\"$job\", instance=~\"$instance\"}[$__rate_interval])))",
+          "legendFormat": "p99 {{${group_by}}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "s", "decimals": 3 },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "JVM heap used (%)",
+      "id": 9,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 * sum(jvm_memory_used_bytes{job=\"$job\", instance=~\"$instance\", area=\"heap\"}) / sum(jvm_memory_max_bytes{job=\"$job\", instance=~\"$instance\", area=\"heap\"})",
+          "legendFormat": "heap used"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "percent", "min": 0, "max": 100, "decimals": 1 },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "single" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "CPU usage (process) %",
+      "id": 10,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 * sum by (instance) (rate(process_cpu_seconds_total{job=\"$job\", instance=~\"$instance\"}[$__rate_interval]))",
+          "legendFormat": "{{instance}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "percent", "decimals": 1 },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "single" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "GC pauses (s/s) and count",
+      "id": 11,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (instance) (rate(jvm_gc_pause_seconds_sum{job=\"$job\", instance=~\"$instance\"}[5m]))",
+          "legendFormat": "pause sum {{instance}}"
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (gc, instance) (rate(jvm_gc_pause_seconds_count{job=\"$job\", instance=~\"$instance\"}[5m]))",
+          "legendFormat": "count {{gc}} {{instance}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "decimals": 3 },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } }
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["data-prepper", "opensearch", "prometheus", "jvm"],
+  "templating": {
+    "list": [
+      {
+        "name": "DS_PROMETHEUS",
+        "type": "datasource",
+        "label": "Prometheus",
+        "query": "prometheus",
+        "current": null,
+        "hide": 0
+      },
+      {
+        "name": "job",
+        "type": "query",
+        "label": "job",
+        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "definition": "label_values(up, job)",
+        "query": "label_values(up, job)",
+        "refresh": 2,
+        "includeAll": false,
+        "multi": false,
+        "current": { "text": "data-prepper", "value": "data-prepper", "selected": true }
+      },
+      {
+        "name": "instance",
+        "type": "query",
+        "label": "instance",
+        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "definition": "label_values(up{job=\"$job\"}, instance)",
+        "query": "label_values(up{job=\"$job\"}, instance)",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "current": { "text": "All", "value": "$__all", "selected": true }
+      },
+      {
+        "name": "group_by",
+        "type": "custom",
+        "label": "Group by label",
+        "query": "pipeline,plugin_id,plugin_name,plugin_type,instance",
+        "current": { "text": "pipeline", "value": "pipeline", "selected": true }
+      },
+      {
+        "name": "in_metric",
+        "type": "query",
+        "label": "In metric",
+        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "definition": "label_values({__name__=~\"data_prepper_.*(record|event).*in.*(_total)?$\"}, __name__)",
+        "query": "label_values({__name__=~\"data_prepper_.*(record|event).*in.*(_total)?$\"}, __name__)",
+        "refresh": 2,
+        "current": { "text": "data_prepper_pipeline_records_in_total", "value": "data_prepper_pipeline_records_in_total", "selected": true }
+      },
+      {
+        "name": "out_metric",
+        "type": "query",
+        "label": "Out metric",
+        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "definition": "label_values({__name__=~\"data_prepper_.*(record|event).*out.*(_total)?$\"}, __name__)",
+        "query": "label_values({__name__=~\"data_prepper_.*(record|event).*out.*(_total)?$\"}, __name__)",
+        "refresh": 2,
+        "current": { "text": "data_prepper_pipeline_records_out_total", "value": "data_prepper_pipeline_records_out_total", "selected": true }
+      },
+      {
+        "name": "failed_metric",
+        "type": "query",
+        "label": "Failed metric",
+        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "definition": "label_values({__name__=~\"data_prepper_.*(fail|failed).*(_total)?$\"}, __name__)",
+        "query": "label_values({__name__=~\"data_prepper_.*(fail|failed).*(_total)?$\"}, __name__)",
+        "refresh": 2,
+        "current": { "text": "data_prepper_pipeline_records_failed_total", "value": "data_prepper_pipeline_records_failed_total", "selected": true }
+      },
+      {
+        "name": "dropped_metric",
+        "type": "query",
+        "label": "Dropped metric",
+        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "definition": "label_values({__name__=~\"data_prepper_.*(drop|dropped).*(_total)?$\"}, __name__)",
+        "query": "label_values({__name__=~\"data_prepper_.*(drop|dropped).*(_total)?$\"}, __name__)",
+        "refresh": 2,
+        "current": { "text": "data_prepper_pipeline_records_dropped_total", "value": "data_prepper_pipeline_records_dropped_total", "selected": true }
+      },
+      {
+        "name": "sink_success_metric",
+        "type": "query",
+        "label": "Sink success metric",
+        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "definition": "label_values({__name__=~\"data_prepper_.*sink.*(success|succeeded).*(_total)?$\"}, __name__)",
+        "query": "label_values({__name__=~\"data_prepper_.*sink.*(success|succeeded).*(_total)?$\"}, __name__)",
+        "refresh": 2,
+        "current": { "text": "data_prepper_sink_records_success_total", "value": "data_prepper_sink_records_success_total", "selected": true }
+      },
+      {
+        "name": "sink_failed_metric",
+        "type": "query",
+        "label": "Sink failed metric",
+        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "definition": "label_values({__name__=~\"data_prepper_.*sink.*fail.*(_total)?$\"}, __name__)",
+        "query": "label_values({__name__=~\"data_prepper_.*sink.*fail.*(_total)?$\"}, __name__)",
+        "refresh": 2,
+        "current": { "text": "data_prepper_sink_records_failed_total", "value": "data_prepper_sink_records_failed_total", "selected": true }
+      },
+      {
+        "name": "duration_bucket_metric",
+        "type": "query",
+        "label": "Duration histogram (bucket)",
+        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "definition": "label_values({__name__=~\"data_prepper_.*(duration|latency).*_seconds_bucket$\"}, __name__)",
+        "query": "label_values({__name__=~\"data_prepper_.*(duration|latency).*_seconds_bucket$\"}, __name__)",
+        "refresh": 2,
+        "current": { "text": "data_prepper_pipeline_processing_duration_seconds_bucket", "value": "data_prepper_pipeline_processing_duration_seconds_bucket", "selected": true }
+      }
+    ]
+  },
+  "time": { "from": "now-6h", "to": "now" },
+  "timepicker": {},
+  "timezone": "",
+  "title": "Data Prepper Metrics",
+  "uid": "data-prepper-metrics",
+  "version": 1,
+  "weekStart": ""
+}
+```
+
+Как пользоваться
+- После импорта выберите ваш Prometheus datasource.
+- Убедитесь, что job = ваш job scrape’а (например data-prepper).
+- Если некоторые панели пустые — выберите правильные имена метрик в переменных in_metric/out_metric/… наверху дэшборда. Я добавил автопоиск по префиксу data_prepper_*, но названия могут отличаться между версиями и плагинами.
+- Переменная group_by позволяет переключиться между группировкой по pipeline, plugin_name, plugin_type и т.д.
+
+Хотите я подгоню дэшборд точно под ваши метрики? Скиньте, пожалуйста, небольшой фрагмент вашего /metrics (или список имён метрик) и версию Data Prepper — добавлю панели под конкретные pipeline’ы/плагины и настрою алерты.

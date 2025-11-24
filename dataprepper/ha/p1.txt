@@ -1,0 +1,2 @@
+﻿Трейсы сохраняются по цепочке otelcol - dataprepper - opensearch
+Как обеспечить HA и горизонтальное масштабирование для dataprepper ?

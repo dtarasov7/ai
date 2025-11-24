@@ -1,0 +1,11 @@
+﻿loc = to_string!(.location)
+
+if downcase(loc) == "local" {
+  .locationip = "127.0.0.1"
+} else {
+  # ожидаем формат "IP:port" или просто "IP"
+  .locationip = splitn(loc, ":", 2)[0]
+}
+
+# при желании можно удалить исходное поле
+# del(.location)

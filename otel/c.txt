@@ -1,0 +1,63 @@
+﻿Можно решить через processor route и sinks с routes, отправляя записи в разные pipeline через pipeline sink.
+
+Пример pipelines.yaml для Data Prepper 2.0.1:
+
+```yaml
+# Входной pipeline: принимает OTLP-трейсы от otelcol и роутит по значению span.attributes.application
+ingest-traces:
+  source:
+    opentelemetry: {}   # по умолчанию слушает OTLP (уточните порт/SSL при необходимости)
+  processors:
+    - route:
+        routes:
+          dev:
+            - equals:
+                span.attributes.application: "dev"
+          test:
+            - equals:
+                span.attributes.application: "test"
+          prod:
+            - equals:
+                span.attributes.application: "prod"
+  sinks:
+    - pipeline:
+        name: traces-dev
+      routes: [dev]
+    - pipeline:
+        name: traces-test
+      routes: [test]
+    - pipeline:
+        name: traces-prod
+      routes: [prod]
+
+# Целевые pipeline'ы. Здесь можно делать уже свою обработку/индексацию.
+traces-dev:
+  source:
+    pipeline: {}
+  sinks:
+    - stdout: {}   # замените на нужный sink (opensearch и т.п.)
+
+traces-test:
+  source:
+    pipeline: {}
+  sinks:
+    - stdout: {}
+
+traces-prod:
+  source:
+    pipeline: {}
+  sinks:
+    - stdout: {}
+```
+
+Пояснения:
+- route создает именованные маршруты dev/test/prod по условию equals span.attributes.application == "...".
+- В sinks указываем routes, чтобы соответствующие записи уходили в нужный pipeline через pipeline sink.
+- Приемные pipeline’ы начинают с source: pipeline: {} — это “вход” для pipeline-to-pipeline.
+
+Полезные заметки:
+- Если хотите, чтобы весь trace целиком попадал в один pipeline, убедитесь, что “application” задается как resource-атрибут и/или попадает в каждый span одинаково. Иначе разные спаны одного трейса могут разойтись по разным маршрутам.
+- Если атрибут может отсутствовать или иметь другие значения, можно добавить fallback-маршрут (например, other) и направить его в отдельный пайплайн или drop:
+  - добавить в route еще один маршрут other с условием not_in по списку [dev, test, prod], и отдельный sink на него.
+
+Нужно помочь подставить конкретные порты/SSL для opentelemetry и целевые sinks (например, opensearch индексы для dev/test/prod)?

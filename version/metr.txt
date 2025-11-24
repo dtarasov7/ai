@@ -1,0 +1,36 @@
+﻿Есть следующие метрики в prometheus
+
+1. Информационная метрика (info-metric):
+Имя: app_version_info
+Метки: nodename, appname, version (строковое значение версии)
+Значение: Всегда 1.
+Пример: app_version_info{nodename="srv-1", appname="nginx", version="1.22.1", prev_version="1.20.1"} 1
+
+2. Числовая метрика (numeric-metric):
+
+Имя: app_version_numeric
+Метки: nodename, appname
+Значение: Версия ПО, закодированная в число.
+Пример кодирования: Версия "1.22.1" превращается в число 1022001. 
+Пример: app_version_numeric{nodename="srv-1", appname="nginx"} 1022001
+3. Числовая метрика (numeric-metric):
+
+Имя: app_version_change_time_seconds
+Метки: nodename, appname
+Значение: время в секундах когда произошла предыдущая смена версии.
+
+4. Время когда произошло сканирование версий ПО - секунды unix time
+app_version_scrape_timestamp_seconds{nodename, appname} 
+
+5. для наблюдения за самим сборщиком
+app_version_collector_success{nodename} 0/1 
+app_version_collector_duration_seconds 
+
+Создай дашборд для grafana11 , который показывает 
+- таблицу с текущей версией , предыдущей версией и датой смены версии
+- панель state timeline , на которой отображается смена версий ПО во времени. 
+
+В дашборде должны быть переменные 
+datasource
+nodename
+appname
