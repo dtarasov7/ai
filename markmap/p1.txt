@@ -1,0 +1,54 @@
+﻿часть конфига nginx, которая рендерит markmap файл.
+    location /gggg {
+      alias /usr/share/nginx/html;
+      autoindex on;
+      autoindex_exact_size off;
+      autoindex_localtime on;
+      autoindex_format html;
+      sub_filter_types text/html;
+      sub_filter '</body>' '<script>
+        console.log("Script loaded!");
+        document.addEventListener("click", function(e) {
+            console.log("Click detected", e.target);
+            if (e.target.tagName === "A") {
+                var href = e.target.href;
+                console.log("Link href:", href);
+                if (href.endsWith(".mm")) {
+                    e.preventDefault();
+                    var targetUrl = "/markmap-viewer.html?file=" + encodeURIComponent(href);
+                    console.log("Redirecting to:", targetUrl);
+                    window.location.href = targetUrl;
+                }
+            }
+        });
+    </script></body>';
+    sub_filter_once on;
+    location ~ \.mm$ {
+        types { text/plain mm; }
+        add_header Content-Type "text/plain; charset=utf-8";
+    }
+   }
+  location = /markmap-viewer.html {
+    root /usr/share/nginx/html;
+  }
+
+напиши код markmap-viewer.html, учитывая что 
+- файл кроме markmap кода может содержать текст в начале и текст в конце. В этом случае markmap начинается с ```markdown и завершается ```
+- внутри  markmap могут быть вставки вида
+```yaml
+annotations:
+  secrets-store.deckhouse.io/role: "myapp-role"
+env:
+  - name: DB_PASS
+    value: secrets-store:demo-kv/data/myapp-secret#DB_PASS
+```
+
+
+
+
+Добавь в код возможность интерактивно изменять параметры
+duration
+maxWidth
+nodeMinHeight
+spacingVertical
+spacingHorizontal
