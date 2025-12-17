@@ -1,0 +1,119 @@
+# Nginx конфигурация для безопасного размещения Markmap Viewer
+# Расположение: /etc/nginx/sites-available/markmap-viewer
+
+server {
+    listen 80;
+    server_name your-domain.com;
+    
+    # Корневая директория
+    root /var/www/markmap-viewer;
+    index markmap-viewer-secure.html;
+    
+    # Логи
+    access_log /var/log/nginx/markmap-access.log;
+    error_log /var/log/nginx/markmap-error.log;
+    
+    # Защита от скрытых файлов
+    location ~ /\. {
+        deny all;
+        return 404;
+    }
+    
+    # Основная страница
+    location / {
+        try_files $uri $uri/ =404;
+        
+        # Security Headers
+        add_header X-Frame-Options "DENY" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-XSS-Protection "1; mode=block" always;
+        add_header Referrer-Policy "no-referrer" always;
+        add_header Permissions-Policy "geolocation=(), microphone=(), camera=()" always;
+        
+        # Content Security Policy
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'none';" always;
+        
+        # HSTS (раскомментируйте после настройки SSL)
+        # add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
+    }
+    
+    # JavaScript библиотеки
+    location /libs/ {
+        alias /var/www/markmap-viewer/libs/;
+        
+        # Разрешаем только JavaScript файлы
+        location ~* \.(js)$ {
+            add_header Cache-Control "public, max-age=31536000, immutable";
+            add_header X-Content-Type-Options "nosniff" always;
+            
+            # CORS (если необходимо)
+            # add_header Access-Control-Allow-Origin "https://your-domain.com" always;
+        }
+        
+        # Запрещаем доступ к другим типам файлов
+        location ~* \.(?!js$) {
+            deny all;
+            return 404;
+        }
+    }
+    
+    # Markmap файлы (.mm, .md, .markdown)
+    location ~* \.(mm|md|markdown)$ {
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Cache-Control "no-cache, no-store, must-revalidate";
+        
+        # Ограничение размера файла
+        client_max_body_size 5M;
+    }
+    
+    # Запрет доступа к служебным файлам
+    location ~ /\.(git|svn|env|htaccess) {
+        deny all;
+        return 404;
+    }
+    
+    # Ограничение на загружаемые типы файлов
+    location ~* \.(exe|dll|bat|sh|php|pl|cgi)$ {
+        deny all;
+        return 404;
+    }
+    
+    # Rate limiting для защиты от DoS
+    limit_req_zone $binary_remote_addr zone=markmap:10m rate=10r/s;
+    limit_req zone=markmap burst=20 nodelay;
+    
+    # Защита от slowloris
+    client_body_timeout 10s;
+    client_header_timeout 10s;
+    keepalive_timeout 5s 5s;
+    send_timeout 10s;
+}
+
+# SSL конфигурация (рекомендуется)
+server {
+    listen 443 ssl http2;
+    server_name your-domain.com;
+    
+    # SSL сертификаты (получите через Let's Encrypt)
+    # ssl_certificate /etc/letsencrypt/live/your-domain.com/fullchain.pem;
+    # ssl_certificate_key /etc/letsencrypt/live/your-domain.com/privkey.pem;
+    
+    # Современные SSL настройки
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-CHACHA20-POLY1305;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 10m;
+    ssl_stapling on;
+    ssl_stapling_verify on;
+    
+    # Включаем остальную конфигурацию из блока server выше
+    # ... (скопируйте всё из блока listen 80)
+}
+
+# Редирект с HTTP на HTTPS
+# server {
+#     listen 80;
+#     server_name your-domain.com;
+#     return 301 https://$server_name$request_uri;
+# }

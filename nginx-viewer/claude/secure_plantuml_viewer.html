@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: http://localhost:8080;">
+    <title>PlantUML Viewer (Secure)</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f5f5f5;
+            line-height: 1.6;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            border-bottom: 2px solid #4CAF50;
+            padding-bottom: 10px;
+            margin-top: 0;
+        }
+        .security-badge {
+            display: inline-block;
+            background: #4CAF50;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+            margin-left: 10px;
+            vertical-align: middle;
+        }
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            border-bottom: 1px solid #ddd;
+        }
+        .tab {
+            padding: 10px 20px;
+            cursor: pointer;
+            border: none;
+            background: none;
+            font-size: 16px;
+            color: #666;
+            border-bottom: 3px solid transparent;
+            transition: all 0.3s;
+        }
+        .tab:hover {
+            color: #4CAF50;
+        }
+        .tab.active {
+            color: #4CAF50;
+            border-bottom-color: #4CAF50;
+        }
+        .content {
+            display: none;
+        }
+        .content.active {
+            display: block;
+        }
+        #diagram {
+            text-align: center;
+            margin: 20px 0;
+            min-height: 200px;
+        }
+        #diagram img {
+            max-width: 100%;
+            height: auto;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        #source {
+            background: #f8f8f8;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 15px;
+            white-space: pre-wrap;
+            font-family: 'Courier New', Monaco, monospace;
+            font-size: 14px;
+            line-height: 1.5;
+            overflow-x: auto;
+            margin: 0;
+        }
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+        .loading::after {
+            content: '...';
+            animation: dots 1.5s steps(4, end) infinite;
+        }
+        @keyframes dots {
+            0%, 20% { content: '.'; }
+            40% { content: '..'; }
+            60%, 100% { content: '...'; }
+        }
+        .error {
+            background: #ffebee;
+            color: #c62828;
+            padding: 15px;
+            border-radius: 4px;
+            border-left: 4px solid #c62828;
+            margin: 20px 0;
+        }
+        .warning {
+            background: #fff3e0;
+            color: #ef6c00;
+            padding: 15px;
+            border-radius: 4px;
+            border-left: 4px solid #ef6c00;
+            margin: 20px 0;
+        }
+        .info {
+            background: #e3f2fd;
+            color: #1565c0;
+            padding: 15px;
+            border-radius: 4px;
+            border-left: 4px solid #1565c0;
+            margin: 20px 0;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>
+            PlantUML Diagram Viewer
+            <span class="security-badge">🔒 SECURE</span>
+        </h1>
+        
+        <div class="info">
+            ℹ️ <strong>Режим безопасности:</strong> Используются только локальные ресурсы. Диаграммы обрабатываются на локальном сервере.
+        </div>
+        
+        <div class="tabs">
+            <button class="tab active" onclick="showTab('diagram')">Диаграмма</button>
+            <button class="tab" onclick="showTab('source')">Исходный код</button>
+        </div>
+        
+        <div id="diagram-content" class="content active">
+            <div id="diagram" class="loading">Загрузка диаграммы</div>
+        </div>
+        
+        <div id="source-content" class="content">
+            <pre id="source"></pre>
+        </div>
+    </div>
+
+    <!-- Локальная библиотека вместо CDN -->
+    <script src="/libs/pako.min.js"></script>
+    <script>
+        'use strict';
+
+        // Конфигурация
+        const CONFIG = {
+            // Используем локальный PlantUML сервер
+            plantUMLServer: 'http://localhost:8080/png/',
+            
+            // Разрешенные расширения файлов
+            allowedExtensions: ['.plant', '.plantuml', '.puml', '.uml'],
+            
+            // Максимальный размер файла (1MB)
+            maxFileSize: 1024 * 1024,
+            
+            // Таймаут загрузки
+            fetchTimeout: 10000
+        };
+
+        // Функция для безопасного переключения табов
+        function showTab(tabName) {
+            const tabs = document.querySelectorAll('.tab');
+            const contents = document.querySelectorAll('.content');
+            
+            tabs.forEach(tab => tab.classList.remove('active'));
+            contents.forEach(content => content.classList.remove('active'));
+            
+            event.target.classList.add('active');
+            const targetContent = document.getElementById(tabName + '-content');
+            if (targetContent) {
+                targetContent.classList.add('active');
+            }
+        }
+
+        // Улучшенная функция проверки безопасности URL
+        function isSecureUrl(url) {
+            try {
+                const urlObj = new URL(url, window.location.origin);
+                
+                // Проверяем origin
+                if (urlObj.origin !== window.location.origin) {
+                    console.error('[Security] External URL blocked:', urlObj.origin);
+                    return false;
+                }
+                
+                // Нормализация пути
+                const path = urlObj.pathname;
+                const segments = path.split('/').filter(Boolean);
+                
+                // Проверка на path traversal
+                for (const segment of segments) {
+                    if (segment === '..' || segment === '.') {
+                        console.error('[Security] Path traversal attempt blocked');
+                        return false;
+                    }
+                }
+                
+                // Проверка расширения файла
+                const hasValidExtension = CONFIG.allowedExtensions.some(ext => 
+                    path.toLowerCase().endsWith(ext)
+                );
+                
+                if (!hasValidExtension) {
+                    console.error('[Security] Invalid file extension');
+                    return false;
+                }
+                
+                return true;
+            } catch (e) {
+                console.error('[Security] Invalid URL:', e);
+                return false;
+            }
+        }
+
+        // Функция безопасного создания текстового узла
+        function createSafeElement(tag, content, isText = true) {
+            const element = document.createElement(tag);
+            if (isText) {
+                element.textContent = content; // Безопасно от XSS
+            }
+            return element;
+        }
+
+        // Функция для безопасного отображения ошибок
+        function showError(message) {
+            const diagram = document.getElementById('diagram');
+            diagram.innerHTML = ''; // Очищаем
+            
+            const errorDiv = createSafeElement('div', '', false);
+            errorDiv.className = 'error';
+            
+            const errorText = createSafeElement('span', `❌ Ошибка: ${message}`);
+            errorDiv.appendChild(errorText);
+            
+            diagram.appendChild(errorDiv);
+        }
+
+        // Функция для безопасного отображения предупреждений
+        function showWarning(message) {
+            const diagram = document.getElementById('diagram');
+            
+            const warningDiv = createSafeElement('div', '', false);
+            warningDiv.className = 'warning';
+            
+            const warningText = createSafeElement('span', `⚠️ ${message}`);
+            warningDiv.appendChild(warningText);
+            
+            diagram.insertBefore(warningDiv, diagram.firstChild);
+        }
+
+        // Кодирование PlantUML
+        function encode64(data) {
+            let r = "";
+            for (let i = 0; i < data.length; i += 3) {
+                if (i + 2 === data.length) {
+                    r += append3bytes(data[i], data[i + 1], 0);
+                } else if (i + 1 === data.length) {
+                    r += append3bytes(data[i], 0, 0);
+                } else {
+                    r += append3bytes(data[i], data[i + 1], data[i + 2]);
+                }
+            }
+            return r;
+        }
+
+        function append3bytes(b1, b2, b3) {
+            const c1 = b1 >> 2;
+            const c2 = ((b1 & 0x3) << 4) | (b2 >> 4);
+            const c3 = ((b2 & 0xF) << 2) | (b3 >> 6);
+            const c4 = b3 & 0x3F;
+            let r = "";
+            r += encode6bit(c1 & 0x3F);
+            r += encode6bit(c2 & 0x3F);
+            r += encode6bit(c3 & 0x3F);
+            r += encode6bit(c4 & 0x3F);
+            return r;
+        }
+
+        function encode6bit(b) {
+            if (b < 10) return String.fromCharCode(48 + b);
+            b -= 10;
+            if (b < 26) return String.fromCharCode(65 + b);
+            b -= 26;
+            if (b < 26) return String.fromCharCode(97 + b);
+            b -= 26;
+            if (b === 0) return '-';
+            if (b === 1) return '_';
+            return '?';
+        }
+
+        function encodePlantUML(text) {
+            const utf8Bytes = new TextEncoder().encode(text);
+            const compressed = pako.deflateRaw(utf8Bytes, {level: 9});
+            return encode64(compressed);
+        }
+
+        // Функция загрузки с таймаутом
+        async function fetchWithTimeout(url, timeout = CONFIG.fetchTimeout) {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), timeout);
+            
+            try {
+                const response = await fetch(url, {
+                    signal: controller.signal,
+                    credentials: 'same-origin' // Только same-origin запросы
+                });
+                clearTimeout(timeoutId);
+                return response;
+            } catch (error) {
+                clearTimeout(timeoutId);
+                throw error;
+            }
+        }
+
+        // Основная функция загрузки диаграммы
+        async function loadDiagram() {
+            const urlParams = new URLSearchParams(window.location.search);
+            let file = urlParams.get('file');
+            
+            if (!file) {
+                showError('Файл не указан. Добавьте ?file=yourfile.plant к URL');
+                return;
+            }
+
+            try {
+                // Декодируем URL
+                file = decodeURIComponent(file);
+                
+                // Проверка на абсолютный URL
+                if (file.match(/^https?:\/\//)) {
+                    const fileUrl = new URL(file);
+                    if (fileUrl.origin !== window.location.origin) {
+                        throw new Error('Внешние URL запрещены по соображениям безопасности');
+                    }
+                    file = fileUrl.pathname;
+                }
+                
+                // Нормализация пути
+                file = file.replace(/\/+/g, '/');
+                
+                // Добавление текущего пути если нужно
+                if (!file.startsWith('/')) {
+                    const currentPath = window.location.pathname.substring(
+                        0, 
+                        window.location.pathname.lastIndexOf('/')
+                    );
+                    file = currentPath + '/' + file;
+                }
+                
+                // Создание и проверка URL
+                const fullUrl = new URL(file, window.location.origin);
+                
+                if (!isSecureUrl(fullUrl.href)) {
+                    throw new Error('Доступ запрещен: URL не разрешен');
+                }
+
+                // Загрузка файла
+                console.log('[Info] Loading file:', file);
+                const response = await fetchWithTimeout(file);
+                
+                if (!response.ok) {
+                    throw new Error(`Файл не найден (HTTP ${response.status})`);
+                }
+                
+                // Проверка размера
+                const contentLength = response.headers.get('content-length');
+                if (contentLength && parseInt(contentLength) > CONFIG.maxFileSize) {
+                    throw new Error('Файл слишком большой');
+                }
+                
+                let plantUMLSource = await response.text();
+                
+                // Проверка размера после загрузки
+                if (plantUMLSource.length > CONFIG.maxFileSize) {
+                    throw new Error('Файл слишком большой');
+                }
+                
+                // Автоматическое добавление @startuml/@enduml
+                if (!plantUMLSource.trim().match(/^@start/)) {
+                    plantUMLSource = '@startuml\n' + plantUMLSource + '\n@enduml';
+                }
+                
+                // Отображение исходного кода (безопасно через textContent)
+                document.getElementById('source').textContent = plantUMLSource;
+                
+                // Кодирование и создание URL диаграммы
+                const encoded = encodePlantUML(plantUMLSource);
+                const imageUrl = CONFIG.plantUMLServer + encoded;
+                
+                // Безопасное создание изображения
+                const diagram = document.getElementById('diagram');
+                diagram.innerHTML = '';
+                
+                const img = document.createElement('img');
+                img.src = imageUrl;
+                img.alt = 'PlantUML Diagram';
+                img.onerror = handleImageError;
+                
+                diagram.appendChild(img);
+                
+                console.log('[Info] Diagram loaded successfully');
+                
+            } catch (error) {
+                console.error('[Error]', error);
+                showError(error.message || 'Неизвестная ошибка');
+            }
+        }
+
+        function handleImageError() {
+            showError('Не удалось отобразить диаграмму. Проверьте синтаксис PlantUML или доступность локального сервера.');
+        }
+
+        // Проверка зависимостей при загрузке
+        if (typeof pako === 'undefined') {
+            showError('Библиотека pako не загружена. Проверьте путь к /libs/pako.min.js');
+        } else {
+            loadDiagram();
+        }
+    </script>
+</body>
+</html>

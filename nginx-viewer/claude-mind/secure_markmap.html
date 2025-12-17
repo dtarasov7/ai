@@ -1,0 +1,870 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Markmap Viewer</title>
+    
+    <!-- Content Security Policy -->
+    <meta http-equiv="Content-Security-Policy" content="
+        default-src 'self';
+        script-src 'self' 'unsafe-inline';
+        style-src 'self' 'unsafe-inline';
+        img-src 'self' data: blob:;
+        font-src 'self';
+        connect-src 'self';
+        frame-ancestors 'none';
+        base-uri 'self';
+        form-action 'none';
+    ">
+    
+    <!-- Security Headers -->
+    <meta http-equiv="X-Content-Type-Options" content="nosniff">
+    <meta http-equiv="X-Frame-Options" content="DENY">
+    <meta http-equiv="X-XSS-Protection" content="1; mode=block">
+    <meta name="referrer" content="no-referrer">
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: #f6f8fa;
+            overflow: hidden;
+        }
+        .toolbar {
+            background: #24292e;
+            color: white;
+            padding: 15px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .toolbar h1 {
+            margin: 0;
+            font-size: 18px;
+            font-weight: 600;
+        }
+        .toolbar-buttons {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+        }
+        .toolbar a, .toolbar button {
+            color: #58a6ff;
+            text-decoration: none;
+            font-size: 14px;
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 5px 10px;
+            border-radius: 4px;
+            transition: background 0.2s;
+        }
+        .toolbar a:hover, .toolbar button:hover {
+            background: rgba(255,255,255,0.1);
+        }
+        
+        .settings-panel {
+            position: absolute;
+            top: 60px;
+            right: -350px;
+            width: 350px;
+            height: calc(100vh - 60px);
+            background: #ffffff;
+            box-shadow: -2px 0 8px rgba(0,0,0,0.15);
+            transition: right 0.3s ease;
+            z-index: 1000;
+            overflow-y: auto;
+        }
+        .settings-panel.active {
+            right: 0;
+        }
+        .settings-header {
+            background: #f6f8fa;
+            padding: 15px 20px;
+            border-bottom: 1px solid #e1e4e8;
+            font-weight: 600;
+            font-size: 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .settings-content {
+            padding: 20px;
+        }
+        .setting-group {
+            margin-bottom: 25px;
+        }
+        .setting-label {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+            font-size: 14px;
+            color: #24292e;
+            font-weight: 500;
+        }
+        .setting-value {
+            background: #f6f8fa;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 12px;
+            color: #0366d6;
+            min-width: 45px;
+            text-align: center;
+        }
+        .setting-slider {
+            width: 100%;
+            height: 6px;
+            -webkit-appearance: none;
+            appearance: none;
+            background: #e1e4e8;
+            border-radius: 3px;
+            outline: none;
+            transition: background 0.2s;
+        }
+        .setting-slider:hover {
+            background: #d1d5da;
+        }
+        .setting-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 16px;
+            height: 16px;
+            background: #0366d6;
+            cursor: pointer;
+            border-radius: 50%;
+            transition: background 0.2s;
+        }
+        .setting-slider::-webkit-slider-thumb:hover {
+            background: #0256c7;
+        }
+        .setting-slider::-moz-range-thumb {
+            width: 16px;
+            height: 16px;
+            background: #0366d6;
+            cursor: pointer;
+            border-radius: 50%;
+            transition: background 0.2s;
+        }
+        .setting-slider::-moz-range-thumb:hover {
+            background: #0256c7;
+        }
+        .settings-description {
+            font-size: 12px;
+            color: #586069;
+            margin-top: 5px;
+        }
+        .reset-button {
+            width: 100%;
+            padding: 10px;
+            background: #f6f8fa;
+            border: 1px solid #e1e4e8;
+            border-radius: 6px;
+            color: #24292e;
+            font-size: 14px;
+            cursor: pointer;
+            transition: background 0.2s;
+            margin-top: 20px;
+        }
+        .reset-button:hover {
+            background: #e1e4e8;
+        }
+        .close-settings {
+            background: none;
+            border: none;
+            font-size: 20px;
+            cursor: pointer;
+            color: #586069;
+            padding: 0;
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .close-settings:hover {
+            color: #24292e;
+        }
+        
+        #settings-toggle {
+            background: #0366d6;
+            color: white;
+            padding: 6px 12px;
+            border-radius: 6px;
+        }
+        #settings-toggle:hover {
+            background: #0256c7;
+        }
+        
+        #markmap-container {
+            width: 100vw;
+            height: calc(100vh - 60px);
+            background: white;
+            position: relative;
+        }
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: calc(100vh - 60px);
+            font-size: 18px;
+            color: #666;
+        }
+        .error {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: calc(100vh - 60px);
+            padding: 20px;
+        }
+        .error-content {
+            background: #ffebee;
+            color: #c62828;
+            padding: 30px;
+            border-radius: 8px;
+            border-left: 4px solid #c62828;
+            max-width: 600px;
+        }
+        svg {
+            width: 100%;
+            height: 100%;
+        }
+        .markmap-foreign pre {
+            background: #f6f8fa;
+            padding: 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            overflow-x: auto;
+            margin: 4px 0;
+        }
+        .markmap-foreign code {
+            font-family: 'Courier New', Courier, monospace;
+            color: #24292e;
+        }
+        .security-badge {
+            position: fixed;
+            bottom: 10px;
+            right: 10px;
+            background: #28a745;
+            color: white;
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            opacity: 0.8;
+            z-index: 9999;
+        }
+    </style>
+</head>
+<body>
+    <div class="toolbar">
+        <h1 id="filename">Loading...</h1>
+        <div class="toolbar-buttons">
+            <button id="zoom-in">Zoom In</button>
+            <button id="zoom-out">Zoom Out</button>
+            <button id="fit">Fit</button>
+            <button id="settings-toggle">Settings</button>
+            <a href="#" id="raw-link">View Raw</a>
+        </div>
+    </div>
+    <div id="markmap-container">
+        <div class="loading">Loading mind map...</div>
+    </div>
+    
+    <div class="settings-panel" id="settings-panel">
+        <div class="settings-header">
+            <span>Markmap Settings</span>
+            <button class="close-settings" id="close-settings">×</button>
+        </div>
+        <div class="settings-content">
+            <div class="setting-group">
+                <div class="setting-label">
+                    <span>Animation Duration</span>
+                    <span class="setting-value" id="duration-value">500</span>
+                </div>
+                <input type="range" class="setting-slider" id="duration-slider" 
+                       min="0" max="2000" value="500" step="50">
+                <div class="settings-description">Animation speed in milliseconds</div>
+            </div>
+            
+            <div class="setting-group">
+                <div class="setting-label">
+                    <span>Max Width</span>
+                    <span class="setting-value" id="maxWidth-value">300</span>
+                </div>
+                <input type="range" class="setting-slider" id="maxWidth-slider" 
+                       min="100" max="800" value="300" step="10">
+                <div class="settings-description">Maximum width of node content</div>
+            </div>
+            
+            <div class="setting-group">
+                <div class="setting-label">
+                    <span>Node Min Height</span>
+                    <span class="setting-value" id="nodeMinHeight-value">10</span>
+                </div>
+                <input type="range" class="setting-slider" id="nodeMinHeight-slider" 
+                       min="5" max="100" value="10" step="5">
+                <div class="settings-description">Minimum height of nodes</div>
+            </div>
+            
+            <div class="setting-group">
+                <div class="setting-label">
+                    <span>Vertical Spacing</span>
+                    <span class="setting-value" id="spacingVertical-value">5</span>
+                </div>
+                <input type="range" class="setting-slider" id="spacingVertical-slider" 
+                       min="0" max="100" value="5" step="5">
+                <div class="settings-description">Space between nodes vertically</div>
+            </div>
+            
+            <div class="setting-group">
+                <div class="setting-label">
+                    <span>Horizontal Spacing</span>
+                    <span class="setting-value" id="spacingHorizontal-value">70</span>
+                </div>
+                <input type="range" class="setting-slider" id="spacingHorizontal-slider" 
+                       min="20" max="300" value="70" step="10">
+                <div class="settings-description">Space between nodes horizontally</div>
+            </div>
+            
+            <button class="reset-button" id="reset-settings">Reset to Defaults</button>
+        </div>
+    </div>
+
+    <div class="security-badge" title="Using local libraries with integrity checks">🔒 Secure Mode</div>
+
+    <!-- Локальные библиотеки с проверкой целостности -->
+    <!-- ВАЖНО: Обновите атрибут integrity после загрузки библиотек -->
+    <script src="libs/d3/d3.min.js" 
+            crossorigin="anonymous"></script>
+    <script src="libs/markmap-view/index.js" 
+            crossorigin="anonymous"></script>
+    <script src="libs/markmap-lib/index.js" 
+            crossorigin="anonymous"></script>
+
+    <script>
+        'use strict';
+        
+        // Глобальные переменные
+        let markmapInstance = null;
+        let currentRoot = null;
+        let currentTransform = null;
+        let currentOptions = {
+            duration: 500,
+            maxWidth: 300,
+            paddingX: 8,
+            nodeMinHeight: 20,
+            spacingVertical: 10,
+            spacingHorizontal: 70,
+            autoFit: false,
+            embedGlobalCSS: true
+        };
+        
+        const defaultOptions = { ...currentOptions };
+
+        // Белый список разрешенных расширений файлов
+        const ALLOWED_EXTENSIONS = ['.mm', '.md', '.markdown', '.txt'];
+        
+        // Максимальный размер загружаемого файла (5MB)
+        const MAX_FILE_SIZE = 5 * 1024 * 1024;
+
+        /**
+         * Проверка безопасности URL
+         * @param {string} url - URL для проверки
+         * @returns {boolean} - true если URL безопасен
+         */
+        function isSecureUrl(url) {
+            try {
+                const urlObj = new URL(url, window.location.origin);
+                
+                // Проверяем, что это тот же origin
+                if (urlObj.origin !== window.location.origin) {
+                    console.error('[Security] External URL blocked:', urlObj.origin);
+                    return false;
+                }
+                
+                // Нормализация пути
+                const path = urlObj.pathname;
+                const normalizedPath = path.replace(/\/+/g, '/');
+                
+                // Защита от path traversal
+                if (normalizedPath.includes('..') || normalizedPath.includes('%2e%2e')) {
+                    console.error('[Security] Path traversal attempt blocked');
+                    return false;
+                }
+                
+                // Проверка расширения файла
+                const extension = normalizedPath.substring(normalizedPath.lastIndexOf('.')).toLowerCase();
+                if (!ALLOWED_EXTENSIONS.includes(extension)) {
+                    console.error('[Security] File extension not allowed:', extension);
+                    return false;
+                }
+                
+                return true;
+            } catch (e) {
+                console.error('[Security] Invalid URL:', e);
+                return false;
+            }
+        }
+
+        /**
+         * Санитизация HTML для предотвращения XSS
+         * @param {string} str - строка для очистки
+         * @returns {string} - очищенная строка
+         */
+        function sanitizeHtml(str) {
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
+        /**
+         * Извлечение markmap контента из файла
+         * @param {string} text - содержимое файла
+         * @returns {string} - извлеченный markmap контент
+         */
+        function extractMarkmapContent(text) {
+            const lines = text.split('\n');
+            let inMarkdownBlock = false;
+            let nestedCodeBlockCount = 0;
+            let markmapLines = [];
+            let contentLines = [];
+
+            // Поиск блока ```markdown
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
+                const trimmedLine = line.trim();
+
+                if (!inMarkdownBlock && trimmedLine.startsWith('```markdown')) {
+                    inMarkdownBlock = true;
+                    contentLines = [];
+                    continue;
+                }
+
+                if (inMarkdownBlock) {
+                    if (trimmedLine.startsWith('```') && trimmedLine !== '```') {
+                        nestedCodeBlockCount++;
+                        contentLines.push(line);
+                        continue;
+                    }
+
+                    if (trimmedLine === '```') {
+                        if (nestedCodeBlockCount > 0) {
+                            nestedCodeBlockCount--;
+                            contentLines.push(line);
+                        } else {
+                            markmapLines = contentLines;
+                            break;
+                        }
+                        continue;
+                    }
+
+                    contentLines.push(line);
+                }
+            }
+
+            if (markmapLines.length > 0) {
+                console.log('[Parser] Found markdown block');
+                return markmapLines.join('\n').trim();
+            }
+
+            // Поиск обычного блока ```
+            inMarkdownBlock = false;
+            nestedCodeBlockCount = 0;
+            contentLines = [];
+
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
+                const trimmedLine = line.trim();
+
+                if (!inMarkdownBlock && trimmedLine === '```') {
+                    inMarkdownBlock = true;
+                    contentLines = [];
+                    continue;
+                }
+
+                if (inMarkdownBlock) {
+                    if (trimmedLine.startsWith('```') && trimmedLine !== '```') {
+                        nestedCodeBlockCount++;
+                        contentLines.push(line);
+                        continue;
+                    }
+
+                    if (trimmedLine === '```') {
+                        if (nestedCodeBlockCount > 0) {
+                            nestedCodeBlockCount--;
+                            contentLines.push(line);
+                        } else {
+                            markmapLines = contentLines;
+                            break;
+                        }
+                        continue;
+                    }
+
+                    contentLines.push(line);
+                }
+            }
+
+            if (markmapLines.length > 0) {
+                console.log('[Parser] Found code block');
+                return markmapLines.join('\n').trim();
+            }
+
+            console.log('[Parser] Using entire content');
+            return text.trim();
+        }
+
+        /**
+         * Назначение цветов узлам дерева
+         * @param {Object} node - узел дерева
+         * @param {number} depth - глубина узла
+         * @returns {Object} - узел с назначенными цветами
+         */
+        function assignColors(node, depth = 0) {
+            const colors = ['#5E35B1', '#1E88E5', '#43A047', '#FB8C00', '#E53935', '#8E24AA', '#00ACC1'];
+
+            if (!node.payload) {
+                node.payload = {};
+            }
+
+            node.payload.color = colors[depth % colors.length];
+
+            if (node.children && node.children.length > 0) {
+                node.children.forEach(child => assignColors(child, depth + 1));
+            }
+
+            return node;
+        }
+
+        /**
+         * Получение текущей трансформации SVG
+         * @returns {Object|null} - объект с координатами и масштабом
+         */
+        function getCurrentTransform() {
+            if (!markmapInstance) return null;
+            
+            try {
+                const svg = document.getElementById('markmap-svg');
+                if (!svg) return null;
+                
+                const g = svg.querySelector('g');
+                if (!g) return null;
+                
+                const transform = g.getAttribute('transform');
+                if (!transform) return null;
+                
+                const match = transform.match(/translate\(([^,]+),([^)]+)\)\s*scale\(([^)]+)\)/);
+                if (match) {
+                    return {
+                        x: parseFloat(match[1]),
+                        y: parseFloat(match[2]),
+                        scale: parseFloat(match[3])
+                    };
+                }
+                
+                return null;
+            } catch (e) {
+                console.error('[Transform] Error getting transform:', e);
+                return null;
+            }
+        }
+
+        /**
+         * Применение трансформации к SVG
+         * @param {Object} transform - объект трансформации
+         */
+        function applyTransform(transform) {
+            if (!transform || !markmapInstance) return;
+            
+            try {
+                const svg = document.getElementById('markmap-svg');
+                if (!svg) return;
+                
+                const g = svg.querySelector('g');
+                if (!g) return;
+                
+                const transformStr = `translate(${transform.x},${transform.y}) scale(${transform.scale})`;
+                g.setAttribute('transform', transformStr);
+                
+                if (markmapInstance.state) {
+                    markmapInstance.state.data = {
+                        ...markmapInstance.state.data,
+                        x: transform.x,
+                        y: transform.y,
+                        scale: transform.scale
+                    };
+                }
+            } catch (e) {
+                console.error('[Transform] Error applying transform:', e);
+            }
+        }
+
+        /**
+         * Обновление markmap с текущими настройками
+         */
+        function updateMarkmap() {
+            if (!currentRoot) return;
+
+            const svg = document.getElementById('markmap-svg');
+            if (!svg) return;
+
+            const savedTransform = getCurrentTransform();
+
+            svg.innerHTML = '';
+
+            const { Markmap } = window.markmap;
+
+            markmapInstance = Markmap.create(svg, {
+                ...currentOptions,
+                color: (node) => node.payload?.color || '#5E35B1'
+            });
+
+            markmapInstance.setData(currentRoot);
+            
+            if (savedTransform) {
+                setTimeout(() => {
+                    applyTransform(savedTransform);
+                }, 10);
+            } else {
+                markmapInstance.fit();
+            }
+        }
+
+        /**
+         * Инициализация панели настроек
+         */
+        function initializeSettings() {
+            document.getElementById('settings-toggle').onclick = () => {
+                document.getElementById('settings-panel').classList.toggle('active');
+            };
+
+            document.getElementById('close-settings').onclick = () => {
+                document.getElementById('settings-panel').classList.remove('active');
+            };
+
+            const sliders = [
+                { id: 'duration', key: 'duration' },
+                { id: 'maxWidth', key: 'maxWidth' },
+                { id: 'nodeMinHeight', key: 'nodeMinHeight' },
+                { id: 'spacingVertical', key: 'spacingVertical' },
+                { id: 'spacingHorizontal', key: 'spacingHorizontal' }
+            ];
+
+            sliders.forEach(({ id, key }) => {
+                const slider = document.getElementById(`${id}-slider`);
+                const value = document.getElementById(`${id}-value`);
+
+                slider.oninput = () => {
+                    value.textContent = slider.value;
+                    currentOptions[key] = parseInt(slider.value, 10);
+                    updateMarkmap();
+                };
+            });
+
+            document.getElementById('reset-settings').onclick = () => {
+                const savedTransform = getCurrentTransform();
+                
+                currentOptions = { ...defaultOptions };
+                
+                sliders.forEach(({ id, key }) => {
+                    const slider = document.getElementById(`${id}-slider`);
+                    const value = document.getElementById(`${id}-value`);
+                    slider.value = defaultOptions[key];
+                    value.textContent = defaultOptions[key];
+                });
+
+                updateMarkmap();
+                
+                if (savedTransform) {
+                    setTimeout(() => {
+                        applyTransform(savedTransform);
+                    }, 10);
+                }
+            };
+        }
+
+        /**
+         * Загрузка и отображение markmap
+         */
+        async function loadMarkmap() {
+            const urlParams = new URLSearchParams(window.location.search);
+            let file = urlParams.get('file');
+
+            if (!file) {
+                document.getElementById('markmap-container').innerHTML =
+                    '<div class="error"><div class="error-content"><strong>Error:</strong> No file specified.<br>Add ?file=yourfile.mm to the URL</div></div>';
+                return;
+            }
+
+            try {
+                // Декодирование URL
+                file = decodeURIComponent(file);
+                
+                // Обработка полного URL
+                if (file.match(/^https?:\/\//)) {
+                    const fileUrl = new URL(file);
+                    if (fileUrl.origin !== window.location.origin) {
+                        throw new Error('External URLs are not allowed for security reasons');
+                    }
+                    file = fileUrl.pathname;
+                }
+                
+                // Нормализация пути
+                file = file.replace(/\/+/g, '/');
+                
+                // Добавление текущего пути если необходимо
+                if (!file.startsWith('/')) {
+                    const currentPath = window.location.pathname.substring(0, window.location.pathname.lastIndexOf('/'));
+                    file = currentPath + '/' + file;
+                }
+                
+                // Создание полного URL для проверки
+                const fullUrl = new URL(file, window.location.origin);
+                
+                // Проверка безопасности URL
+                if (!isSecureUrl(fullUrl.href)) {
+                    throw new Error('Access denied: URL validation failed');
+                }
+
+                const filename = file.split('/').pop();
+                document.getElementById('filename').textContent = sanitizeHtml(filename);
+                document.getElementById('raw-link').href = file;
+
+                console.log('[Loader] Fetching file:', file);
+                
+                const response = await fetch(file, {
+                    method: 'GET',
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    cache: 'default'
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`File not found (HTTP ${response.status})`);
+                }
+
+                // Проверка типа содержимого
+                const contentType = response.headers.get('content-type');
+                if (contentType && !contentType.includes('text/')) {
+                    throw new Error('Invalid content type: ' + contentType);
+                }
+
+                // Проверка размера файла
+                const contentLength = response.headers.get('content-length');
+                if (contentLength && parseInt(contentLength, 10) > MAX_FILE_SIZE) {
+                    throw new Error('File too large (max 5MB)');
+                }
+
+                const fileContent = await response.text();
+                
+                // Дополнительная проверка размера
+                if (fileContent.length > MAX_FILE_SIZE) {
+                    throw new Error('File content too large (max 5MB)');
+                }
+
+                const markmapContent = extractMarkmapContent(fileContent);
+
+                if (!markmapContent) {
+                    throw new Error('No valid markmap content found in file');
+                }
+
+                console.log('[Parser] Markmap content extracted, length:', markmapContent.length);
+
+                const container = document.getElementById('markmap-container');
+                container.innerHTML = '<svg id="markmap-svg"></svg>';
+
+                const { Transformer } = window.markmap;
+                const transformer = new Transformer();
+
+                let { root } = transformer.transform(markmapContent);
+
+                root = assignColors(root);
+                currentRoot = root;
+
+                console.log('[Markmap] Tree created with', countNodes(root), 'nodes');
+
+                const svg = document.getElementById('markmap-svg');
+                const { Markmap } = window.markmap;
+
+                markmapInstance = Markmap.create(svg, {
+                    ...currentOptions,
+                    autoFit: true,
+                    color: (node) => node.payload?.color || '#5E35B1'
+                });
+
+                markmapInstance.setData(root);
+                markmapInstance.fit();
+
+                currentOptions.autoFit = false;
+
+                // Инициализация кнопок управления
+                document.getElementById('zoom-in').onclick = () => {
+                    markmapInstance.rescale(1.25);
+                };
+                document.getElementById('zoom-out').onclick = () => {
+                    markmapInstance.rescale(0.8);
+                };
+                document.getElementById('fit').onclick = () => {
+                    markmapInstance.fit();
+                };
+
+                initializeSettings();
+
+                console.log('[Loader] Markmap loaded successfully');
+
+            } catch (error) {
+                console.error('[Loader] Error:', error);
+                document.getElementById('markmap-container').innerHTML =
+                    `<div class="error"><div class="error-content">
+                        <strong>Error loading mind map:</strong><br>
+                        ${sanitizeHtml(error.message)}<br><br>
+                        <small>Check the browser console for details.</small>
+                    </div></div>`;
+            }
+        }
+
+        /**
+         * Подсчет узлов в дереве
+         * @param {Object} node - корневой узел
+         * @returns {number} - количество узлов
+         */
+        function countNodes(node) {
+            let count = 1;
+            if (node.children) {
+                node.children.forEach(child => {
+                    count += countNodes(child);
+                });
+            }
+            return count;
+        }
+
+        // Проверка загрузки необходимых библиотек
+        window.addEventListener('load', () => {
+            if (typeof d3 === 'undefined') {
+                console.error('[Security] D3.js library not loaded');
+                document.getElementById('markmap-container').innerHTML =
+                    '<div class="error"><div class="error-content"><strong>Error:</strong> Required libraries not loaded.<br>Please check library files in libs/ directory.</div></div>';
+                return;
+            }
+            
+            if (typeof window.markmap === 'undefined') {
+                console.error('[Security] Markmap library not loaded');
+                document.getElementById('markmap-container').innerHTML =
+                    '<div class="error"><div class="error-content"><strong>Error:</strong> Markmap library not loaded.<br>Please check library files in libs/ directory.</div></div>';
+                return;
+            }
+            
+            console.log('[Security] All libraries loaded successfully');
+            loadMarkmap();
+        });
+    </script>
+</body>
+</html>
