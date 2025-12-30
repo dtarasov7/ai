@@ -1,0 +1,17 @@
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: dex
+  namespace: kube-system
+spec:
+  rules:
+  - host: auth.k8s.m<Ваш номер логина>.slurm.io
+    http:
+      paths:
+      - backend:
+          serviceName: dex
+          servicePort: 5556
+  tls:
+  - hosts:
+    - auth.k8s.m<Ваш номер логина>.slurm.io
+    secretName: dex-tls

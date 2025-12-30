@@ -1,0 +1,8 @@
+﻿---
+# Простые скаляры
+simple_string: Hello World
+simple_number: 42
+simple_float: 3.14159
+simple_boolean: true
+null_value: null
+empty_string: ""

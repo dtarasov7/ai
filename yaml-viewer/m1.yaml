@@ -1,0 +1,11 @@
+---
+## Delete kube-proxy daemonset if kube_proxy_remove set, e.g. kube_network_plugin providing proxy services
+kube_proxy_remove: >-
+  {%- if kube_network_plugin == 'kube-router' -%}
+  {{ (kube_router_run_service_proxy is defined and kube_router_run_service_proxy)| bool }}
+  {%- elif kube_network_plugin == 'cilium' -%}
+  {{ (cilium_kube_proxy_replacement is defined and cilium_kube_proxy_replacement == 'strict')| bool }}
+  {%- else -%}
+  false
+  {%- endif -%}
+

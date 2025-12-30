@@ -1,0 +1,13 @@
+---
+curator_logrotate_log:
+    - name: delete_curator_logs
+      conf: |
+        {{ opensearch_data_dir }}/curator/log/curator.log {
+               rotate 3
+               size 10M
+               compress
+               dateext
+               delaycompress
+               missingok
+        }
+

@@ -1,0 +1,14 @@
+---
+docker_dns_options:
+- "ndots:{{ ndots }}"
+- "timeout:2"
+- "attempts:2"
+
+a:
+  - c
+  - b
+
+kube_dns_servers:
+  coredns: ["{{skydns_server}}"]
+  coredns_dual: "{{[skydns_server] + [ skydns_server_secondary ]}}"
+  manual: ["{{manual_dns_server}}"]

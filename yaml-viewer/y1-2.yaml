@@ -1,0 +1,11 @@
+---
+# Сервисный аккаунт
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: gitlab-runner
+  namespace: gitlab-runners
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gitlab-runner-1

@@ -1,0 +1,83 @@
+---
+# переменные inventory group_vars/ выше чем inventory group_vars/all, но ниже чем inventory file
+################## basic vars
+# путь до каталога, где необходимо разместить данные, если не указано, то будет использоваться Docker Root Dir
+docker_path_data: /data/opensearch-cluster-data
+# каталог для деплоя
+opensearch_data_dir: /opt/{{ project_name }}
+# имя проекта
+project_name: ans_opensearch_deploy
+
+################## opensearch vars
+cluster_name: opensearch-{{ product_environment }}-cluster
+bootstrapMemoryLock: 'true' # bootstrap_memoryLock along with the memlock settings below, disables swapping
+network_host: '0.0.0.0' # required if not using the demo Security configuration
+network_bind_host: '0.0.0.0' # the network address(es) to which the node should bind in order to listen for incoming connections
+es_java_opt: # minimum and maximum Java heap size, recommend setting both to 50% of system RAM (use Mb)
+     min: '2048m'
+     max: '2048m'
+ulimits:
+     memlock_soft: '-1'
+     memlock_hard: '-1'
+     nofile_soft: '65536' # maximum number of open files for the Elasticsearch user, set to at least 65536 on modern systems
+     nofile_hard: '65536'
+
+################## generate certs
+# days
+validityDays: '3650'
+# main domain name
+domain_name: sz.rshbcloud.ru
+# additional domain name
+more_domain_name: [] # example ['myrshb', '"*.rshbcloud.ru"']
+
+################## curator
+# docker контейнер с curator
+curator_image: '10.80./es-curator:5.8.4'
+# ротация логов (общая и для snapshots и для indices)
+curator_logrotate_log:
+    - name: delete_curator_logs
+      conf: |
+        {{ opensearch_data_dir }}/curator/log/curator.log {
+               #weekly
+               rotate 3
+               size 10M
+               compress
+               dateext
+               delaycompress
+               missingok
+        }
+
+################## snapshot индексов и конфиг файлов opendistro_security
+# делать снапшоты или нет (true/false).
+opensearch_snapshot: false
+# путь до репозитория, если разный, то указать для каждого хоста в host_vars, если единый, то тут.
+#opensearch_snapshot_path: /path/to/folder
+# имя репозиотрия.
+opensearch_snapshot_repository_name: "{{ cluster_name }}_{{ ansible_hostname }}_repository_full"
+# путь до скрипта по автоматическому созданию снапшотов (cron).
+opensearch_snapshot_script_path: "{{ opensearch_data_dir }}"
+# расписание cron, если разное, то указать для каждого хоста в host_vars, если единое, то тут.
+#opensearch_snapshot_script_cron: '0,6,12,18'
+# расписание cron, если разное, то указать для каждого хоста в host_vars, если единое, то тут.
+curator_delete_snapshot_script_cron:
+    minute: '0'
+    hour: '23'
+# удалять снапшоты старше n-дней.
+curator_delete_snapshots: '7'
+
+################## indices and actions for delete indices older than X seconds, minutes, hours, days, weeks, months, or years (based on index name).
+# расписание cron, если разное, то указать для каждого хоста в host_vars, если единое, то тут.
+#curator_delete_indices_script_cron:
+#    minute: '30'
+#    hour: '1'
+# удалять индексы старше n-дней или n-месяцев
+#curator_delete_indices:
+#    - action: delete_other_indices #action script name
+#      kind: prefix #prefix (logstash-), suffix (-prod), timestring (%Y.%m.%d) or regex (^a-|^b-|^c-)
+#      value: other-
+#      direction: older #older or younger
+#      timestring: '%Y.%m'
+#      unit: months #seconds, minutes, hours, days, weeks, months, or years
+#      unit_count: 2
+#      exclude: False #True (the filter will remove matches from the actionable list) or False (only matches will be kept in the actionable list)
+
