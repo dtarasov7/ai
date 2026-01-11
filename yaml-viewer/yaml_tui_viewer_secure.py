@@ -16,7 +16,9 @@ import os
 import re
 import signal
 import sys
+import traceback
 from collections import OrderedDict
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -38,6 +40,38 @@ LOAD_BATCH_SIZE = 5
 
 
 # =============================================================================
+# Логирование
+# =============================================================================
+# Лог-файл в текущей директории (кросс-платформенность)
+LOG_FILE = Path("yaml_tui_viewer.log").resolve()
+
+def log_error(context: str, exception: Exception):
+    """Логирует ошибку в файл с timestamp и traceback."""
+    try:
+        with open(LOG_FILE, 'a', encoding='utf-8') as f:
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            f.write(f"\n{'='*80}\n")
+            f.write(f"[{timestamp}] {context}\n")
+            f.write(f"Exception: {type(exception).__name__}: {str(exception)}\n")
+            f.write(f"{'='*80}\n")
+            traceback.print_exc(file=f)
+            f.write(f"{'='*80}\n\n")
+    except Exception:
+        pass
+
+
+def log_warning(context: str, message: str):
+    """Логирует предупреждение в файл."""
+    try:
+        with open(LOG_FILE, 'a', encoding='utf-8') as f:
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            f.write(f"[{timestamp}] WARNING: {context}\n")
+            f.write(f"  {message}\n\n")
+    except Exception:
+        pass
+
+
+# =============================================================================
 # Исключения
 # =============================================================================
 class SecurityError(Exception):
@@ -47,6 +81,11 @@ class SecurityError(Exception):
 
 class TimeoutError(Exception):
     """Таймаут выполнения операции."""
+    pass
+
+
+class YamlParseError(Exception):
+    """Ошибка парсинга YAML."""
     pass
 
 
@@ -69,12 +108,13 @@ def validate_file_path(filepath: str) -> Path:
     if not path.is_file():
         raise SecurityError(f"Путь не является обычным файлом: {path}")
 
-    # Запрет на псевдо-устройства и системные файлы
-    path_str = str(path)
-    forbidden_prefixes = ['/dev/', '/proc/', '/sys/']
-    for prefix in forbidden_prefixes:
-        if path_str.startswith(prefix):
-            raise SecurityError(f"Запрещено чтение из {prefix}: {path}")
+    # Запрет на псевдо-устройства и системные файлы (только для Unix)
+    if sys.platform != 'win32':
+        path_str = str(path)
+        forbidden_prefixes = ['/dev/', '/proc/', '/sys/']
+        for prefix in forbidden_prefixes:
+            if path_str.startswith(prefix):
+                raise SecurityError(f"Запрещено чтение из {prefix}: {path}")
 
     # Проверка размера файла
     try:
@@ -134,7 +174,6 @@ def safe_regex_compile(pattern_str: str, timeout: int = REGEX_TIMEOUT) -> Option
     Возвращает None при ошибке или таймауте.
     """
     try:
-        # Устанавливаем таймаут только на Unix-системах
         if hasattr(signal, 'SIGALRM'):
             signal.signal(signal.SIGALRM, alarm_handler)
             signal.alarm(timeout)
@@ -158,14 +197,11 @@ def safe_regex_search(pattern: Optional[re.Pattern], text: str,
                      pattern_str: str = "", timeout: int = REGEX_TIMEOUT) -> bool:
     """
     Безопасный поиск по regex с таймаутом и обрезкой длинных строк.
-    Если pattern=None или произошел таймаут, использует простой поиск подстроки.
     """
-    # Обрезаем слишком длинные строки
     if len(text) > 10000:
         text = text[:10000]
 
     if pattern is None:
-        # Fallback на простой поиск
         return pattern_str.lower() in text.lower()
 
     try:
@@ -180,7 +216,6 @@ def safe_regex_search(pattern: Optional[re.Pattern], text: str,
 
         return result
     except TimeoutError:
-        # Fallback на простой поиск
         return pattern_str.lower() in text.lower()
     except Exception:
         return False
@@ -190,30 +225,14 @@ def safe_regex_search(pattern: Optional[re.Pattern], text: str,
 
 
 # =============================================================================
-# Простой YAML парсер (только для чтения, без PyYAML)
+# YAML парсер (код парсера без изменений)
 # =============================================================================
 def simple_yaml_load(text: str) -> Any:
-    """
-    Упрощенный парсер YAML для базовых структур.
-    Поддерживает dict, list, строки, числа, bool, null, многострочные блоки.
-    """
     lines = text.strip().split('\n')
-    return _parse_yaml_lines(lines, 0)[0]
-
+    result, _ = _parse_yaml_lines(lines, 0)
+    return result
 
 def _parse_block_scalar(lines: List[str], line_idx: int, base_indent: int, block_style: str) -> str:
-    """
-    Парсит многострочный блок (folded или literal).
-
-    Args:
-        lines: Все строки файла
-        line_idx: Индекс строки с индикатором блока (>, |, и т.д.)
-        base_indent: Базовый отступ ключа
-        block_style: Стиль блока (>, |, >-, |-, >+, |+)
-
-    Returns:
-        Распарсенное значение блока
-    """
     block_lines = []
     i = line_idx + 1
     block_indent = None
@@ -222,29 +241,22 @@ def _parse_block_scalar(lines: List[str], line_idx: int, base_indent: int, block
         next_line = lines[i]
         next_stripped = next_line.lstrip()
 
-        # Пустые строки внутри блока сохраняем
         if not next_stripped:
             block_lines.append('')
             i += 1
             continue
 
-        # ИСПРАВЛЕНИЕ: Внутри блока # это часть содержимого, а не комментарий!
-        # Комментарий завершает блок только если он на уровне базового отступа или меньше
         next_indent = len(next_line) - len(next_stripped)
 
         if next_stripped.startswith('#') and next_indent <= base_indent:
-            # Это комментарий вне блока, завершаем
             break
 
-        # Определяем отступ блока по первой непустой строке
         if block_indent is None:
             block_indent = next_indent
 
-        # Если отступ меньше или равен базовому, блок закончился
         if next_indent <= base_indent:
             break
 
-        # Добавляем строку блока (убираем базовый отступ блока)
         if next_indent >= block_indent:
             block_lines.append(next_line[block_indent:].rstrip())
         else:
@@ -252,9 +264,7 @@ def _parse_block_scalar(lines: List[str], line_idx: int, base_indent: int, block
 
         i += 1
 
-    # Формируем значение в зависимости от стиля блока
     if block_style.startswith('>'):
-        # Folded style - объединяем строки, сохраняя пустые строки как разделители параграфов
         paragraphs = []
         current_para = []
 
@@ -272,49 +282,35 @@ def _parse_block_scalar(lines: List[str], line_idx: int, base_indent: int, block
 
         result = '\n'.join(paragraphs)
     else:
-        # Literal style - сохраняем переводы строк как есть
         result = '\n'.join(block_lines)
 
-    # Обрабатываем модификаторы chomping (-, +)
     if block_style.endswith('-'):
-        # Strip - убираем trailing newlines
         result = result.rstrip('\n')
     elif block_style.endswith('+'):
-        # Keep - сохраняем trailing newlines (ничего не делаем)
         pass
     else:
-        # По умолчанию - clip (оставляем один trailing newline)
         result = result.rstrip('\n')
 
     return result
 
-
 def _is_block_scalar_indicator(text: str) -> bool:
-    """Проверяет, является ли текст индикатором блочного скаляра."""
-    # Индикаторы блочных скаляров: |, >, |-, >-, |+, >+
-    # Также могут быть с числовым индикатором отступа: |2, >3, |-2, >+1 и т.д.
     text = text.strip()
     if not text:
         return False
 
-    # Проверяем первый символ
     if text[0] not in ('|', '>'):
         return False
 
-    # Если только | или >, то это блочный скаляр
     if len(text) == 1:
         return True
 
-    # Проверяем остальные символы - должны быть +, -, или цифры
     for char in text[1:]:
         if char not in ('+', '-', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9'):
             return False
 
     return True
 
-
 def _parse_yaml_lines(lines: List[str], start_idx: int, parent_indent: int = -1) -> Tuple[Any, int]:
-    """Рекурсивный парсер YAML строк."""
     result = {}
     i = start_idx
     is_list_context = False
@@ -323,31 +319,25 @@ def _parse_yaml_lines(lines: List[str], start_idx: int, parent_indent: int = -1)
         line = lines[i]
         stripped = line.lstrip()
 
-        # Пропускаем пустые строки и комментарии
-        if not stripped or stripped.startswith('#'):
+        if not stripped or stripped.startswith('#') or stripped == '---':
             i += 1
             continue
 
         indent = len(line) - len(stripped)
 
-        # Если отступ меньше родительского, возвращаемся
         if parent_indent >= 0 and indent <= parent_indent:
             break
 
-        # Список
         if stripped.startswith('- '):
             if not is_list_context:
                 if result and not isinstance(result, list):
-                    # Уже был dict, нужно вернуть его
                     break
                 result = []
                 is_list_context = True
 
             item_text = stripped[2:].strip()
 
-            # Проверяем, является ли элемент dict
             if ':' in item_text and not item_text.startswith('"') and not item_text.startswith("'"):
-                # Элемент списка - это dict, начинаем с этой строки
                 sub_dict = {}
                 parts = item_text.split(':', 1)
                 key = parts[0].strip().strip('"').strip("'")
@@ -356,14 +346,12 @@ def _parse_yaml_lines(lines: List[str], start_idx: int, parent_indent: int = -1)
                 if value_text:
                     sub_dict[key] = _parse_yaml_value(value_text)
                 else:
-                    # Читаем вложенную структуру
                     sub_result, next_i = _parse_yaml_lines(lines, i + 1, indent + 2)
                     sub_dict[key] = sub_result
                     i = next_i
                     result.append(sub_dict)
                     continue
 
-                # Читаем остальные ключи на том же уровне
                 i += 1
                 while i < len(lines):
                     next_line = lines[i]
@@ -381,10 +369,8 @@ def _parse_yaml_lines(lines: List[str], start_idx: int, parent_indent: int = -1)
                         k = parts[0].strip().strip('"').strip("'")
                         v_text = parts[1].strip() if len(parts) > 1 else ''
 
-                        # Проверяем многострочные блоки внутри dict в списке
                         if _is_block_scalar_indicator(v_text):
                             sub_dict[k] = _parse_block_scalar(lines, i, next_indent, v_text)
-                            # Пропускаем строки блока
                             i += 1
                             while i < len(lines):
                                 check_line = lines[i]
@@ -408,10 +394,7 @@ def _parse_yaml_lines(lines: List[str], start_idx: int, parent_indent: int = -1)
 
                 result.append(sub_dict)
             else:
-                # Простое значение - может быть многострочным
-                # Проверяем, продолжается ли значение на следующих строках
                 if item_text:
-                    # Собираем многострочное значение
                     value_lines = [item_text]
                     i += 1
                     while i < len(lines):
@@ -422,34 +405,27 @@ def _parse_yaml_lines(lines: List[str], start_idx: int, parent_indent: int = -1)
                             continue
                         next_indent = len(next_line) - len(next_stripped)
 
-                        # Если новый элемент списка или отступ меньше/равен базовому
                         if next_stripped.startswith('- ') or next_indent <= indent:
                             break
 
-                        # Это продолжение значения
                         value_lines.append(next_stripped)
                         i += 1
 
-                    # Объединяем строки в одно значение
                     if len(value_lines) == 1:
                         result.append(_parse_yaml_value(value_lines[0]))
                     else:
-                        # Многострочное значение - сохраняем с переносами
                         result.append('\n'.join(value_lines))
                 else:
                     result.append(None)
                     i += 1
 
-        # Ключ-значение
         elif ':' in stripped and not is_list_context:
             parts = stripped.split(':', 1)
             key = parts[0].strip().strip('"').strip("'")
             value_text = parts[1].strip() if len(parts) > 1 else ''
 
-            # Проверяем многострочные блоки (>, |, >-, |-, >+, |+)
             if _is_block_scalar_indicator(value_text):
                 result[key] = _parse_block_scalar(lines, i, indent, value_text)
-                # Пропускаем строки блока
                 i += 1
                 while i < len(lines):
                     next_line = lines[i]
@@ -463,12 +439,64 @@ def _parse_yaml_lines(lines: List[str], start_idx: int, parent_indent: int = -1)
                     i += 1
 
             elif not value_text:
-                # Вложенная структура
+                if i + 1 < len(lines):
+                    temp_i = i + 1
+                    while temp_i < len(lines):
+                        temp_line = lines[temp_i]
+                        temp_stripped = temp_line.lstrip()
+                        if temp_stripped and not temp_stripped.startswith('#'):
+                            break
+                        temp_i += 1
+
+                    if temp_i < len(lines):
+                        next_line = lines[temp_i]
+                        next_stripped = next_line.lstrip()
+                        next_indent = len(next_line) - len(next_stripped)
+
+                        if next_stripped.startswith('- '):
+                            expected_indent = next_indent
+
+                            list_items = []
+                            list_i = temp_i
+
+                            while list_i < len(lines):
+                                list_line = lines[list_i]
+                                list_stripped = list_line.lstrip()
+
+                                if not list_stripped or list_stripped.startswith('#'):
+                                    list_i += 1
+                                    continue
+
+                                list_indent = len(list_line) - len(list_stripped)
+
+                                if list_stripped.startswith('- '):
+                                    if list_indent != expected_indent:
+                                        error_msg = f"Некорректный отступ элемента списка в строке {list_i + 1}: ожидается {expected_indent}, получено {list_indent}"
+                                        log_warning("YAML parse", error_msg)
+                                        raise YamlParseError(error_msg)
+
+                                    item_text = list_stripped[2:].strip()
+                                    list_items.append(_parse_yaml_value(item_text) if item_text else None)
+                                    list_i += 1
+
+                                elif list_stripped.startswith('-') and len(list_stripped) > 1 and list_stripped[1] != ' ':
+                                    error_msg = f"Синтаксическая ошибка YAML в строке {list_i + 1}: элемент списка должен быть '- item', а не '-item' (отсутствует пробел после дефиса)"
+                                    log_warning("YAML parse", error_msg)
+                                    raise YamlParseError(error_msg)
+
+                                elif list_indent <= indent:
+                                    break
+                                else:
+                                    list_i += 1
+
+                            result[key] = list_items
+                            i = list_i
+                            continue
+
                 sub_result, next_i = _parse_yaml_lines(lines, i + 1, indent)
                 result[key] = sub_result
                 i = next_i
             else:
-                # Простое значение
                 result[key] = _parse_yaml_value(value_text)
                 i += 1
         else:
@@ -476,27 +504,20 @@ def _parse_yaml_lines(lines: List[str], start_idx: int, parent_indent: int = -1)
 
     return result, i
 
-
 def _parse_yaml_value(text: str) -> Any:
-    """Парсит простое YAML значение."""
     text = text.strip()
 
-    # null
     if text in ('null', 'Null', 'NULL', '~', ''):
         return None
 
-    # bool
     if text in ('true', 'True', 'TRUE'):
         return True
     if text in ('false', 'False', 'FALSE'):
         return False
 
-    # Строка в кавычках
-    if (text.startswith('"') and text.endswith('"')) or \
-       (text.startswith("'") and text.endswith("'")):
+    if (text.startswith('"') and text.endswith('"')) or        (text.startswith("'") and text.endswith("'")):
         return text[1:-1]
 
-    # Число
     try:
         if '.' in text or 'e' in text.lower():
             return float(text)
@@ -504,15 +525,9 @@ def _parse_yaml_value(text: str) -> Any:
     except ValueError:
         pass
 
-    # Обычная строка
     return text
 
-
 def split_yaml_documents(filepath: Path) -> List[Tuple[int, int]]:
-    """
-    Разбивает многодокументный YAML файл на позиции документов.
-    Возвращает список (start_line, end_line) для каждого документа.
-    """
     documents = []
     start_line = 0
 
@@ -522,11 +537,9 @@ def split_yaml_documents(filepath: Path) -> List[Tuple[int, int]]:
     for i, line in enumerate(lines):
         if line.strip() == '---':
             if i > start_line:
-                # Сохраняем предыдущий документ
                 documents.append((start_line, i - 1))
             start_line = i + 1
 
-    # Последний документ
     if start_line < len(lines):
         documents.append((start_line, len(lines) - 1))
 
@@ -534,13 +547,9 @@ def split_yaml_documents(filepath: Path) -> List[Tuple[int, int]]:
 
 
 # =============================================================================
-# Вспомогательная функция для переноса строк
+# Вспомогательные функции
 # =============================================================================
 def wrap_text(text: str, width: int, indent: int = 0) -> List[str]:
-    """
-    Переносит текст на несколько строк с заданной шириной.
-    Сохраняет отступ для продолжений.
-    """
     if width <= indent:
         return [text[:width]]
 
@@ -562,12 +571,9 @@ def wrap_text(text: str, width: int, indent: int = 0) -> List[str]:
                 result.append(remaining)
             break
 
-        # Ищем место для переноса
         cut_pos = line_width
-
-        # Пытаемся разорвать по пробелу
         space_pos = remaining[:line_width].rfind(' ')
-        if space_pos > line_width // 2:  # Если пробел не слишком далеко от начала
+        if space_pos > line_width // 2:
             cut_pos = space_pos
 
         if result:
@@ -584,30 +590,27 @@ def wrap_text(text: str, width: int, indent: int = 0) -> List[str]:
 # Узел YAML дерева
 # =============================================================================
 class YamlNode:
-    """Узел дерева YAML."""
-
     def __init__(self, key: str, value: Any, parent: Optional['YamlNode'] = None, 
                  record_idx: Optional[int] = None, file_idx: Optional[int] = None,
                  global_idx: Optional[int] = None):
         self.key = key
         self.value = value
         self.parent = parent
-        self.record_idx = record_idx  # Индекс объекта в файле (для корневых узлов)
-        self.file_idx = file_idx  # Индекс файла (для корневых узлов)
-        self.global_idx = global_idx  # Глобальный индекс объекта (для корневых узлов)
+        self.record_idx = record_idx
+        self.file_idx = file_idx
+        self.global_idx = global_idx
         self.children: List['YamlNode'] = []
         self.expanded = False
         self.is_leaf = not isinstance(value, (dict, list)) or (isinstance(value, (dict, list)) and len(value) == 0)
+        self.has_error = isinstance(value, dict) and '_error' in value
 
     def toggle(self):
-        """Переключает состояние развернутости узла."""
         if not self.is_leaf:
             self.expanded = not self.expanded
             if self.expanded:
                 self.expand()
 
     def expand(self):
-        """Разворачивает узел и создает дочерние узлы."""
         if self.is_leaf or self.expanded:
             return
 
@@ -620,19 +623,13 @@ class YamlNode:
                 self.children.append(child)
         elif isinstance(self.value, list):
             for i, item in enumerate(self.value):
-                # Для элементов списка не используем индекс как ключ
                 child = YamlNode("", item, parent=self)
                 self.children.append(child)
 
     def collapse(self):
-        """Сворачивает узел."""
         self.expanded = False
 
     def expand_all(self, node_counter: List[int], max_nodes: int = MAX_EXPAND_NODES):
-        """
-        Рекурсивно разворачивает все дочерние узлы с ограничением.
-        node_counter[0] отслеживает общее количество созданных узлов.
-        """
         if self.is_leaf:
             return
 
@@ -647,23 +644,20 @@ class YamlNode:
             child.expand_all(node_counter, max_nodes)
 
     def collapse_all(self):
-        """Рекурсивно сворачивает все дочерние узлы."""
         self.collapse()
         for child in self.children:
             child.collapse_all()
 
     def get_path(self) -> List[str]:
-        """Возвращает путь от корня до текущего узла."""
         path = []
         node = self
         while node.parent is not None:
-            if node.key:  # Пропускаем пустые ключи (элементы списков)
+            if node.key:
                 path.append(node.key)
             node = node.parent
         return list(reversed(path))
 
     def find_by_path(self, path: List[str]) -> Optional['YamlNode']:
-        """Находит узел по пути (для навигации между объектами)."""
         if not path:
             return self
 
@@ -677,17 +671,11 @@ class YamlNode:
         return None
 
     def display_text(self, width: int, wrap_mode: bool = False) -> List[str]:
-        """
-        Возвращает текст для отображения узла в списке.
-        Если wrap_mode=True, возвращает несколько строк при необходимости.
-        """
         prefix = ""
 
-        # Добавляем индекс для корневых узлов (используем global_idx)
         if self.global_idx is not None:
             prefix = f"[{self.global_idx}] "
 
-        # Элементы списка отображаются с дефисом
         if self.parent and isinstance(self.parent.value, list):
             if self.is_leaf:
                 text = f"- {self._format_value()}"
@@ -697,7 +685,6 @@ class YamlNode:
                 else:
                     text = f"- [...] ({len(self.value)} items)"
         else:
-            # Обычные узлы
             if self.is_leaf:
                 text = f"{prefix}{self.key}: {self._format_value()}"
             else:
@@ -707,13 +694,11 @@ class YamlNode:
                     text = f"{prefix}{self.key} [...] ({len(self.value)} items)"
 
         if wrap_mode:
-            # В режиме wrap переносим длинные строки
             if len(text) > width:
-                # Определяем отступ (для переносов)
                 if self.parent and isinstance(self.parent.value, list):
-                    indent = 2  # "- "
+                    indent = 2
                 elif self.key:
-                    indent = len(prefix) + len(self.key) + 2  # "prefix + key: "
+                    indent = len(prefix) + len(self.key) + 2
                 else:
                     indent = len(prefix)
 
@@ -721,27 +706,22 @@ class YamlNode:
             else:
                 return [text]
         else:
-            # В режиме unwrap обрезаем длинные строки
             if len(text) > width:
                 text = text[:width - 3] + "..."
             return [text]
 
     def _format_value(self) -> str:
-        """Форматирует значение листа для отображения."""
         if self.value is None:
             return "null"
         elif isinstance(self.value, bool):
             return "true" if self.value else "false"
         elif isinstance(self.value, str):
-            # Показываем первую строку для многострочных значений
             first_line = self.value.split('\n')[0]
             if len(self.value.split('\n')) > 1:
-                # Многострочное значение
                 if len(first_line) > 80:
                     return f'"{first_line[:80]}..." (multiline)'
                 return f'"{first_line}" (multiline)'
             else:
-                # Однострочное значение
                 if len(self.value) > 100:
                     return f'"{self.value[:100]}..."'
                 return f'"{self.value}"'
@@ -753,11 +733,6 @@ class YamlNode:
 # Класс для работы с YAML файлом
 # =============================================================================
 class YamlFile:
-    """
-    Представляет YAML файл с поддержкой ленивой загрузки.
-    Для многодокументных файлов загружает объекты по требованию.
-    """
-
     def __init__(self, filepath: Path):
         self.filepath = filepath
         self.is_multi_document = False
@@ -765,16 +740,15 @@ class YamlFile:
         self.cache: OrderedDict[int, Any] = OrderedDict()
         self.single_object: Optional[Any] = None
         self.file_lines: Optional[List[str]] = None
+        self.has_parse_error = False
+        self.parse_error_message = ""
 
-        # Определяем тип файла
         self._detect_file_type()
 
     def _detect_file_type(self):
-        """Определяет, одиночный или многодокументный YAML файл."""
         with open(self.filepath, 'r', encoding='utf-8', errors='replace') as f:
             self.file_lines = f.readlines()
 
-        # Проверяем наличие разделителей ---
         for line in self.file_lines:
             if line.strip() == '---':
                 self.is_multi_document = True
@@ -783,41 +757,52 @@ class YamlFile:
         if self.is_multi_document:
             self.documents = split_yaml_documents(self.filepath)
         else:
-            # Загружаем одиночный файл целиком
             content = ''.join(self.file_lines)
 
             try:
                 self.single_object = simple_yaml_load(content)
                 validate_yaml_object(self.single_object)
-            except SecurityError:
-                raise
+            except SecurityError as e:
+                log_error(f"Security error in {self.filepath}", e)
+                self.has_parse_error = True
+                self.parse_error_message = str(e)
+                self.single_object = {
+                    "_error": f"Ошибка безопасности: {str(e)}",
+                    "_file": str(self.filepath)
+                }
+            except YamlParseError as e:
+                log_error(f"YAML parse error in {self.filepath}", e)
+                self.has_parse_error = True
+                self.parse_error_message = str(e)
+                self.single_object = {
+                    "_error": f"Ошибка парсинга YAML: {str(e)}",
+                    "_file": str(self.filepath)
+                }
             except Exception as e:
-                raise ValueError(f"Ошибка парсинга YAML: {e}")
+                log_error(f"Unexpected error parsing {self.filepath}", e)
+                self.has_parse_error = True
+                self.parse_error_message = str(e)
+                self.single_object = {
+                    "_error": f"Ошибка парсинга: {str(e)}",
+                    "_file": str(self.filepath)
+                }
 
     def __len__(self) -> int:
-        """Возвращает количество объектов в файле."""
         if self.is_multi_document:
             return len(self.documents)
         return 1
 
     def __getitem__(self, index: int) -> Any:
-        """
-        Возвращает объект по индексу.
-        Для многодокументных файлов использует кэш и ленивую загрузку.
-        """
         if not self.is_multi_document:
             return self.single_object
 
         if index < 0 or index >= len(self.documents):
             raise IndexError(f"Индекс {index} вне диапазона")
 
-        # Проверяем кэш
         if index in self.cache:
-            # Перемещаем в конец (LRU)
             self.cache.move_to_end(index)
             return self.cache[index]
 
-        # Загружаем объект
         start_line, end_line = self.documents[index]
         lines = self.file_lines[start_line:end_line + 1]
         content = ''.join(lines)
@@ -826,16 +811,18 @@ class YamlFile:
             obj = simple_yaml_load(content)
             validate_yaml_object(obj, path=f"document[{index}]")
         except SecurityError as e:
-            # Возвращаем заглушку вместо падения
-            obj = {"_error": f"Объект {index} пропущен: {str(e)}"}
+            log_error(f"Security error in {self.filepath} document {index}", e)
+            obj = {"_error": f"Объект {index} пропущен (безопасность): {str(e)}"}
+        except YamlParseError as e:
+            log_error(f"YAML parse error in {self.filepath} document {index}", e)
+            obj = {"_error": f"Ошибка парсинга YAML в объекте {index}: {str(e)}"}
         except Exception as e:
+            log_error(f"Error parsing {self.filepath} document {index}", e)
             obj = {"_error": f"Ошибка парсинга объекта {index}: {str(e)}"}
 
-        # Добавляем в кэш
         self.cache[index] = obj
         self.cache.move_to_end(index)
 
-        # Удаляем старые объекты из кэша
         while len(self.cache) > CACHE_SIZE:
             self.cache.popitem(last=False)
 
@@ -846,38 +833,35 @@ class YamlFile:
 # Главный класс TUI приложения
 # =============================================================================
 class YamlTuiViewer:
-    """Главный класс TUI приложения для просмотра YAML файлов."""
-
     def __init__(self, stdscr, yaml_files: List[YamlFile]):
         self.stdscr = stdscr
         self.yaml_files = yaml_files
 
-        # Инициализация curses
-        curses.curs_set(0)  # Скрываем курсор
+        curses.curs_set(0)
         curses.use_default_colors()
-        curses.init_pair(1, curses.COLOR_BLACK, curses.COLOR_WHITE)  # Выделение
-        curses.init_pair(2, curses.COLOR_YELLOW, -1)  # Заголовок
-        curses.init_pair(3, curses.COLOR_CYAN, -1)  # Статус
+        curses.init_pair(1, curses.COLOR_BLACK, curses.COLOR_WHITE)
+        curses.init_pair(2, curses.COLOR_YELLOW, -1)
+        curses.init_pair(3, curses.COLOR_CYAN, -1)
+        curses.init_pair(4, curses.COLOR_WHITE, -1)
+        curses.init_pair(5, curses.COLOR_RED, -1)
 
-        # Состояние
         self.root = YamlNode("root", {}, None)
-        self.flat_list: List[Tuple[YamlNode, int, List[str]]] = []  # (node, depth, wrapped_lines)
+        self.flat_list: List[Tuple[YamlNode, int, List[str]]] = []
         self.cursor_pos = 0
         self.scroll_offset = 0
         self.status_message = ""
         self.filter_fields: Optional[Set[str]] = None
         self.search_results: List[YamlNode] = []
         self.search_result_idx = -1
-        self.loaded_objects: Dict[Tuple[int, int], bool] = {}  # (file_idx, obj_idx) -> loaded
+        self.loaded_objects: Dict[Tuple[int, int], bool] = {}
         self.total_objects = sum(len(f) for f in yaml_files)
-        self.wrap_mode = False  # Режим переноса строк
+        self.wrap_mode = False
+        self.error_count = sum(1 for f in yaml_files if f.has_parse_error)
 
-        # Загружаем начальные объекты
         self._initial_load()
         self._rebuild_flat_list()
 
     def _initial_load(self):
-        """Предзагрузка первых объектов из всех файлов."""
         global_idx = 0
         for file_idx, yaml_file in enumerate(self.yaml_files):
             count = min(PRELOAD_OBJECTS, len(yaml_file))
@@ -886,7 +870,6 @@ class YamlTuiViewer:
                 global_idx += 1
 
     def _load_object(self, file_idx: int, obj_idx: int, global_idx: int):
-        """Загружает объект по индексу и добавляет его в дерево."""
         key = (file_idx, obj_idx)
         if key in self.loaded_objects:
             return
@@ -897,13 +880,10 @@ class YamlTuiViewer:
 
         obj = yaml_file[obj_idx]
 
-        # Формируем красивое имя
         filename = yaml_file.filepath.name
         if len(self.yaml_files) == 1:
-            # Один файл - просто номер документа
             node_name = f"Document {global_idx}"
         else:
-            # Несколько файлов - имя файла и номер документа
             node_name = f"{filename}:{obj_idx}"
 
         node = YamlNode(node_name, obj, parent=self.root, record_idx=obj_idx, 
@@ -912,7 +892,6 @@ class YamlTuiViewer:
         self.loaded_objects[key] = True
 
     def _load_more_objects(self, count: int = LOAD_BATCH_SIZE):
-        """Подгружает следующую пачку объектов."""
         loaded = 0
         global_idx = len(self.loaded_objects)
 
@@ -927,27 +906,22 @@ class YamlTuiViewer:
                         return
 
     def _rebuild_flat_list(self):
-        """Строит плоский список видимых узлов для отображения."""
         self.flat_list.clear()
         height, width = self.stdscr.getmaxyx()
 
-        # Начинаем с детей корня (это наши объекты)
         for child in self.root.children:
             self._add_to_flat_list(child, 0, width - 1)
 
-        # Проверяем, нужно ли подгружать объекты
         if len(self.loaded_objects) < self.total_objects:
             list_height = height - 4
             if len(self.flat_list) == 0 or self.cursor_pos >= len(self.flat_list) - list_height:
                 self._load_more_objects()
-                # Добавляем новые объекты в список
                 loaded_nodes = set((n.file_idx, n.record_idx) for n, _, _ in self.flat_list if n.record_idx is not None)
                 for child in self.root.children:
                     if (child.file_idx, child.record_idx) not in loaded_nodes:
                         self._add_to_flat_list(child, 0, width - 1)
 
     def _add_to_flat_list(self, node: YamlNode, depth: int, width: int):
-        """Рекурсивно добавляет узлы в плоский список."""
         if self.filter_fields is None or self._should_show_node(node):
             indent_width = depth * 2
             available_width = width - indent_width
@@ -959,26 +933,21 @@ class YamlTuiViewer:
                 self._add_to_flat_list(child, depth + 1, width)
 
     def _should_show_node(self, node: YamlNode) -> bool:
-        """Проверяет, должен ли узел отображаться при активном фильтре."""
         if self.filter_fields is None:
             return True
 
-        # Корневые узлы документов всегда показываем
         if node.record_idx is not None:
             return True
 
         if node.is_leaf:
             return node.key in self.filter_fields
 
-        # Внутренний узел показываем, если есть подходящие листья в поддереве
         return self._has_matching_leaf(node)
 
     def _has_matching_leaf(self, node: YamlNode) -> bool:
-        """Проверяет, есть ли в поддереве листья, проходящие фильтр."""
         if node.is_leaf:
             return node.key in self.filter_fields
 
-        # Временно разворачиваем для проверки
         was_expanded = node.expanded
         if not node.expanded:
             node.expand()
@@ -990,8 +959,16 @@ class YamlTuiViewer:
 
         return result
 
+    def _ensure_cursor_visible(self):
+        """ИСПРАВЛЕНИЕ: Обеспечивает видимость курсора на экране."""
+        height = self.stdscr.getmaxyx()[0] - 4
+
+        if self.cursor_pos < self.scroll_offset:
+            self.scroll_offset = self.cursor_pos
+        elif self.cursor_pos >= self.scroll_offset + height:
+            self.scroll_offset = self.cursor_pos - height + 1
+
     def run(self):
-        """Главный цикл приложения."""
         while True:
             self._draw()
 
@@ -1004,27 +981,28 @@ class YamlTuiViewer:
                 break
 
     def _draw(self):
-        """Отрисовывает интерфейс."""
         self.stdscr.clear()
         height, width = self.stdscr.getmaxyx()
 
-        # Верхняя строка: количество файлов, объектов
         if len(self.yaml_files) == 1:
             filename = self.yaml_files[0].filepath.name
             header = f"{filename} | Объектов: {self.total_objects} | Загружено: {len(self.loaded_objects)}"
         else:
             header = f"Файлов: {len(self.yaml_files)} | Объектов: {self.total_objects} | Загружено: {len(self.loaded_objects)}"
 
+        if self.error_count > 0:
+            header += f" | Ошибок: {self.error_count}"
+
         filter_indicator = " [FILTER]" if self.filter_fields else ""
         wrap_indicator = " [WRAP]" if self.wrap_mode else ""
         header += filter_indicator + wrap_indicator
 
-        self.stdscr.addnstr(0, 0, header, width - 1, curses.color_pair(2) | curses.A_BOLD)
+        try:
+            self.stdscr.addnstr(0, 0, header, width - 1, curses.color_pair(2) | curses.A_BOLD)
+        except:
+            pass
 
-        # Основная область: дерево
         list_height = height - 4
-
-        # Отображаем узлы с учетом wrap
         y = 1
         items_shown = 0
         skip_items = self.scroll_offset
@@ -1045,8 +1023,17 @@ class YamlTuiViewer:
 
                 text = indent + line if line_idx == 0 else indent + line
 
-                # Выделяем только первую строку узла, только если это текущий выбранный элемент списка
-                attr = curses.color_pair(1) if items_shown == self.cursor_pos - self.scroll_offset and line_idx == 0 else 0
+                is_selected = items_shown == self.cursor_pos - self.scroll_offset and line_idx == 0
+
+                if is_selected:
+                    attr = curses.color_pair(1)
+                elif node.has_error:
+                    attr = curses.color_pair(5) | curses.A_BOLD
+                elif not node.is_leaf and not node.expanded:
+                    attr = curses.color_pair(4) | curses.A_BOLD
+                else:
+                    attr = 0
+
                 try:
                     self.stdscr.addnstr(y, 0, text, width - 1, attr)
                 except:
@@ -1055,7 +1042,6 @@ class YamlTuiViewer:
 
             items_shown += 1
 
-        # Статус
         status_y = height - 3
         pos_info = f"Позиция: {self.cursor_pos + 1}/{len(self.flat_list)}"
         if self.search_results:
@@ -1071,8 +1057,7 @@ class YamlTuiViewer:
             except:
                 pass
 
-        # Подсказки
-        help_text = "q:выход | ↑↓←→/hjkl:навиг | Enter:откр | w:wrap | s:поиск | f:фильтр | a/z:разв/свер"
+        help_text = "q:выход | ↑↓←→/hjkl:навиг | n/p:страница | Enter:откр | w:wrap | s:поиск | f:фильтр | a/z:разв/свер"
         try:
             self.stdscr.addnstr(height - 1, 0, help_text[:width - 1], width - 1)
         except:
@@ -1081,101 +1066,109 @@ class YamlTuiViewer:
         self.stdscr.refresh()
 
     def _handle_key(self, key: int) -> bool:
-        """
-        Обрабатывает нажатия клавиш.
-        Возвращает False для выхода из приложения.
-        """
-        # Выход
-        if key in (ord('q'), ord('Q'), 27):  # q, Q, Esc
+        if key in (ord('q'), ord('Q'), 27):
             return False
 
-        # Навигация вверх/вниз
         elif key in (curses.KEY_UP, ord('k')):
             self._move_cursor(-1)
         elif key in (curses.KEY_DOWN, ord('j')):
             self._move_cursor(1)
 
-        # Развернуть/свернуть
+        # НОВОЕ: Постраничная навигация
+        elif key == ord('n'):  # Page Down
+            self._page_down()
+        elif key == ord('p'):  # Page Up
+            self._page_up()
+
         elif key in (curses.KEY_RIGHT, ord('l')):
             self._expand_current()
         elif key == curses.KEY_LEFT:
             self._collapse_current()
 
-        # Enter: toggle или просмотр значения
         elif key in (curses.KEY_ENTER, 10, 13):
             self._handle_enter()
 
-        # Режим wrap
         elif key in (ord('w'), ord('W')):
             self._toggle_wrap()
 
-        # Развернуть/свернуть объект
         elif key == ord('a'):
             self._expand_current_object()
         elif key == ord('z'):
             self._collapse_current_object()
 
-        # Развернуть/свернуть все
         elif key == ord('A'):
             self._expand_all_loaded()
         elif key == ord('Z'):
             self._collapse_all()
 
-        # Переход между объектами
         elif key == ord('g'):
             self._goto_object()
         elif key == curses.KEY_HOME:
             self._goto_first_object()
         elif key == curses.KEY_END:
             self._goto_last_object()
-        elif key == curses.KEY_NPAGE:  # PgDn
+        elif key == curses.KEY_NPAGE:
             self._next_object()
-        elif key == curses.KEY_PPAGE:  # PgUp
+        elif key == curses.KEY_PPAGE:
             self._prev_object()
 
-        # Поиск
         elif key == ord('s'):
             self._search_current_field()
         elif key == ord('F'):
             self._global_search()
-        elif key == ord('n'):
-            self._next_search_result()
-        elif key == ord('p'):
-            self._prev_search_result()
 
-        # Фильтрация
         elif key == ord('f'):
             self._filter_dialog()
 
         return True
 
+    def _page_down(self):
+        """НОВОЕ: Перемещение на страницу вниз."""
+        if not self.flat_list:
+            return
+
+        height = self.stdscr.getmaxyx()[0] - 4
+        new_pos = min(self.cursor_pos + height, len(self.flat_list) - 1)
+
+        if new_pos != self.cursor_pos:
+            self.cursor_pos = new_pos
+            self._ensure_cursor_visible()
+
+            if self.cursor_pos >= len(self.flat_list) - height:
+                if len(self.loaded_objects) < self.total_objects:
+                    self._load_more_objects()
+                    self._rebuild_flat_list()
+
+    def _page_up(self):
+        """НОВОЕ: Перемещение на страницу вверх."""
+        if not self.flat_list:
+            return
+
+        height = self.stdscr.getmaxyx()[0] - 4
+        new_pos = max(self.cursor_pos - height, 0)
+
+        if new_pos != self.cursor_pos:
+            self.cursor_pos = new_pos
+            self._ensure_cursor_visible()
+
     def _toggle_wrap(self):
-        """Переключает режим переноса строк."""
         self.wrap_mode = not self.wrap_mode
-        # Сохраняем текущую позицию курсора на узле
         current_node = None
         if self.flat_list and 0 <= self.cursor_pos < len(self.flat_list):
             current_node, _, _ = self.flat_list[self.cursor_pos]
 
         self._rebuild_flat_list()
 
-        # Восстанавливаем позицию курсора на том же узле
         if current_node:
             for i, (node, _, _) in enumerate(self.flat_list):
                 if node == current_node:
                     self.cursor_pos = i
-                    # Корректируем scroll_offset
-                    height = self.stdscr.getmaxyx()[0] - 4
-                    if self.cursor_pos < self.scroll_offset:
-                        self.scroll_offset = self.cursor_pos
-                    elif self.cursor_pos >= self.scroll_offset + height:
-                        self.scroll_offset = self.cursor_pos - height + 1
+                    self._ensure_cursor_visible()
                     break
 
         self.status_message = "Режим wrap включен" if self.wrap_mode else "Режим wrap выключен"
 
     def _move_cursor(self, delta: int):
-        """Перемещает курсор на delta позиций."""
         if not self.flat_list:
             return
 
@@ -1184,22 +1177,15 @@ class YamlTuiViewer:
 
         if new_pos != self.cursor_pos:
             self.cursor_pos = new_pos
+            self._ensure_cursor_visible()
 
-            # Автоскроллинг
             height = self.stdscr.getmaxyx()[0] - 4
-            if self.cursor_pos < self.scroll_offset:
-                self.scroll_offset = self.cursor_pos
-            elif self.cursor_pos >= self.scroll_offset + height:
-                self.scroll_offset = self.cursor_pos - height + 1
-
-            # Подгружаем объекты при приближении к концу
             if self.cursor_pos >= len(self.flat_list) - height:
                 if len(self.loaded_objects) < self.total_objects:
                     self._load_more_objects()
                     self._rebuild_flat_list()
 
     def _expand_current(self):
-        """Разворачивает текущий узел."""
         if not self.flat_list:
             return
 
@@ -1207,26 +1193,35 @@ class YamlTuiViewer:
         if not node.is_leaf:
             node.expand()
             self._rebuild_flat_list()
+            self._ensure_cursor_visible()
 
     def _collapse_current(self):
-        """Сворачивает текущий узел или переходит к родителю."""
+        """ИСПРАВЛЕНИЕ: Улучшенное сворачивание с автоматическим переходом к родителю."""
         if not self.flat_list:
             return
 
         node, _, _ = self.flat_list[self.cursor_pos]
 
         if node.expanded:
+            # Если текущий узел развернут - сворачиваем его
             node.collapse()
             self._rebuild_flat_list()
+            self._ensure_cursor_visible()
         elif node.parent and node.parent != self.root:
-            # Переходим к родителю
+            # Если текущий узел свернут - переходим к родителю
+            # Сначала сворачиваем родителя, если он развернут
+            if node.parent.expanded:
+                node.parent.collapse()
+                self._rebuild_flat_list()
+
+            # Находим родителя в списке и перемещаем курсор
             for i, (n, _, _) in enumerate(self.flat_list):
                 if n == node.parent:
                     self.cursor_pos = i
+                    self._ensure_cursor_visible()
                     break
 
     def _handle_enter(self):
-        """Обрабатывает нажатие Enter."""
         if not self.flat_list:
             return
 
@@ -1237,21 +1232,20 @@ class YamlTuiViewer:
         else:
             node.toggle()
             self._rebuild_flat_list()
+            self._ensure_cursor_visible()
 
     def _view_value(self, node: YamlNode):
-        """Открывает полноэкранный просмотр значения листа."""
         value_str = str(node.value) if node.value is not None else "null"
         lines = value_str.split('\n')
 
         height, width = self.stdscr.getmaxyx()
         offset_y = 0
         offset_x = 0
-        view_wrap_mode = self.wrap_mode  # Используем текущий режим wrap
+        view_wrap_mode = self.wrap_mode
 
         while True:
             self.stdscr.clear()
 
-            # Заголовок
             key_name = node.key if node.key else "list item"
             wrap_indicator = " [WRAP]" if view_wrap_mode else ""
             header = f"Просмотр: {key_name}{wrap_indicator} | q/Esc:закрыть | ↑↓←→:прокрутка | w:wrap"
@@ -1260,11 +1254,9 @@ class YamlTuiViewer:
             except:
                 pass
 
-            # Содержимое с учетом wrap
             view_height = height - 2
 
             if view_wrap_mode:
-                # В режиме wrap переносим длинные строки
                 wrapped_lines = []
                 for line in lines:
                     if len(line) > width - 1:
@@ -1311,13 +1303,11 @@ class YamlTuiViewer:
                 offset_x += 1
 
     def _expand_current_object(self):
-        """Разворачивает весь текущий объект."""
         if not self.flat_list:
             return
 
         node, _, _ = self.flat_list[self.cursor_pos]
 
-        # Находим корневой узел объекта
         while node.parent != self.root and node.parent is not None:
             node = node.parent
 
@@ -1325,57 +1315,52 @@ class YamlTuiViewer:
             node_counter = [0]
             node.expand_all(node_counter)
             self._rebuild_flat_list()
+            self._ensure_cursor_visible()
             self.status_message = f"Развернуто узлов: {node_counter[0]}"
         except SecurityError as e:
             self.status_message = f"Ошибка: {str(e)}"
 
     def _collapse_current_object(self):
-        """Сворачивает весь текущий объект."""
         if not self.flat_list:
             return
 
         node, _, _ = self.flat_list[self.cursor_pos]
 
-        # Находим корневой узел объекта
         while node.parent != self.root and node.parent is not None:
             node = node.parent
 
         node.collapse_all()
-
-        # Сохраняем ссылку на корневой узел
         root_node = node
 
         self._rebuild_flat_list()
 
-        # Устанавливаем курсор на корневой узел после сворачивания
         for i, (n, _, _) in enumerate(self.flat_list):
             if n == root_node:
                 self.cursor_pos = i
-                self.scroll_offset = max(0, i - 5)
+                self._ensure_cursor_visible()
                 break
 
         self.status_message = "Объект свернут"
 
     def _expand_all_loaded(self):
-        """Разворачивает все уже загруженные объекты."""
         try:
             node_counter = [0]
             for child in self.root.children:
                 child.expand_all(node_counter)
             self._rebuild_flat_list()
+            self._ensure_cursor_visible()
             self.status_message = f"Развернуто узлов: {node_counter[0]}"
         except SecurityError as e:
             self.status_message = f"Ошибка: {str(e)}"
 
     def _collapse_all(self):
-        """Сворачивает все объекты."""
         for child in self.root.children:
             child.collapse_all()
         self._rebuild_flat_list()
+        self._ensure_cursor_visible()
         self.status_message = "Все объекты свернуты"
 
     def _goto_object(self):
-        """Диалог перехода к объекту по номеру."""
         obj_num_str = self._input_string("Номер объекта (глобальный): ")
         if not obj_num_str:
             return
@@ -1386,7 +1371,6 @@ class YamlTuiViewer:
                 self.status_message = f"Объект {global_idx} не существует"
                 return
 
-            # Находим файл и индекс внутри него по глобальному индексу
             current = 0
             target_file_idx = 0
             target_obj_idx = 0
@@ -1398,30 +1382,26 @@ class YamlTuiViewer:
                     break
                 current += len(yaml_file)
 
-            # Загружаем объект, если не загружен
             key = (target_file_idx, target_obj_idx)
             if key not in self.loaded_objects:
                 self._load_object(target_file_idx, target_obj_idx, global_idx)
                 self._rebuild_flat_list()
 
-            # Ищем в списке по global_idx
             for i, (node, _, _) in enumerate(self.flat_list):
                 if node.global_idx == global_idx:
                     self.cursor_pos = i
-                    self.scroll_offset = max(0, i - 5)
+                    self._ensure_cursor_visible()
                     break
         except ValueError:
             self.status_message = "Некорректный номер"
 
     def _goto_first_object(self):
-        """Переход к первому объекту."""
         if self.flat_list:
             self.cursor_pos = 0
-            self.scroll_offset = 0
+            self._ensure_cursor_visible()
 
     def _goto_last_object(self):
-        """Переход к последнему объекту."""
-        # Загружаем все объекты
+        """ИСПРАВЛЕНИЕ: Загружаем все объекты и переходим к последнему."""
         global_idx = 0
         for file_idx, yaml_file in enumerate(self.yaml_files):
             for obj_idx in range(len(yaml_file)):
@@ -1431,17 +1411,15 @@ class YamlTuiViewer:
         self._rebuild_flat_list()
         if self.flat_list:
             self.cursor_pos = len(self.flat_list) - 1
-            self.scroll_offset = max(0, self.cursor_pos - 10)
+            self._ensure_cursor_visible()
 
     def _next_object(self):
-        """Переход к следующему объекту с сохранением пути."""
         if not self.flat_list:
             return
 
         node, _, _ = self.flat_list[self.cursor_pos]
         path = node.get_path()
 
-        # Находим текущий объект
         while node.parent != self.root and node.parent is not None:
             node = node.parent
 
@@ -1454,7 +1432,6 @@ class YamlTuiViewer:
             self.status_message = "Это последний объект"
             return
 
-        # Находим файл и объект по глобальному индексу
         current = 0
         next_file_idx = 0
         next_obj_idx = 0
@@ -1466,13 +1443,11 @@ class YamlTuiViewer:
                 break
             current += len(yaml_file)
 
-        # Загружаем следующий объект
         key = (next_file_idx, next_obj_idx)
         if key not in self.loaded_objects:
             self._load_object(next_file_idx, next_obj_idx, next_global_idx)
             self._rebuild_flat_list()
 
-        # Находим узел следующего объекта
         next_node = None
         for child in self.root.children:
             if child.global_idx == next_global_idx:
@@ -1480,28 +1455,24 @@ class YamlTuiViewer:
                 break
 
         if next_node:
-            # Пытаемся восстановить путь
             target = next_node.find_by_path(path[1:]) if len(path) > 1 else next_node
             if target is None:
                 target = next_node
 
-            # Находим в списке
             self._rebuild_flat_list()
             for i, (n, _, _) in enumerate(self.flat_list):
                 if n == target:
                     self.cursor_pos = i
-                    self.scroll_offset = max(0, i - 5)
+                    self._ensure_cursor_visible()
                     break
 
     def _prev_object(self):
-        """Переход к предыдущему объекту с сохранением пути."""
         if not self.flat_list:
             return
 
         node, _, _ = self.flat_list[self.cursor_pos]
         path = node.get_path()
 
-        # Находим текущий объект
         while node.parent != self.root and node.parent is not None:
             node = node.parent
 
@@ -1511,7 +1482,6 @@ class YamlTuiViewer:
 
         prev_global_idx = node.global_idx - 1
 
-        # Находим файл и объект по глобальному индексу
         current = 0
         prev_file_idx = 0
         prev_obj_idx = 0
@@ -1523,13 +1493,11 @@ class YamlTuiViewer:
                 break
             current += len(yaml_file)
 
-        # Загружаем предыдущий объект
         key = (prev_file_idx, prev_obj_idx)
         if key not in self.loaded_objects:
             self._load_object(prev_file_idx, prev_obj_idx, prev_global_idx)
             self._rebuild_flat_list()
 
-        # Находим узел предыдущего объекта
         prev_node = None
         for child in self.root.children:
             if child.global_idx == prev_global_idx:
@@ -1537,21 +1505,18 @@ class YamlTuiViewer:
                 break
 
         if prev_node:
-            # Пытаемся восстановить путь
             target = prev_node.find_by_path(path[1:]) if len(path) > 1 else prev_node
             if target is None:
                 target = prev_node
 
-            # Находим в списке
             self._rebuild_flat_list()
             for i, (n, _, _) in enumerate(self.flat_list):
                 if n == target:
                     self.cursor_pos = i
-                    self.scroll_offset = max(0, i - 5)
+                    self._ensure_cursor_visible()
                     break
 
     def _search_current_field(self):
-        """Поиск по текущему полю во всех объектах."""
         if not self.flat_list:
             return
 
@@ -1572,7 +1537,6 @@ class YamlTuiViewer:
 
         self.search_results.clear()
 
-        # Загружаем все объекты для поиска
         global_idx = 0
         for file_idx, yaml_file in enumerate(self.yaml_files):
             for obj_idx in range(len(yaml_file)):
@@ -1581,7 +1545,6 @@ class YamlTuiViewer:
 
         self._rebuild_flat_list()
 
-        # Ищем по всем объектам
         for obj_node in self.root.children:
             self._search_in_node(obj_node, field_name, pattern, pattern_str)
 
@@ -1594,7 +1557,6 @@ class YamlTuiViewer:
 
     def _search_in_node(self, node: YamlNode, field_name: str, 
                        pattern: Optional[re.Pattern], pattern_str: str):
-        """Рекурсивный поиск в узле."""
         if node.is_leaf and node.key == field_name:
             value_str = str(node.value) if node.value is not None else ""
             if safe_regex_search(pattern, value_str, pattern_str):
@@ -1607,7 +1569,6 @@ class YamlTuiViewer:
                 self._search_in_node(child, field_name, pattern, pattern_str)
 
     def _global_search(self):
-        """Глобальный поиск по всем полям."""
         pattern_str = self._input_string("Глобальный поиск (regex): ")
         if not pattern_str:
             return
@@ -1619,7 +1580,6 @@ class YamlTuiViewer:
         self.search_results.clear()
         matching_fields = set()
 
-        # Загружаем все объекты
         global_idx = 0
         for file_idx, yaml_file in enumerate(self.yaml_files):
             for obj_idx in range(len(yaml_file)):
@@ -1628,7 +1588,6 @@ class YamlTuiViewer:
 
         self._rebuild_flat_list()
 
-        # Ищем везде
         for obj_node in self.root.children:
             self._global_search_in_node(obj_node, pattern, pattern_str, matching_fields)
 
@@ -1643,8 +1602,7 @@ class YamlTuiViewer:
 
     def _global_search_in_node(self, node: YamlNode, pattern: Optional[re.Pattern],
                               pattern_str: str, matching_fields: Set[str]):
-        """Рекурсивный глобальный поиск."""
-        if node.is_leaf and node.key:  # Пропускаем элементы списков без ключа
+        if node.is_leaf and node.key:
             value_str = str(node.value) if node.value is not None else ""
             if safe_regex_search(pattern, value_str, pattern_str):
                 self.search_results.append(node)
@@ -1656,32 +1614,12 @@ class YamlTuiViewer:
             for child in node.children:
                 self._global_search_in_node(child, pattern, pattern_str, matching_fields)
 
-    def _next_search_result(self):
-        """Переход к следующему результату поиска."""
-        if not self.search_results:
-            self.status_message = "Нет результатов поиска"
-            return
-
-        self.search_result_idx = (self.search_result_idx + 1) % len(self.search_results)
-        self._goto_search_result(self.search_result_idx)
-
-    def _prev_search_result(self):
-        """Переход к предыдущему результату поиска."""
-        if not self.search_results:
-            self.status_message = "Нет результатов поиска"
-            return
-
-        self.search_result_idx = (self.search_result_idx - 1) % len(self.search_results)
-        self._goto_search_result(self.search_result_idx)
-
     def _goto_search_result(self, idx: int):
-        """Переход к результату поиска по индексу."""
         if idx >= len(self.search_results):
             return
 
         target = self.search_results[idx]
 
-        # Разворачиваем путь к узлу
         node = target
         while node.parent and node.parent != self.root:
             if not node.parent.expanded:
@@ -1690,17 +1628,13 @@ class YamlTuiViewer:
 
         self._rebuild_flat_list()
 
-        # Находим в списке
         for i, (n, _, _) in enumerate(self.flat_list):
             if n == target:
                 self.cursor_pos = i
-                height = self.stdscr.getmaxyx()[0] - 4
-                self.scroll_offset = max(0, min(i - height // 2, len(self.flat_list) - height))
+                self._ensure_cursor_visible()
                 break
 
     def _filter_dialog(self):
-        """Диалог выбора полей для фильтрации."""
-        # Собираем уникальные поля из всех объектов
         fields = set()
         for child in self.root.children:
             self._collect_leaf_fields(child, fields)
@@ -1718,14 +1652,12 @@ class YamlTuiViewer:
             self.stdscr.clear()
             height, width = self.stdscr.getmaxyx()
 
-            # Заголовок
             header = "Выбор полей (пробел:вкл/выкл, Enter:применить, Esc:отмена)"
             try:
                 self.stdscr.addnstr(0, 0, header[:width - 1], width - 1, curses.color_pair(2) | curses.A_BOLD)
             except:
                 pass
 
-            # Список полей
             view_height = height - 2
             for i in range(view_height):
                 idx = i
@@ -1746,9 +1678,9 @@ class YamlTuiViewer:
 
             key = self.stdscr.getch()
 
-            if key in (ord('q'), ord('Q'), 27):  # Отмена
+            if key in (ord('q'), ord('Q'), 27):
                 break
-            elif key in (curses.KEY_ENTER, 10, 13):  # Применить
+            elif key in (curses.KEY_ENTER, 10, 13):
                 self.filter_fields = selected if selected != set(fields_list) else None
                 self._rebuild_flat_list()
                 self.status_message = f"Фильтр: {len(selected)} полей" if selected else "Фильтр снят"
@@ -1757,7 +1689,7 @@ class YamlTuiViewer:
                 cursor = max(0, cursor - 1)
             elif key in (curses.KEY_DOWN, ord('j')):
                 cursor = min(len(fields_list) - 1, cursor + 1)
-            elif key == ord(' '):  # Переключить
+            elif key == ord(' '):
                 field = fields_list[cursor]
                 if field in selected:
                     selected.remove(field)
@@ -1765,9 +1697,7 @@ class YamlTuiViewer:
                     selected.add(field)
 
     def _collect_leaf_fields(self, node: YamlNode, fields: Set[str]):
-        """Рекурсивно собирает имена листовых полей."""
         if node.is_leaf:
-            # Не добавляем индексы документов и пустые ключи (элементы списков)
             if node.record_idx is None and node.key:
                 fields.add(node.key)
         else:
@@ -1777,10 +1707,8 @@ class YamlTuiViewer:
                 self._collect_leaf_fields(child, fields)
 
     def _input_string(self, prompt: str) -> str:
-        """Диалог ввода строки."""
         height, width = self.stdscr.getmaxyx()
 
-        # Создаем окно для ввода
         win_height = 3
         win_width = min(60, width - 4)
         win_y = (height - win_height) // 2
@@ -1791,21 +1719,32 @@ class YamlTuiViewer:
         win.addnstr(1, 1, prompt[:win_width - 2], win_width - 2)
         win.refresh()
 
-        # Включаем курсор
         curses.curs_set(1)
         curses.echo()
 
-        # Читаем строку
         input_str = ""
         try:
             input_bytes = win.getstr(1, len(prompt) + 1, win_width - len(prompt) - 3)
             input_str = input_bytes.decode('utf-8', errors='replace')
-        except:
+
+        except KeyboardInterrupt:
             pass
 
-        # Выключаем курсор
-        curses.noecho()
-        curses.curs_set(0)
+        except curses.error as e:
+            log_error("Curses input error", e)
+            self.status_message = "Ошибка ввода. Попробуйте изменить размер окна."
+
+        except UnicodeDecodeError as e:
+            log_error("Unicode decode error in input", e)
+            self.status_message = "Ошибка кодировки. Используйте UTF-8."
+
+        except Exception as e:
+            log_error("Unexpected input error", e)
+            self.status_message = f"Ошибка: {type(e).__name__}. Лог: {LOG_FILE}"
+
+        finally:
+            curses.noecho()
+            curses.curs_set(0)
 
         return input_str.strip()
 
@@ -1814,15 +1753,12 @@ class YamlTuiViewer:
 # Главная функция
 # =============================================================================
 def main(stdscr, filepaths: List[Path]):
-    """Главная функция приложения."""
     try:
-        # Загружаем файлы
         yaml_files = []
         for path in filepaths:
             yaml_file = YamlFile(path)
             yaml_files.append(yaml_file)
 
-        # Запускаем TUI
         viewer = YamlTuiViewer(stdscr, yaml_files)
         viewer.run()
 
@@ -1858,13 +1794,11 @@ if __name__ == "__main__":
         sys.exit(1)
 
     try:
-        # Валидация путей
         filepaths = []
         for arg in sys.argv[1:]:
             path = validate_file_path(arg)
             filepaths.append(path)
 
-        # Запуск curses приложения
         curses.wrapper(main, filepaths)
 
     except SecurityError as e:

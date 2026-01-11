@@ -1,0 +1,36 @@
+[2026-01-03 12:37:31] WARNING: YAML parse
+  Синтаксическая ошибка YAML в строке 3: элемент списка должен быть '- item', а не '-item' (отсутствует пробел после дефиса)
+
+
+================================================================================
+[2026-01-03 12:37:31] YAML parse error in C:\repos\ai\yaml-viewer\a1.yaml document 0
+Exception: YamlParseError: Синтаксическая ошибка YAML в строке 3: элемент списка должен быть '- item', а не '-item' (отсутствует пробел после дефиса)
+================================================================================
+Traceback (most recent call last):
+  File "yaml_tui_viewer_secure.py", line 904, in __getitem__
+    obj = simple_yaml_load(content)
+  File "yaml_tui_viewer_secure.py", line 242, in simple_yaml_load
+    result, _ = _parse_yaml_lines(lines, 0)
+  File "yaml_tui_viewer_secure.py", line 542, in _parse_yaml_lines
+    raise YamlParseError(error_msg)
+YamlParseError: Синтаксическая ошибка YAML в строке 3: элемент списка должен быть '- item', а не '-item' (отсутствует пробел после дефиса)
+================================================================================
+
+[2026-01-03 12:38:29] WARNING: YAML parse
+  Синтаксическая ошибка YAML в строке 3: элемент списка должен быть '- item', а не '-item' (отсутствует пробел после дефиса)
+
+
+================================================================================
+[2026-01-03 12:38:29] YAML parse error in C:\repos\ai\yaml-viewer\a1.yaml document 0
+Exception: YamlParseError: Синтаксическая ошибка YAML в строке 3: элемент списка должен быть '- item', а не '-item' (отсутствует пробел после дефиса)
+================================================================================
+Traceback (most recent call last):
+  File "yaml_tui_viewer_secure.py", line 904, in __getitem__
+    obj = simple_yaml_load(content)
+  File "yaml_tui_viewer_secure.py", line 242, in simple_yaml_load
+    result, _ = _parse_yaml_lines(lines, 0)
+  File "yaml_tui_viewer_secure.py", line 542, in _parse_yaml_lines
+    raise YamlParseError(error_msg)
+YamlParseError: Синтаксическая ошибка YAML в строке 3: элемент списка должен быть '- item', а не '-item' (отсутствует пробел после дефиса)
+================================================================================
+

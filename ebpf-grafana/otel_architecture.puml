@@ -1,0 +1,69 @@
+@startuml
+!define RECTANGLE class
+
+skinparam backgroundColor #FEFEFE
+skinparam component {
+  BackgroundColor<<eBPF>> LightBlue
+  BackgroundColor<<SDK>> LightGreen
+  BackgroundColor<<App>> LightYellow
+  BorderColor Black
+}
+
+package "Kubernetes Cluster" {
+
+  component "eBPF Agent\n(Beyla/OBI)\nDaemonSet" <<eBPF>> as ebpf {
+    [Network Level\nObservation]
+    [Kernel Hooks]
+  }
+
+  node "Application Pod" {
+    component "Application" <<App>> as app
+    component "OpenTelemetry\nSDK Agent" <<SDK>> as sdk
+  }
+
+}
+
+component "OTLP Endpoint" as otlp
+
+database "Grafana Cloud" as grafana {
+  [Tempo (Traces)]
+  [Mimir (Metrics)]
+  [Loki (Logs)]
+}
+
+' Connections from eBPF
+ebpf --> otlp : "Baseline Metrics:\n- Request Rate\n- Error Rate\n- Latency\n- Service Graphs\n- Network Metrics\n- Process Metrics"
+
+' Connections from SDK
+sdk --> otlp : "Deep Insights:\n- Detailed Traces\n- Runtime Metrics\n- Log Context\n- Custom Metrics\n+ span.metrics.skip=true"
+
+' Application connections
+app <--> sdk : "Instrumented"
+ebpf ..> app : "Observes\nnetwork calls"
+
+' OTLP to Grafana
+otlp --> grafana
+
+note right of ebpf
+  **eBPF видит:**
+  • Что видит клиент
+  • Queue time
+  • Все языки/runtime
+  • Без изменений в приложении
+end note
+
+note left of sdk
+  **SDK видит:**
+  • Внутренние слои
+  • Exceptions + stack traces
+  • Runtime состояние (heap, GC)
+  • Бизнес-логику
+end note
+
+note bottom of otlp
+  eBPF автоматически отключает
+  дублирующие метрики при
+  обнаружении SDK
+end note
+
+@enduml

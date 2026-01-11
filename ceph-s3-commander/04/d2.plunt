@@ -1,0 +1,276 @@
+﻿Вы правы, в диаграмме объектов есть синтаксические ошибки. Вот исправленная версия:
+
+```plantuml
+@startuml object_diagram
+' Диаграмма объектов - Пример состояния приложения
+
+title S3 Commander - Диаграмма объектов\n(Типичное состояние приложения)
+
+' === Основные объекты ===
+
+object "app : DualPaneApp" as app {
+  s3_config = <s3_config>
+  left_panel = <left_panel>
+  right_panel = <right_panel>
+  loop = <urwid_loop>
+  overwrite_all = false
+  version_all = false
+  skip_all = false
+}
+
+object "s3_config : S3Config" as s3_config {
+  config_file = "s3_config.json"
+  endpoints = [<local_ceph>, <prod_ceph>]
+}
+
+object "left_panel : PanelWidget" as left_panel {
+  title = "Left Panel"
+  panel_type = "fs"
+  current_endpoint = null
+  current_bucket = null
+  current_prefix = ""
+  mode = "fs"
+  sort_mode = "name"
+  fs_browser = <fs_browser_left>
+  s3_manager = null
+}
+
+object "right_panel : PanelWidget" as right_panel {
+  title = "Right Panel"
+  panel_type = "s3"
+  current_endpoint = "Local Ceph"
+  current_bucket = "backup-bucket"
+  current_prefix = "logs/"
+  mode = "s3"
+  sort_mode = "time"
+  fs_browser = null
+  s3_manager = <s3_manager_right>
+}
+
+object "fs_browser_left : FileSystemBrowser" as fs_browser_left {
+  current_path = "/home/user/documents"
+}
+
+object "s3_manager_right : S3Manager" as s3_manager_right {
+  endpoint_name = "Local Ceph"
+  endpoint_url = "http://localhost:7480"
+  access_key = "***"
+  secret_key = "***"
+  is_connected = true
+  connection_error = null
+  s3_client = <boto3_client>
+}
+
+' === Endpoint объекты ===
+object "local_ceph : EndpointConfig" as local_ceph {
+  name = "Local Ceph"
+  url = "http://localhost:7480"
+  access_key = "s3access"
+  secret_key = "s3secret"
+}
+
+object "prod_ceph : EndpointConfig" as prod_ceph {
+  name = "Production Ceph"
+  url = "http://ceph-prod:7480"
+  access_key = "prod_access"
+  secret_key = "prod_secret"
+}
+
+' === UI Widget объекты ===
+object "listbox_left : urwid.ListBox" as listbox_left {
+  walker = <walker_left>
+  focus_position = 2
+}
+
+object "walker_left : urwid.SimpleFocusListWalker" as walker_left {
+  items = [<item1>, <item2>, <item3>, <item4>]
+  focus = 2
+}
+
+' === Item объекты (примеры) ===
+object "item1 : SelectableText" as item1 {
+  text = "  /.."
+  data.type = "fs_dir"
+  data.name = ".."
+  data.can_select = false
+  selected = false
+}
+
+object "item2 : SelectableText" as item2 {
+  text = "  /projects"
+  data.type = "fs_dir"
+  data.name = "projects"
+  data.size = 0
+  data.can_select = true
+  selected = false
+}
+
+object "item3 : SelectableText" as item3 {
+  text = "* report.pdf                1.2 MB 2024-01-15 10:30:00"
+  data.type = "fs_file"
+  data.name = "report.pdf"
+  data.size = 1258291
+  data.mtime = "2024-01-15 10:30:00"
+  data.can_select = true
+  selected = true
+}
+
+object "item4 : SelectableText" as item4 {
+  text = "  data.csv                 15.7 KB 2024-01-14 14:20:00"
+  data.type = "fs_file"
+  data.name = "data.csv"
+  data.size = 16000
+  data.mtime = "2024-01-14 14:20:00"
+  data.can_select = true
+  selected = false
+}
+
+' === Диалог объект (пример) ===
+object "progress_dialog : ProgressDialog" as progress_dialog {
+  title = "Copying files..."
+  total_files = 5
+  processed_files = 2
+  success_count = 2
+  fail_count = 0
+  current_file = "image.jpg"
+  total_bytes = 52428800
+  processed_bytes = 20971520
+  cancelled = false
+}
+
+' === Внешние зависимости ===
+object "boto3_client : boto3.client" as boto3_client {
+  service_name = "s3"
+  endpoint_url = "http://localhost:7480"
+  config = <botocore_config>
+}
+
+object "botocore_config : botocore.config.Config" as botocore_config {
+  connect_timeout = 3
+  read_timeout = 10
+  retries.max_attempts = 1
+}
+
+object "urwid_loop : urwid.MainLoop" as urwid_loop {
+  widget = <app_frame>
+  palette = <palette>
+  unhandled_input = "app.handle_input"
+}
+
+object "app_frame : urwid.Frame" as app_frame {
+  body = <columns>
+  footer = <status_pile>
+}
+
+object "columns : urwid.Columns" as columns {
+  widget_list = [<left_panel>, <right_panel>]
+  focus_position = 0
+  dividechars = 1
+}
+
+object "status_pile : urwid.Pile" as status_pile {
+  widget_list = [<result_text>, <hotkey_text>]
+}
+
+object "result_text : urwid.Text" as result_text {
+  text = "Files copied: 2 | Total: 20.0 MB | Speed: 5.2 MB/s"
+  align = "left"
+}
+
+object "hotkey_text : urwid.Text" as hotkey_text {
+  text = "F3:view | F5:copy | F6:move | F7:mkdir | F8:del | F9:del_old_ver | F10:sort | F11:versioning | INS:sel | +:select | -:unsel | *:invert | TAB | q:quit"
+  align = "left"
+}
+
+object "palette : list" as palette {
+  items = [
+    "('header', 'black', 'light cyan', 'bold')",
+    "('path', 'white', 'dark cyan')",
+    "('body', 'white', 'dark blue')"
+  ]
+}
+
+' === Связи между объектами ===
+
+' Основные связи приложения
+app --> s3_config
+app --> left_panel
+app --> right_panel
+app --> urwid_loop
+app --> progress_dialog
+
+' Конфигурационные связи
+s3_config --> local_ceph
+s3_config --> prod_ceph
+
+' Панельные связи
+left_panel --> fs_browser_left
+left_panel ..> app : ссылается
+right_panel --> s3_manager_right
+right_panel ..> app : ссылается
+
+' S3 связи
+s3_manager_right --> boto3_client
+s3_manager_right ..> local_ceph : настроен из
+boto3_client --> botocore_config
+
+' UI связи
+left_panel --> listbox_left
+listbox_left --> walker_left
+walker_left --> item1
+walker_left --> item2
+walker_left --> item3
+walker_left --> item4
+
+' Urwid связи
+urwid_loop --> app_frame
+app_frame --> columns
+app_frame --> status_pile
+columns --> left_panel
+columns --> right_panel
+status_pile --> result_text
+status_pile --> hotkey_text
+urwid_loop --> palette
+
+' === Примечания ===
+note top of app
+  Текущее состояние:
+  - Левая панель: Локальная ФС
+  - Правая панель: S3 бакет
+  - В процессе: копирование 2 из 5 файлов
+  - Фокус: на левой панели
+end note
+
+note right of item3
+  Выделенный файл
+  (selected=true)
+  Будет скопирован
+  при нажатии F5
+end note
+
+note bottom of progress_dialog
+  Прогресс операции:
+  - 2/5 файлов скопировано
+  - 20MB/50MB передано
+  - Скорость: 5.2 MB/s
+end note
+
+@enduml
+```
+
+Основные исправления:
+
+1. **Убрал фигурные скобки `{}` для словарей в объектах** - в PlantUML нужно использовать прямые присваивания
+2. **Исправил структуру nested объектов** - вместо `{type: "fs_dir"}` теперь `data.type = "fs_dir"`
+3. **Исправил ссылки на другие объекты** - PlantUML автоматически создает связи по именам объектов в угловых скобках `<>`
+4. **Упростил строковые значения** - убрал лишнее форматирование
+
+Теперь диаграмма должна правильно рендериться на серверах PlantUML. Ключевые моменты синтаксиса PlantUML для объектов:
+
+1. Используйте `object "имя : Класс" as ссылка` для создания объектов
+2. Атрибуты задаются как `ключ = значение`
+3. Ссылки на другие объекты: `<ссылка_на_объект>`
+4. Связи создаются стрелками `-->`
+5. Для сложных структур вложенных объектов используйте `parent.child = value`
+
+Проверьте эту исправленную версию - она должна корректно отображаться.

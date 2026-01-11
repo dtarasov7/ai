@@ -1,0 +1,816 @@
+﻿Вот полная диаграмма классов и объектов в формате PlantUML:
+
+## 🏗️ Class Diagram - Диаграмма классов
+
+```plantuml
+@startuml class_diagram
+' Диаграмма классов S3 Commander
+
+' === Настройки ===
+skinparam {
+    BackgroundColor #F9F9F9
+    ArrowColor #2C3E50
+    BorderColor #2C3E50
+    ClassBackgroundColor #FFFFFF
+    ClassBorderColor #2C3E50
+    ClassFontColor #2C3E50
+    ClassFontSize 13
+    ClassFontName Arial
+    NoteBackgroundColor #FFF8DC
+    NoteBorderColor #DAA520
+    PackageBackgroundColor #ECF0F1
+    PackageBorderColor #95A5A6
+    PackageFontColor #2C3E50
+    TitleFontSize 16
+    TitleFontColor #2C3E50
+}
+
+' Титл
+title S3 Commander - Диаграмма классов\n\n
+
+hide circle
+hide empty fields
+hide empty methods
+
+' === Пакет: Core Application ===
+package "Core Application" {
+    class DualPaneApp {
+        - s3_config: S3Config
+        - left_panel: PanelWidget
+        - right_panel: PanelWidget
+        - loop: urwid.MainLoop
+        - overwrite_all: bool
+        - version_all: bool
+        - skip_all: bool
+        
+        + __init__(s3_config)
+        + run()
+        + handle_input(key)
+        + show_dialog(dialog)
+        + close_dialog()
+        + show_result(message)
+        + get_active_panel()
+        + get_inactive_panel()
+        + copy_items()
+        + move_items()
+        + create_directory()
+        + delete_items()
+        + delete_old_versions()
+        + toggle_versioning()
+        + select_by_pattern()
+        + unselect_by_pattern()
+        + wake_up()
+    }
+    
+    class PanelWidget {
+        # title: str
+        # panel_type: str
+        # s3_config: S3Config
+        # s3_manager: S3Manager
+        # fs_browser: FileSystemBrowser
+        # app: DualPaneApp
+        # current_endpoint: str
+        # current_bucket: str
+        # current_prefix: str
+        # mode: str
+        # sort_mode: str
+        # walker: urwid.SimpleFocusListWalker
+        # listbox: urwid.ListBox
+        
+        + __init__(title, panel_type, s3_config, app)
+        + refresh(focus_on=None)
+        + update_header(info)
+        + get_selected_items()
+        + get_focused_item()
+        + view_item()
+        + show_sort_dialog()
+        + select_by_pattern(pattern, select)
+        + invert_selection()
+        + on_item_activated(data)
+        + show_version_select_dialog(file_data)
+        + view_s3_file_version(file_data, version_data, close_callback)
+        + get_current_path()
+        + update_item_display(text_widget)
+        - _refresh_root_menu()
+        - _refresh_endpoints()
+        - _refresh_s3()
+        - _refresh_fs()
+        - _view_file(file_path, title, close_callback)
+        - _calculate_size(item)
+        - format_size(size): str
+    }
+    
+    class SelectableText {
+        - data: dict
+        - panel: PanelWidget
+        - selected: bool
+        
+        + __init__(text, data, panel)
+        + selectable(): bool
+        + keypress(size, key)
+    }
+    
+    class S3Config {
+        - config_file: str
+        - endpoints: list
+        
+        + __init__(config_file='s3_config.json')
+        + load_config()
+        + save_config()
+        + get_endpoints()
+        + get_endpoint(name)
+        - create_default_config()
+    }
+    
+    class S3Manager {
+        - endpoint_name: str
+        - endpoint_url: str
+        - access_key: str
+        - secret_key: str
+        - is_connected: bool
+        - connection_error: str
+        - s3_client: boto3.client
+        
+        + __init__(endpoint_config)
+        + list_buckets()
+        + create_bucket(bucket_name): bool
+        + delete_bucket(bucket_name): bool
+        + list_objects(bucket_name, prefix=''): (folders, files)
+        + list_all_objects(bucket_name, prefix=''): list
+        + object_exists(bucket_name, key): dict or None
+        + list_object_versions(bucket_name, key): list
+        + download_object(bucket_name, key, local_path, version_id=None): bool
+        + upload_file(local_path, bucket_name, key): bool
+        + copy_object(source_bucket, source_key, dest_bucket, dest_key, version_id=None): bool
+        + delete_object(bucket_name, key, version_id=None): bool
+        + delete_old_versions(bucket_name, key): int
+        + enable_versioning(bucket_name): bool
+        + disable_versioning(bucket_name): bool
+        + get_versioning_status(bucket_name): str
+    }
+    
+    class FileSystemBrowser {
+        - current_path: str
+        
+        + __init__()
+        + list_directory(): list
+        + list_all_files(path): list
+        + file_exists(file_path): dict or None
+        + create_directory(dir_name): bool
+    }
+}
+
+' === Пакет: UI Dialogs ===
+package "UI Dialogs" {
+    abstract class BaseDialog {
+        # callback: function
+        + keypress(size, key)
+    }
+    
+    class InputDialog {
+        - edit: urwid.Edit
+        
+        + __init__(title, prompt, callback, default_text='')
+        + on_ok(button)
+        + on_cancel(button)
+    }
+    
+    class ConfirmDialog {
+        + __init__(title, message, items_info, callback)
+        + on_yes(button)
+        + on_no(button)
+    }
+    
+    class CopyMoveDialog {
+        - dest_edit: urwid.Edit
+        
+        + __init__(title, source_desc, dest_path, callback)
+        + on_ok(button)
+        + on_cancel(button)
+    }
+    
+    class ProgressDialog {
+        - title_text: urwid.Text
+        - progress_text: urwid.Text
+        - file_text: urwid.Text
+        - stats_text: urwid.Text
+        - bytes_text: urwid.Text
+        - total_files: int
+        - processed_files: int
+        - success_count: int
+        - fail_count: int
+        - current_file: str
+        - total_bytes: int
+        - processed_bytes: int
+        - start_time: float
+        - cancelled: bool
+        
+        + __init__(title, callback=None)
+        + update(current_file='', file_size=0)
+        + set_total(total_files, total_bytes=0)
+        + add_success()
+        + add_failure()
+        + get_speed_str(): str
+        + on_cancel(button)
+    }
+    
+    class OverwriteDialog {
+        + __init__(filename, source_info, dest_info, callback, show_version_options=False)
+        + on_choice(choice)
+    }
+    
+    class SortDialog {
+        - current_mode: str
+        - radio_group: list
+        
+        + __init__(current_mode, callback)
+        + on_ok(button)
+        + on_cancel(button)
+    }
+    
+    class VersionSelectDialog {
+        - file_data: dict
+        - versions: list
+        - selected_version: str
+        - radio_group: list
+        
+        + __init__(file_data, versions, callback)
+        + get_selected_version()
+        + on_view(button)
+        + on_delete(button)
+        + on_cancel(button)
+    }
+    
+    class FileViewerDialog {
+        + __init__(title, content, callback)
+        + on_close(button)
+    }
+}
+
+' === Пакет: Utils ===
+package "Utilities" {
+    class UtilityFunctions {
+        + check_s3_endpoint_connectivity(endpoint_url, timeout=2): (bool, str)
+        + is_binary_file(file_path): bool
+        + format_size(size): str
+        + get_focus_button(w): urwid.Button or None
+    }
+    
+    note right of UtilityFunctions
+        Статические функции
+        общего назначения
+    end note
+}
+
+' === Связи между классами ===
+
+' Core Application связи
+DualPaneApp "1" *-- "2" PanelWidget : содержит
+PanelWidget "1" *-- "1" SelectableText : содержит
+PanelWidget "1" *-- "0..1" S3Manager : использует
+PanelWidget "1" *-- "0..1" FileSystemBrowser : использует
+PanelWidget "1" --> "1" DualPaneApp : ссылается на
+DualPaneApp "1" *-- "1" S3Config : использует
+S3Manager "1" --> "*" S3Config.endpoints : конфигурация из
+
+' Наследование диалогов
+BaseDialog <|-- InputDialog
+BaseDialog <|-- ConfirmDialog
+BaseDialog <|-- CopyMoveDialog
+BaseDialog <|-- ProgressDialog
+BaseDialog <|-- OverwriteDialog
+BaseDialog <|-- SortDialog
+BaseDialog <|-- VersionSelectDialog
+BaseDialog <|-- FileViewerDialog
+
+' Агрегация диалогов
+DualPaneApp "1" --> "*" BaseDialog : показывает
+
+' Утилиты
+PanelWidget ..> UtilityFunctions : использует
+DualPaneApp ..> UtilityFunctions : использует
+S3Manager ..> UtilityFunctions : использует
+
+' Зависимости внешних библиотек
+note top of S3Manager
+    Зависит от:
+    - boto3
+    - botocore
+end note
+
+note top of PanelWidget
+    Зависит от:
+    - urwid
+    - threading
+end note
+
+' === Интерфейсы (если бы были) ===
+interface "IStorageProvider" as IStorage {
+    + list_items(path): list
+    + get_item_info(path): dict
+    + copy(source, destination): bool
+    + move(source, destination): bool
+    + delete(path): bool
+}
+
+S3Manager .up.|> IStorage
+FileSystemBrowser .up.|> IStorage
+
+' === Типы данных ===
+class "S3EndpointConfig" as EndpointConfig <<struct>> {
+    + name: str
+    + url: str
+    + access_key: str
+    + secret_key: str
+}
+
+class "FileItem" as FileItem <<struct>> {
+    + name: str
+    + type: str
+    + size: int
+    + mtime: datetime
+    + key: str (optional)
+    + can_select: bool
+}
+
+S3Config "1" *-- "*" EndpointConfig : содержит
+PanelWidget "1" *-- "*" FileItem : отображает
+
+' === Enumerations ===
+enum PanelType {
+    FS
+    S3
+    ROOT_MENU
+}
+
+enum ItemType {
+    ROOT_FS
+    ROOT_ENDPOINT
+    ENDPOINT
+    BUCKET
+    S3_DIR
+    S3_FILE
+    FS_DIR
+    FS_FILE
+    ERROR
+}
+
+enum SortMode {
+    NAME
+    EXT
+    SIZE
+    TIME
+}
+
+PanelWidget --> PanelType : panel_type
+SelectableText --> ItemType : data.type
+PanelWidget --> SortMode : sort_mode
+
+@enduml
+```
+
+## 🎯 Object Diagram - Диаграмма объектов
+
+```plantuml
+@startuml object_diagram
+' Диаграмма объектов - Пример состояния приложения
+
+' === Настройки ===
+skinparam {
+    BackgroundColor #F9F9F9
+    ArrowColor #2C3E50
+    BorderColor #2C3E50
+    ObjectBackgroundColor #FFFFFF
+    ObjectBorderColor #2C3E50
+    ObjectFontColor #2C3E50
+    ObjectFontSize 12
+    NoteBackgroundColor #FFF8DC
+    NoteBorderColor #DAA520
+    TitleFontSize 16
+    TitleFontColor #2C3E50
+}
+
+title S3 Commander - Диаграмма объектов\n(Типичное состояние приложения)
+
+' === Основные объекты ===
+
+object "app : DualPaneApp" as app {
+    s3_config = <s3_config>
+    left_panel = <left_panel>
+    right_panel = <right_panel>
+    loop = <urwid_loop>
+    overwrite_all = false
+    version_all = false
+    skip_all = false
+}
+
+object "s3_config : S3Config" as s3_config {
+    config_file = "s3_config.json"
+    endpoints = [<local_ceph>, <prod_ceph>]
+}
+
+object "left_panel : PanelWidget" as left_panel {
+    title = "Left Panel"
+    panel_type = "fs"
+    current_endpoint = null
+    current_bucket = null
+    current_prefix = ""
+    mode = "fs"
+    sort_mode = "name"
+    fs_browser = <fs_browser_left>
+    s3_manager = null
+}
+
+object "right_panel : PanelWidget" as right_panel {
+    title = "Right Panel"
+    panel_type = "s3"
+    current_endpoint = "Local Ceph"
+    current_bucket = "backup-bucket"
+    current_prefix = "logs/"
+    mode = "s3"
+    sort_mode = "time"
+    fs_browser = null
+    s3_manager = <s3_manager_right>
+}
+
+object "fs_browser_left : FileSystemBrowser" as fs_browser_left {
+    current_path = "/home/user/documents"
+}
+
+object "s3_manager_right : S3Manager" as s3_manager_right {
+    endpoint_name = "Local Ceph"
+    endpoint_url = "http://localhost:7480"
+    access_key = "***"
+    secret_key = "***"
+    is_connected = true
+    connection_error = null
+    s3_client = <boto3_client>
+}
+
+' === Endpoint объекты ===
+object "local_ceph : EndpointConfig" as local_ceph {
+    name = "Local Ceph"
+    url = "http://localhost:7480"
+    access_key = "s3access"
+    secret_key = "s3secret"
+}
+
+object "prod_ceph : EndpointConfig" as prod_ceph {
+    name = "Production Ceph"
+    url = "http://ceph-prod:7480"
+    access_key = "prod_access"
+    secret_key = "prod_secret"
+}
+
+' === UI Widget объекты ===
+object "listbox_left : urwid.ListBox" as listbox_left {
+    walker = <walker_left>
+    focus_position = 2
+}
+
+object "walker_left : urwid.SimpleFocusListWalker" as walker_left {
+    items = [<item1>, <item2>, <item3>, <item4>]
+    focus = 2
+}
+
+' === Item объекты (примеры) ===
+object "item1 : SelectableText" as item1 {
+    text = "  /.."
+    data = {type: "fs_dir", name: "..", can_select: false}
+    selected = false
+}
+
+object "item2 : SelectableText" as item2 {
+    text = "  /projects"
+    data = {type: "fs_dir", name: "projects", size: 0, can_select: true}
+    selected = false
+}
+
+object "item3 : SelectableText" as item3 {
+    text = "* report.pdf                1.2 MB 2024-01-15 10:30:00"
+    data = {type: "fs_file", name: "report.pdf", size: 1258291, mtime: "2024-01-15 10:30:00", can_select: true}
+    selected = true
+}
+
+object "item4 : SelectableText" as item4 {
+    text = "  data.csv                 15.7 KB 2024-01-14 14:20:00"
+    data = {type: "fs_file", name: "data.csv", size: 16000, mtime: "2024-01-14 14:20:00", can_select: true}
+    selected = false
+}
+
+' === Диалог объект (пример) ===
+object "progress_dialog : ProgressDialog" as progress_dialog {
+    title = "Copying files..."
+    total_files = 5
+    processed_files = 2
+    success_count = 2
+    fail_count = 0
+    current_file = "image.jpg"
+    total_bytes = 52428800
+    processed_bytes = 20971520
+    cancelled = false
+}
+
+' === Внешние зависимости ===
+object "boto3_client : boto3.client" as boto3_client {
+    service_name = "s3"
+    endpoint_url = "http://localhost:7480"
+    config = <botocore_config>
+}
+
+object "botocore_config : botocore.config.Config" as botocore_config {
+    connect_timeout = 3
+    read_timeout = 10
+    retries = {max_attempts: 1}
+}
+
+object "urwid_loop : urwid.MainLoop" as urwid_loop {
+    widget = <app_frame>
+    palette = <palette>
+    unhandled_input = app.handle_input
+}
+
+object "app_frame : urwid.Frame" as app_frame {
+    body = <columns>
+    footer = <status_pile>
+}
+
+object "columns : urwid.Columns" as columns {
+    widget_list = [left_panel, right_panel]
+    focus_position = 0
+    dividechars = 1
+}
+
+object "status_pile : urwid.Pile" as status_pile {
+    widget_list = [<result_text>, <hotkey_text>]
+}
+
+object "result_text : urwid.Text" as result_text {
+    text = "Files copied: 2 | Total: 20.0 MB | Speed: 5.2 MB/s"
+    align = "left"
+}
+
+object "hotkey_text : urwid.Text" as hotkey_text {
+    text = "F3:view | F5:copy | F6:move | F7:mkdir | F8:del | F9:del_old_ver | F10:sort | F11:versioning | INS:sel | +:select | -:unsel | *:invert | TAB | q:quit"
+    align = "left"
+}
+
+object "palette : list" as palette {
+    items = [
+        "('header', 'black', 'light cyan', 'bold')",
+        "('path', 'white', 'dark cyan')",
+        "('body', 'white', 'dark blue')",
+        "... 13 more color definitions"
+    ]
+}
+
+' === Связи между объектами ===
+
+' Основные связи приложения
+app --> s3_config : ссылается на
+app --> left_panel : содержит
+app --> right_panel : содержит
+app --> urwid_loop : управляет
+app --> progress_dialog : может показывать
+
+' Конфигурационные связи
+s3_config --> local_ceph : содержит
+s3_config --> prod_ceph : содержит
+
+' Панельные связи
+left_panel --> fs_browser_left : использует
+left_panel --> app : ссылается на
+right_panel --> s3_manager_right : использует
+right_panel --> app : ссылается на
+
+' S3 связи
+s3_manager_right --> boto3_client : содержит
+s3_manager_right --> local_ceph : настроен из
+boto3_client --> botocore_config : использует
+
+' UI связи
+left_panel --> listbox_left : содержит
+listbox_left --> walker_left : использует
+walker_left --> item1 : содержит
+walker_left --> item2 : содержит
+walker_left --> item3 : содержит
+walker_left --> item4 : содержит
+
+' Urwid связи
+urwid_loop --> app_frame : отображает
+app_frame --> columns : body
+app_frame --> status_pile : footer
+columns --> left_panel : widget_list[0]
+columns --> right_panel : widget_list[1]
+status_pile --> result_text : widget_list[0]
+status_pile --> hotkey_text : widget_list[1]
+urwid_loop --> palette : использует
+
+' === Группы объектов ===
+package "Configuration Objects" {
+    s3_config
+    local_ceph
+    prod_ceph
+}
+
+package "Panel State Objects" {
+    left_panel
+    right_panel
+    fs_browser_left
+    s3_manager_right
+}
+
+package "UI Widget Objects" {
+    listbox_left
+    walker_left
+    item1
+    item2
+    item3
+    item4
+}
+
+package "Dialog Objects" {
+    progress_dialog
+}
+
+package "External Dependencies" {
+    boto3_client
+    botocore_config
+    urwid_loop
+    app_frame
+    columns
+    status_pile
+    result_text
+    hotkey_text
+    palette
+}
+
+' === Примечания ===
+note top of app
+    Текущее состояние:
+    - Левая панель: Локальная ФС
+    - Правая панель: S3 бакет
+    - В процессе: копирование 2 из 5 файлов
+    - Фокус: на левой панели
+end note
+
+note right of item3
+    Выделенный файл
+    (selected=true)
+    Будет скопирован
+    при нажатии F5
+end note
+
+note bottom of progress_dialog
+    Прогресс операции:
+    - 2/5 файлов скопировано
+    - 20MB/50MB передано
+    - Скорость: 5.2 MB/s
+end note
+
+@enduml
+```
+
+## 📊 Дополнительная диаграмма: Состояния панели
+
+```plantuml
+@startuml panel_state_machine
+' Диаграмма состояний PanelWidget
+
+title PanelWidget - Диаграмма состояний
+
+state "Root Menu" as root_menu {
+    state "Выбор источника" as choose_source
+    state "Список endpoints" as endpoints_list
+}
+
+state "FS Mode" as fs_mode {
+    state "Навигация по ФС" as fs_navigation
+    state "Просмотр файла" as file_view
+    state "Выбор файлов" as file_selection
+}
+
+state "S3 Mode" as s3_mode {
+    state "Выбор endpoint" as endpoint_selection
+    state "Список бакетов" as bucket_list
+    state "Содержимое бакета" as bucket_view
+    state "Выбор версий" as version_selection
+    state "Просмотр S3 файла" as s3_file_view
+}
+
+[*] --> root_menu : Инициализация
+
+root_menu --> choose_source : __init__()
+choose_source --> endpoints_list : Выбрать "S3"
+choose_source --> fs_mode : Выбрать "FS"
+endpoints_list --> choose_source : "Back to root menu"
+
+endpoints_list --> s3_mode : Выбрать endpoint
+
+s3_mode --> endpoint_selection : Вход в S3 mode
+endpoint_selection --> bucket_list : Выбрать endpoint
+bucket_list --> endpoint_selection : "Back to endpoints"
+bucket_list --> bucket_view : Выбрать бакет
+bucket_view --> bucket_list : "Back to buckets"
+bucket_view --> s3_file_view : Выбрать файл
+bucket_view --> version_selection : F3 на версионном файле
+s3_file_view --> bucket_view : ESC/F3
+version_selection --> bucket_view : Cancel
+version_selection --> s3_file_view : View version
+
+fs_mode --> fs_navigation : Вход в FS mode
+fs_navigation --> file_view : F3/Enter на файле
+fs_navigation --> file_selection : Insert/+/*
+file_view --> fs_navigation : ESC/F3
+file_selection --> fs_navigation : Операция завершена
+
+fs_navigation --> root_menu : "Back to root menu"
+
+note right of root_menu
+    Исходное состояние
+    Выбор типа источника данных
+end note
+
+note right of fs_mode
+    Режим локальной
+    файловой системы
+end note
+
+note right of s3_mode
+    Режим работы с
+    S3/Ceph хранилищем
+end note
+
+@enduml
+```
+
+## 🔄 Диаграмма последовательностей операций
+
+```plantuml
+@startuml sequence_operations
+' Диаграмма последовательностей для операций копирования
+
+title Последовательность операций: Копирование файлов S3 → FS
+
+participant User
+participant "DualPaneApp" as App
+participant "Active Panel (S3)" as SrcPanel
+participant "S3Manager" as S3Mgr
+participant "ProgressDialog" as Progress
+participant "Inactive Panel (FS)" as DstPanel
+participant "FileSystem" as FS
+participant "Thread" as WorkerThread
+
+User -> App: Нажимает F5 (Копировать)
+activate App
+
+App -> SrcPanel: get_selected_items()
+SrcPanel --> App: [file1, file2, ...]
+
+App -> DstPanel: get_current_path()
+DstPanel --> App: "/home/user/destination"
+
+App -> App: _show_copy_dialog()
+App -> User: Показывает CopyMoveDialog
+User -> App: Подтверждает путь назначения
+App -> App: close_dialog()
+
+App -> App: _do_copy_with_progress()
+App -> Progress: new ProgressDialog()
+App -> User: Показывает прогресс
+activate Progress
+
+App -> WorkerThread: start()
+activate WorkerThread
+
+loop Для каждого файла
+    WorkerThread -> S3Mgr: download_object(bucket, key, local_path)
+    S3Mgr --> WorkerThread: true/false
+    WorkerThread -> Progress: update(filename, size)
+    Progress --> User: Обновляет прогресс
+    WorkerThread -> Progress: add_success() / add_failure()
+end
+
+WorkerThread -> App: Завершение потока
+deactivate WorkerThread
+
+App -> Progress: close_dialog()
+App -> User: Скрывает прогресс
+deactivate Progress
+
+App -> DstPanel: refresh()
+App -> SrcPanel: refresh()
+
+App -> User: show_result("Copied: X files")
+deactivate App
+
+@enduml
+```
+
+Эти диаграммы предоставляют полное представление о:
+1. **Классовой структуре** - как организованы компоненты
+2. **Объектной модели** - как взаимодействуют экземпляры
+3. **Состояниях системы** - как меняется поведение
+4. **Последовательностях операций** - как выполняются действия
+
+Это позволяет новым разработчикам быстро понять архитектуру и начать работу с кодом.

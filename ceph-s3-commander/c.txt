@@ -1,0 +1,1008 @@
+﻿
+Для целей PoC надо развернуть ceph v17 с поддержкой s3. Без отказоустойчивости.
+Для этих целей есть виртуальная машина ubuntu с Docker
+Свободных разделов на ней нет, поэтому OSD должен использовать файлы на имеющейся файловой системе
+Подготовь необходимые файлы
+2 шага выполнено
+Для развертывания Ceph v17 с поддержкой S3 в Docker на Ubuntu подготовлены необходимые файлы. Решение использует один контейнер с минимальной конфигурацией для PoC.​
+
+Структура файлов
+Создайте следующую структуру директорий и файлов:
+
+1. Dockerfile
+text
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Установка Ceph Quincy (v17)
+RUN apt-get update && \
+    apt-get install -y wget gnupg2 ca-certificates && \
+    wget -q -O- 'https://download.ceph.com/keys/release.asc' | apt-key add - && \
+    echo "deb https://download.ceph.com/debian-quincy/ jammy main" > /etc/apt/sources.list.d/ceph.list && \
+    apt-get update && \
+    apt-get install -y ceph ceph-common radosgw && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+EXPOSE 7480 8080
+
+ENTRYPOINT ["/entrypoint.sh"]
+2. entrypoint.sh
+bash
+#!/bin/bash
+set -e
+
+CLUSTER_NAME="ceph"
+MON_NAME="mon0"
+MGR_NAME="mgr0"
+OSD_NAME="osd.0"
+RGW_NAME="rgw.${CLUSTER_NAME}"
+FSID=$(uuidgen)
+MON_IP=${MON_IP:-127.0.0.1}
+
+# Создание директорий
+mkdir -p /etc/ceph /var/lib/ceph/{mon,mgr,osd,radosgw,bootstrap-osd}
+mkdir -p /var/lib/ceph/osd/ceph-0
+mkdir -p /var/lib/ceph/mon/ceph-${MON_NAME}
+mkdir -p /var/lib/ceph/mgr/ceph-${MGR_NAME}
+
+# Генерация ceph.conf
+cat > /etc/ceph/ceph.conf <<EOF
+[global]
+fsid = ${FSID}
+mon initial members = ${MON_NAME}
+mon host = ${MON_IP}
+public network = 0.0.0.0/0
+cluster network = 0.0.0.0/0
+auth cluster required = none
+auth service required = none
+auth client required = none
+osd pool default size = 1
+osd pool default min size = 1
+osd crush chooseleaf type = 0
+osd journal size = 100
+osd max object name len = 256
+osd max object namespace len = 64
+ms bind ipv6 = false
+
+[mon]
+mon allow pool delete = true
+
+[osd]
+osd objectstore = bluestore
+bluestore block db size = 0
+bluestore block wal size = 0
+
+[client.rgw.${CLUSTER_NAME}]
+host = ${CLUSTER_NAME}
+keyring = /var/lib/ceph/radosgw/ceph-rgw.${CLUSTER_NAME}/keyring
+rgw frontends = beast port=7480
+rgw dns name = localhost
+EOF
+
+# Создание ключей монитора
+ceph-authtool --create-keyring /tmp/ceph.mon.keyring --gen-key -n mon. --cap mon 'allow *'
+ceph-authtool --create-keyring /etc/ceph/ceph.client.admin.keyring --gen-key -n client.admin --cap mon 'allow *' --cap osd 'allow *' --cap mds 'allow *' --cap mgr 'allow *'
+ceph-authtool --create-keyring /var/lib/ceph/bootstrap-osd/ceph.keyring --gen-key -n client.bootstrap-osd --cap mon 'profile bootstrap-osd' --cap mgr 'allow r'
+
+# Импорт ключей
+ceph-authtool /tmp/ceph.mon.keyring --import-keyring /etc/ceph/ceph.client.admin.keyring
+ceph-authtool /tmp/ceph.mon.keyring --import-keyring /var/lib/ceph/bootstrap-osd/ceph.keyring
+
+# Генерация монитора
+monmaptool --create --add ${MON_NAME} ${MON_IP} --fsid ${FSID} /tmp/monmap
+
+# Инициализация монитора
+ceph-mon --cluster ${CLUSTER_NAME} --mkfs -i ${MON_NAME} --monmap /tmp/monmap --keyring /tmp/ceph.mon.keyring
+touch /var/lib/ceph/mon/ceph-${MON_NAME}/done
+
+# Запуск монитора
+ceph-mon -i ${MON_NAME} --cluster ${CLUSTER_NAME} &
+
+# Ожидание запуска монитора
+sleep 5
+
+# Создание менеджера
+mkdir -p /var/lib/ceph/mgr/ceph-${MGR_NAME}
+ceph auth get-or-create mgr.${MGR_NAME} mon 'allow profile mgr' osd 'allow *' mds 'allow *' -o /var/lib/ceph/mgr/ceph-${MGR_NAME}/keyring
+
+# Запуск менеджера
+ceph-mgr -i ${MGR_NAME} &
+
+# Ожидание запуска менеджера
+sleep 5
+
+# Создание loopback файла для OSD (10GB)
+dd if=/dev/zero of=/var/lib/ceph/osd-data.img bs=1M count=10240
+LOOP_DEV=$(losetup -f)
+losetup ${LOOP_DEV} /var/lib/ceph/osd-data.img
+
+# Создание OSD
+OSD_ID=$(ceph osd create)
+ceph-volume lvm create --bluestore --data ${LOOP_DEV} --osd-id ${OSD_ID} || {
+    # Fallback: создание директорного OSD если lvm не работает
+    ceph-osd -i ${OSD_ID} --mkfs --osd-uuid $(uuidgen) --mkkey
+    ceph auth add osd.${OSD_ID} osd 'allow *' mon 'allow profile osd' -i /var/lib/ceph/osd/ceph-${OSD_ID}/keyring
+    ceph osd crush add osd.${OSD_ID} 1.0 host=$(hostname)
+}
+
+# Запуск OSD
+ceph-osd -i ${OSD_ID} &
+
+# Ожидание готовности OSD
+sleep 10
+
+# Создание пулов для RGW
+ceph osd pool create .rgw.root 8
+ceph osd pool create default.rgw.control 8
+ceph osd pool create default.rgw.meta 8
+ceph osd pool create default.rgw.log 8
+ceph osd pool create default.rgw.buckets.index 8
+ceph osd pool create default.rgw.buckets.data 8
+
+# Настройка RadosGW
+mkdir -p /var/lib/ceph/radosgw/ceph-rgw.${CLUSTER_NAME}
+ceph auth get-or-create client.rgw.${CLUSTER_NAME} osd 'allow rwx' mon 'allow rw' -o /var/lib/ceph/radosgw/ceph-rgw.${CLUSTER_NAME}/keyring
+
+# Запуск RadosGW
+radosgw -n client.rgw.${CLUSTER_NAME} &
+
+# Ожидание запуска RGW
+sleep 5
+
+# Создание пользователя S3
+radosgw-admin user create --uid=s3user --display-name="S3 User" --access-key=s3access --secret-key=s3secret
+
+echo "========================================"
+echo "Ceph cluster started successfully!"
+echo "S3 endpoint: http://localhost:7480"
+echo "Access Key: s3access"
+echo "Secret Key: s3secret"
+echo "========================================"
+
+# Логирование в foreground
+tail -f /var/log/ceph/*.log 2>/dev/null || sleep infinity
+3. docker-compose.yml
+text
+version: '3.8'
+
+services:
+  ceph:
+    build: .
+    container_name: ceph-s3-poc
+    hostname: ceph
+    privileged: true
+    environment:
+      - MON_IP=127.0.0.1
+    ports:
+      - "7480:7480"
+      - "8080:8080"
+    volumes:
+      - ceph-data:/var/lib/ceph
+      - ceph-config:/etc/ceph
+    networks:
+      - ceph-net
+
+networks:
+  ceph-net:
+    driver: bridge
+
+volumes:
+  ceph-data:
+  ceph-config:
+4. Альтернативный docker run
+bash
+docker build -t ceph-s3-poc .
+
+docker run -d \
+  --name ceph-s3-poc \
+  --hostname ceph \
+  --privileged \
+  -p 7480:7480 \
+  -p 8080:8080 \
+  -e MON_IP=127.0.0.1 \
+  -v ceph-data:/var/lib/ceph \
+  -v ceph-config:/etc/ceph \
+  ceph-s3-poc
+Запуск
+bash
+# Сборка и запуск через docker-compose
+docker-compose up -d
+
+# Или сборка образа
+docker build -t ceph-s3-poc .
+
+# Проверка логов
+docker-compose logs -f
+
+# Проверка статуса кластера
+docker exec ceph-s3-poc ceph -s
+Тестирование S3
+bash
+# Установка s3cmd
+apt-get install s3cmd
+
+# Конфигурация
+cat > ~/.s3cfg <<EOF
+[default]
+access_key = s3access
+secret_key = s3secret
+host_base = localhost:7480
+host_bucket = localhost:7480
+use_https = False
+EOF
+
+# Создание bucket
+s3cmd mb s3://test-bucket
+
+# Загрузка файла
+s3cmd put testfile.txt s3://test-bucket/
+Эта конфигурация создает минимальный Ceph кластер без репликации (размер пула = 1) с одним OSD, использующим loopback устройство на файле. Подходит исключительно для PoC и тестирования S3 API.​
+
+Связанные
+
+Пример docker-compose для ceph v17 с radosgw
+
+Настройка OSD на файлах без разделов для cephadm
+
+Команды bootstrap ceph кластера на одной VM
+
+Конфигурация crush map для single node ceph
+
+Шаги по запуску radosgw с S3 API в Docker
+Пример docker-compose для ceph v17 с radosgw
+2 шага выполнено
+Вот пример docker-compose.yml для Ceph v17 (Quincy) с RadosGW, адаптированный под однонодовую конфигурацию для PoC:​
+
+docker-compose.yml
+text
+version: "3.8"
+
+networks:
+  ceph-net:
+    driver: bridge
+
+volumes:
+  ceph-config:
+  ceph-lib:
+  ceph-osd:
+
+services:
+  mon:
+    image: ceph/daemon:latest-quincy
+    container_name: ceph-mon
+    hostname: ceph-mon
+    command: mon
+    environment:
+      MON_IP: 172.20.0.10
+      CEPH_PUBLIC_NETWORK: 172.20.0.0/16
+      CEPH_DAEMON: MON
+    volumes:
+      - ceph-config:/etc/ceph
+      - ceph-lib:/var/lib/ceph
+    networks:
+      ceph-net:
+        ipv4_address: 172.20.0.10
+
+  mgr:
+    image: ceph/daemon:latest-quincy
+    container_name: ceph-mgr
+    hostname: ceph-mgr
+    command: mgr
+    environment:
+      CEPH_DAEMON: MGR
+    volumes:
+      - ceph-config:/etc/ceph
+      - ceph-lib:/var/lib/ceph
+    ports:
+      - "8443:8443"  # Ceph dashboard
+    depends_on:
+      - mon
+    networks:
+      - ceph-net
+
+  osd:
+    image: ceph/daemon:latest-quincy
+    container_name: ceph-osd
+    hostname: ceph-osd
+    pid: host
+    privileged: true
+    command: osd_directory
+    environment:
+      CEPH_DAEMON: OSD_DIRECTORY
+    volumes:
+      - ceph-config:/etc/ceph
+      - ceph-lib:/var/lib/ceph
+      - ceph-osd:/var/lib/ceph/osd
+    depends_on:
+      - mon
+    networks:
+      - ceph-net
+
+  rgw:
+    image: ceph/daemon:latest-quincy
+    container_name: ceph-rgw
+    hostname: ceph-rgw
+    command: rgw
+    environment:
+      CEPH_DAEMON: RGW
+      RGW_NAME: rgw.default
+    volumes:
+      - ceph-config:/etc/ceph
+      - ceph-lib:/var/lib/ceph
+    ports:
+      - "7480:7480"  # RGW S3 endpoint
+    depends_on:
+      - mon
+      - mgr
+      - osd
+    networks:
+      - ceph-net
+.env файл
+bash
+# Ceph version
+CEPH_CONTAINER_VERSION=latest-quincy
+
+# Network
+MON_IP=172.20.0.10
+CEPH_PUBLIC_NETWORK=172.20.0.0/16
+
+# Ports
+DASHBOARD_PORT=8443
+RGW_PORT=7480
+
+# Locale
+LANG=en_US.UTF-8
+TZ=Europe/Moscow
+Запуск
+bash
+# Создать network (опционально, docker-compose создаст автоматически)
+docker network create --driver bridge --subnet=172.20.0.0/16 ceph-net
+
+# Запустить сервисы последовательно
+docker-compose up -d mon
+sleep 10
+docker-compose up -d mgr
+sleep 5
+docker-compose up -d osd
+sleep 10
+docker-compose up -d rgw
+
+# Или запустить все сразу
+docker-compose up -d
+
+# Проверить статус
+docker-compose logs -f
+
+# Проверить кластер
+docker exec ceph-mon ceph -s
+docker exec ceph-mon ceph health
+Создание S3 пользователя
+bash
+# Создать пользователя S3
+docker exec ceph-mon radosgw-admin user create \
+  --uid=s3user \
+  --display-name="S3 User" \
+  --access-key=ACCESSKEY123 \
+  --secret-key=SECRETKEY456
+
+# Получить информацию о пользователе
+docker exec ceph-mon radosgw-admin user info --uid=s3user
+Настройка для одного узла
+Для PoC без отказоустойчивости добавьте следующие настройки в конфигурацию монитора:​
+
+bash
+# Выполнить после запуска кластера
+docker exec ceph-mon ceph config set global osd_pool_default_size 1
+docker exec ceph-mon ceph config set global osd_pool_default_min_size 1
+docker exec ceph-mon ceph config set global mon_allow_pool_size_one true
+docker exec ceph-mon ceph config set global osd_crush_chooseleaf_type 0
+
+# Отключить предупреждения о single node
+docker exec ceph-mon ceph config set mon mon_warn_on_pool_no_redundancy false
+Тестирование S3
+bash
+# Используя AWS CLI
+aws configure set aws_access_key_id ACCESSKEY123
+aws configure set aws_secret_access_key SECRETKEY456
+aws configure set default.region us-east-1
+
+# Создать bucket
+aws --endpoint-url http://localhost:7480 s3 mb s3://test-bucket
+
+# Загрузить файл
+aws --endpoint-url http://localhost:7480 s3 cp file.txt s3://test-bucket/
+
+# Список buckets
+aws --endpoint-url http://localhost:7480 s3 ls
+Эта конфигурация использует официальные образы ceph/daemon для версии Quincy (v17) и развертывает минимальный кластер с одним OSD, использующим директорное хранилище вместо блочных устройств.​
+
+root@ceph:/# ceph status
+cluster:
+id: 4c516818-e827-4c3a-8f51-d9578ac750ab
+health: HEALTH_WARN
+mon is allowing insecure global_id reclaim
+1 monitors have not enabled msgr2
+Reduced data availability: 49 pgs inactive
+6 pool(s) do not have an application enabled
+7 pool(s) have no replicas configured
+
+services:
+mon: 1 daemons, quorum mon0 (age 2m)
+mgr: mgr0(active, since 2m)
+osd: 1 osds: 1 up (since 2m), 1 in (since 2m)
+
+data:
+pools: 7 pools, 49 pgs
+objects: 0 objects, 0 B
+usage: 290 MiB used, 100 GiB / 100 GiB avail
+pgs: 100.000% pgs unknown
+49 unknown
+1 шаг выполнен
+Проблема с неактивными PG (placement groups) в состоянии "unknown" обычно возникает при первом запуске кластера с одним OSD. Выполните следующие команды для исправления:​
+
+Устранение проблем
+1. Включить application для пулов
+bash
+# Включить RGW application для всех пулов
+ceph osd pool application enable .rgw.root rgw
+ceph osd pool application enable default.rgw.control rgw
+ceph osd pool application enable default.rgw.meta rgw
+ceph osd pool application enable default.rgw.log rgw
+ceph osd pool application enable default.rgw.buckets.index rgw
+ceph osd pool application enable default.rgw.buckets.data rgw
+
+# Если есть пул device_health_metrics
+ceph osd pool application enable device_health_metrics mgr_devicehealth
+2. Настроить размер реплик для одного узла
+bash
+# Разрешить пулы без репликации
+ceph config set mon mon_allow_pool_size_one true
+
+# Установить размер пула = 1 для всех пулов
+for pool in .rgw.root default.rgw.control default.rgw.meta default.rgw.log \
+            default.rgw.buckets.index default.rgw.buckets.data device_health_metrics; do
+  ceph osd pool set $pool size 1
+  ceph osd pool set $pool min_size 1
+done
+3. Включить msgr2 протокол
+bash
+# Включить msgr2 для монитора
+ceph mon enable-msgr2
+
+# Или отключить предупреждение
+ceph config set mon mon_warn_on_insecure_global_id_reclaim false
+ceph config set mon mon_warn_on_insecure_global_id_reclaim_allowed false
+4. Исправить CRUSH map для single OSD
+bash
+# Установить chooseleaf type = 0 (osd вместо host)
+ceph osd crush rule rm replicated_rule
+ceph osd crush rule create-replicated replicated_rule default host
+
+# Или для single node
+ceph config set osd osd_crush_chooseleaf_type 0
+5. Перезапустить OSD если PG остаются unknown
+bash
+# Перезапустить OSD
+ceph osd down 0
+systemctl restart ceph-osd@0
+
+# Или в контейнере
+docker restart ceph-osd  # если используете docker-compose
+6. Принудительно создать PG
+bash
+# Если PG все еще unknown, форсировать их создание
+ceph osd force-create-pg <pgid>
+
+# Или для всех сразу
+ceph pg repeer $(ceph pg dump pgs -f json | jq -r '.pg_stats[] | select(.state == "unknown") | .pgid')
+Проверка результата
+bash
+# Проверить статус
+ceph status
+
+# Проверить PG
+ceph pg stat
+
+# Проверить конфигурацию пулов
+ceph osd pool ls detail
+
+# Ожидать пока PG станут active+clean
+watch ceph status
+После выполнения этих команд PG должны перейти в состояние active+clean, а предупреждения исчезнут. Статус 100.000% pgs unknown указывает на то, что OSD не смог создать PG из-за настроек репликации, несовместимых с однонодовой конфигурацией.​
+
+creating /var/lib/ceph/osd/ceph-0/keyring
+Error EEXIST: entity osd.0 exists but key does not match
+1 шаг выполнен
+Ключ уже зарегистрирован в кластере с другим значением. Нужно либо удалить старый ключ, либо получить существующий.​
+
+Вариант 1: Получить существующий ключ из кластера
+bash
+# Получить существующий keyring из кластера
+ceph auth get osd.0 -o /var/lib/ceph/osd/ceph-0/keyring
+
+# Проверить что файл создан
+cat /var/lib/ceph/osd/ceph-0/keyring
+
+# Продолжить с mkfs
+OSD_UUID=$(uuidgen)
+echo $OSD_UUID > /var/lib/ceph/osd/ceph-0/fsid
+echo "bluestore" > /var/lib/ceph/osd/ceph-0/type
+
+ceph-osd -i 0 --mkfs --osd-uuid $OSD_UUID
+
+chown -R ceph:ceph /var/lib/ceph/osd/ceph-0
+
+ceph-osd -i 0 --setuser ceph --setgroup ceph &
+
+sleep 10
+ceph -s
+Вариант 2: Удалить старый ключ и создать новый
+bash
+# Удалить старую регистрацию
+ceph auth del osd.0
+
+# Создать новый keyring
+ceph-authtool --create-keyring /var/lib/ceph/osd/ceph-0/keyring \
+  --gen-key -n osd.0
+
+# Зарегистрировать заново
+ceph auth add osd.0 osd 'allow *' mon 'allow profile osd' \
+  -i /var/lib/ceph/osd/ceph-0/keyring
+
+# Продолжить
+OSD_UUID=$(uuidgen)
+echo $OSD_UUID > /var/lib/ceph/osd/ceph-0/fsid
+echo "bluestore" > /var/lib/ceph/osd/ceph-0/type
+
+ceph-osd -i 0 --mkfs --osd-uuid $OSD_UUID
+
+chown -R ceph:ceph /var/lib/ceph/osd/ceph-0
+
+ceph-osd -i 0 --setuser ceph --setgroup ceph &
+
+sleep 10
+ceph -s
+Рекомендую вариант 1 — проще получить существующий ключ, чем пересоздавать.​
+
+[osd.0]
+key = AQCaPl5pSd18KhAAGciE9NdeVBeucaNPFmi1bA==
+caps mon = "allow profile osd"
+caps osd = "allow *"
+2026-01-07T11:10:00.075+0000 7ac804349480 -1 bluestore(/var/lib/ceph/osd/ceph-0/block) _read_bdev_label failed to open /var/lib/ceph/osd/ceph-0/block: (2) No such file or directory
+
+2026-01-07T11:10:00.075+0000 7ac804349480 -1 bluestore(/var/lib/ceph/osd/ceph-0/block) _read_bdev_label failed to open /var/lib/ceph/osd/ceph-0/block: (2) No such file or directory
+
+[2] 11540
+2026-01-07T11:10:03.960+0000 7ee767bbf480 -1 osd.0 0 log_to_monitors true
+
+[2]+ Done ceph-osd -i 0 --setuser ceph --setgroup ceph
+cluster:
+id: 7e791900-2a14-4cb8-9ed0-7bb1bb7ef2e9
+health: HEALTH_WARN
+mon is allowing insecure global_id reclaim
+1 monitors have not enabled msgr2
+1 slow ops, oldest one blocked for 221 sec, mon.mon0 has slow ops
+
+services:
+mon: 1 daemons, quorum mon0 (age 5m)
+mgr: mgr0(active, since 4m)
+osd: 1 osds: 0 up, 1 in (since 2m)
+
+data:
+pools: 0 pools, 0 pgs
+objects: 0 objects, 0 B
+usage: 0 B used, 0 B / 0 B avail
+pgs:
+1 шаг выполнен
+OSD создался, keyring получен, но нет блочного устройства /var/lib/ceph/osd/ceph-0/block. Для bluestore нужно создать этот файл или symlink на устройство.​
+
+Создать block файл для bluestore
+bash
+# 1. Создать большой файл для OSD data (10GB)
+truncate -s 10G /var/lib/ceph/osd/ceph-0/block
+
+# Или через dd (медленнее но надёжнее)
+# dd if=/dev/zero of=/var/lib/ceph/osd/ceph-0/block bs=1M count=10240
+
+# 2. Проверить что файл создан
+ls -lh /var/lib/ceph/osd/ceph-0/block
+
+# 3. Сделать mkfs
+OSD_UUID=$(uuidgen)
+ceph-osd -i 0 --mkfs --osd-uuid $OSD_UUID
+
+# 4. Установить права
+chown -R ceph:ceph /var/lib/ceph/osd/ceph-0
+
+# 5. Запустить OSD
+ceph-osd -i 0 --setuser ceph --setgroup ceph &
+
+sleep 10
+
+# 6. Проверить
+ceph -s
+ceph osd tree
+ps aux | grep ceph-osd
+Проверить что OSD запустился
+bash
+# Должно показать: 1 osds: 1 up, 1 in
+ceph osd stat
+
+# Дерево OSD
+ceph osd tree
+
+# Если OSD up - можно создавать пулы
+После того как OSD станет up, можно продолжать с созданием пулов RGW и запуском RadosGW.​
+
+-rw-r--r-- 1 ceph ceph 10G Jan 7 11:11 /var/lib/ceph/osd/ceph-0/block
+2026-01-07T11:11:01.088+0000 71fc853a5480 -1 asok(0x6209c9ea8000) AdminSocketConfigObs::init: failed: AdminSocket::bind_and_listen: failed to bind the UNIX domain socket to '/var/run/ceph/ceph-osd.0.asok': (17) File exists
+
+[2] 12030
+2026-01-07T11:11:01.115+0000 7aecd2b6c480 -1 asok(0x614a9605a000) AdminSocketConfigObs::init: failed: AdminSocket::bind_and_listen: failed to bind the UNIX domain socket to '/var/run/ceph/ceph-osd.0.asok': (17) File exists
+
+2026-01-07T11:11:01.116+0000 7aecd2b6c480 -1 bluestore(/var/lib/ceph/osd/ceph-0) _lock_fsid failed to lock /var/lib/ceph/osd/ceph-0/fsid (is another ceph-osd still running?)(11) Resource temporarily unavailable
+
+2026-01-07T11:11:01.146+0000 7aecd2b6c480 -1 bluestore(/var/lib/ceph/osd/ceph-0) _lock_fsid failed to lock /var/lib/ceph/osd/ceph-0/fsid (is another ceph-osd still running?)(11) Resource temporarily unavailable
+
+2026-01-07T11:11:01.146+0000 7aecd2b6c480 -1 bluestore(/var/lib/ceph/osd/ceph-0) _lock_fsid failed to lock /var/lib/ceph/osd/ceph-0/fsid (is another ceph-osd still running?)(11) Resource temporarily unavailable
+
+2026-01-07T11:11:01.148+0000 7aecd2b6c480 -1 bluestore(/var/lib/ceph/osd/ceph-0) _lock_fsid failed to lock /var/lib/ceph/osd/ceph-0/fsid (is another ceph-osd still running?)(11) Resource temporarily unavailable
+
+2026-01-07T11:11:01.148+0000 7aecd2b6c480 -1 bluestore(/var/lib/ceph/osd/ceph-0) _lock_fsid failed to lock /var/lib/ceph/osd/ceph-0/fsid (is another ceph-osd still running?)(11) Resource temporarily unavailable
+
+2026-01-07T11:11:01.149+0000 7aecd2b6c480 -1 bluestore(/var/lib/ceph/osd/ceph-0) _lock_fsid failed to lock /var/lib/ceph/osd/ceph-0/fsid (is another ceph-osd still running?)(11) Resource temporarily unavailable
+
+2026-01-07T11:11:01.149+0000 7aecd2b6c480 -1 bluestore(/var/lib/ceph/osd/ceph-0) _lock_fsid failed to lock /var/lib/ceph/osd/ceph-0/fsid (is another ceph-osd still running?)(11) Resource temporarily unavailable
+
+2026-01-07T11:11:01.149+0000 7aecd2b6c480 -1 bluestore(/var/lib/ceph/osd/ceph-0) _lock_fsid failed to lock /var/lib/ceph/osd/ceph-0/fsid (is another ceph-osd still running?)(11) Resource temporarily unavailable
+
+2026-01-07T11:11:01.149+0000 7aecd2b6c480 -1 osd.0 0 OSD::pre_init: object store '/var/lib/ceph/osd/ceph-0' is currently in use. (Is ceph-osd already running?)
+
+2026-01-07T11:11:01.149+0000 7aecd2b6c480 -1 ** ERROR: osd pre_init failed: (16) Device or resource busy
+
+[2]+ Exit 250 ceph-osd -i 0 --setuser ceph --setgroup ceph
+cluster:
+id: 7e791900-2a14-4cb8-9ed0-7bb1bb7ef2e9
+health: HEALTH_WARN
+mon is allowing insecure global_id reclaim
+1 monitors have not enabled msgr2
+
+services:
+mon: 1 daemons, quorum mon0 (age 6m)
+mgr: mgr0(active, since 5m)
+osd: 1 osds: 0 up, 1 in (since 3m)
+
+data:
+pools: 0 pools, 0 pgs
+objects: 0 objects, 0 B
+usage: 0 B used, 0 B / 0 B avail
+pgs:
+
+ID CLASS WEIGHT TYPE NAME STATUS REWEIGHT PRI-AFF
+-1 1.00000 root default
+-2 1.00000 host ceph
+0 hdd 1.00000 osd.0 down 1.00000 1.00000
+ceph 9818 2.0 2.0 834116 83176 ? Ssl 11:06 0:06 ceph-osd -i 0 --setuser ceph --setgroup ceph
+ceph 10686 0.2 0.6 126516 27776 pts/0 Sl 11:09 0:00 ceph-osd -i 0 --setuser ceph --setgroup ceph
+ceph 11550 2.6 1.7 801336 70092 ? Ssl 11:10 0:01 ceph-osd -i 0 --setuser ceph --setgroup ceph
+root 12102 0.0 0.0 3472 1792 pts/0 S+ 11:11 0:00 grep --color=auto ceph-osd
+1 шаг выполнен
+Есть 3 процесса ceph-osd одновременно! Они блокируют друг друга. Нужно убить все и очистить socket.​
+
+Очистка и правильный запуск
+bash
+# 1. Убить ВСЕ процессы OSD
+killall -9 ceph-osd
+sleep 3
+
+# 2. Удалить socket файл
+rm -f /var/run/ceph/ceph-osd.0.asok
+
+# 3. Проверить что нет процессов
+ps aux | grep ceph-osd
+
+# 4. Проверить что нет lock файлов
+ls -la /var/lib/ceph/osd/ceph-0/fsid.lock 2>/dev/null && rm -f /var/lib/ceph/osd/ceph-0/fsid.lock
+
+# 5. Запустить ОДИН раз
+ceph-osd -i 0 --setuser ceph --setgroup ceph &
+
+sleep 15
+
+# 6. Проверить что запустился ОДИН процесс
+ps aux | grep ceph-osd | grep -v grep
+
+# 7. Проверить статус
+ceph -s
+ceph osd tree
+Проверка успешного запуска
+bash
+# Должно показать:
+# osd: 1 osds: 1 up, 1 in
+
+# Если да - проверить дерево
+ceph osd tree
+
+# Должно быть:
+# 0  hdd  1.00000    osd.0    up   1.00000  1.00000
+После успешного запуска OSD можно создавать пулы для RGW.​
+
+Так как у нас нет данных, то предлагаю, остановить контейнер с удалением томов , внести в entrypoint.sh необходимые правки и заново запустить с нуля.
+1 шаг выполнен
+Отличная идея! Давай создадим правильный entrypoint.sh с cephx с самого начала. Это будет чище и надёжнее.
+
+Шаг 1: Остановить и удалить
+bash
+# Выйти из контейнера
+exit
+
+# На хосте - удалить с volumes
+docker-compose down -v
+
+# Проверить что volumes удалены
+docker volume ls | grep ceph
+Шаг 2: Обновить entrypoint.sh
+Создайте новый entrypoint.sh:
+
+bash
+#!/bin/bash
+set -e
+
+CLUSTER_NAME="ceph"
+MON_NAME="mon0"
+MGR_NAME="mgr0"
+OSD_ID="0"
+RGW_NAME="rgw.ceph"
+MON_IP=${MON_IP:-127.0.0.1}
+
+# Создание директорий
+mkdir -p /etc/ceph /var/lib/ceph/{mon,mgr,osd,radosgw,bootstrap-osd}
+mkdir -p /var/lib/ceph/osd/ceph-${OSD_ID}
+mkdir -p /var/lib/ceph/mon/ceph-${MON_NAME}
+mkdir -p /var/lib/ceph/mgr/ceph-${MGR_NAME}
+mkdir -p /var/log/ceph
+
+# ПРОВЕРКА: кластер уже существует?
+if [ -f /var/lib/ceph/mon/ceph-${MON_NAME}/store.db/CURRENT ]; then
+    echo "=== Existing cluster found, starting services ==="
+    
+    chown -R ceph:ceph /var/lib/ceph/mon
+    chown -R ceph:ceph /var/lib/ceph/mgr
+    
+    ceph-mon -i ${MON_NAME} --cluster ${CLUSTER_NAME} --setuser ceph --setgroup ceph &
+    sleep 5
+    
+    ceph-mgr -i ${MGR_NAME} --setuser ceph --setgroup ceph &
+    sleep 3
+    
+    if [ -d /var/lib/ceph/osd/ceph-0 ] && [ -f /var/lib/ceph/osd/ceph-0/keyring ]; then
+        chown -R ceph:ceph /var/lib/ceph/osd/ceph-0
+        ceph-osd -i 0 --setuser ceph --setgroup ceph &
+        sleep 5
+    fi
+    
+    if [ -f /var/lib/ceph/radosgw/ceph-rgw.${RGW_NAME}/keyring ]; then
+        chown -R ceph:ceph /var/lib/ceph/radosgw
+        radosgw -n client.rgw.${RGW_NAME} --setuser ceph --setgroup ceph &
+        sleep 3
+    fi
+    
+    echo "=== Services started ==="
+    ceph -s || true
+    tail -f /dev/null
+    exit 0
+fi
+
+echo "=== Initializing new cluster with cephx ==="
+
+# Генерация FSID
+FSID=$(uuidgen)
+
+# Генерация ceph.conf с CEPHX
+cat > /etc/ceph/ceph.conf <<EOF
+[global]
+fsid = ${FSID}
+mon initial members = ${MON_NAME}
+mon host = ${MON_IP}
+public network = 0.0.0.0/0
+cluster network = 0.0.0.0/0
+auth cluster required = cephx
+auth service required = cephx
+auth client required = cephx
+osd pool default size = 1
+osd pool default min size = 1
+osd crush chooseleaf type = 0
+mon allow pool size one = true
+mon warn on pool no redundancy = false
+mon warn on insecure global id reclaim = false
+ms bind ipv6 = false
+
+[mon]
+mon allow pool delete = true
+
+[osd]
+osd objectstore = bluestore
+
+[client.rgw.${RGW_NAME}]
+rgw frontends = beast endpoint=0.0.0.0:7480
+EOF
+
+# Создание ключей для cephx
+echo "Creating keyrings..."
+ceph-authtool --create-keyring /tmp/ceph.mon.keyring --gen-key -n mon. --cap mon 'allow *'
+ceph-authtool --create-keyring /etc/ceph/ceph.client.admin.keyring --gen-key -n client.admin \
+    --cap mon 'allow *' --cap osd 'allow *' --cap mds 'allow *' --cap mgr 'allow *'
+ceph-authtool --create-keyring /var/lib/ceph/bootstrap-osd/ceph.keyring --gen-key -n client.bootstrap-osd \
+    --cap mon 'profile bootstrap-osd' --cap mgr 'allow r'
+
+ceph-authtool /tmp/ceph.mon.keyring --import-keyring /etc/ceph/ceph.client.admin.keyring
+ceph-authtool /tmp/ceph.mon.keyring --import-keyring /var/lib/ceph/bootstrap-osd/ceph.keyring
+
+monmaptool --create --add ${MON_NAME} ${MON_IP} --fsid ${FSID} /tmp/monmap
+
+echo "Initializing monitor..."
+ceph-mon --cluster ${CLUSTER_NAME} --mkfs -i ${MON_NAME} --monmap /tmp/monmap --keyring /tmp/ceph.mon.keyring
+touch /var/lib/ceph/mon/ceph-${MON_NAME}/done
+chown -R ceph:ceph /var/lib/ceph/mon
+
+echo "Starting monitor..."
+ceph-mon -i ${MON_NAME} --cluster ${CLUSTER_NAME} --setuser ceph --setgroup ceph &
+sleep 8
+
+echo "Creating manager..."
+mkdir -p /var/lib/ceph/mgr/ceph-${MGR_NAME}
+ceph auth get-or-create mgr.${MGR_NAME} mon 'allow profile mgr' osd 'allow *' mds 'allow *' \
+    -o /var/lib/ceph/mgr/ceph-${MGR_NAME}/keyring
+chown -R ceph:ceph /var/lib/ceph/mgr
+
+ceph-mgr -i ${MGR_NAME} --setuser ceph --setgroup ceph &
+sleep 5
+
+echo "Creating OSD..."
+OSD_UUID=$(uuidgen)
+ceph osd create ${OSD_UUID} ${OSD_ID}
+
+mkdir -p /var/lib/ceph/osd/ceph-${OSD_ID}
+
+# Создать block файл для bluestore (10GB)
+truncate -s 10G /var/lib/ceph/osd/ceph-${OSD_ID}/block
+
+# Создать keyring для OSD
+ceph-authtool --create-keyring /var/lib/ceph/osd/ceph-${OSD_ID}/keyring \
+    --gen-key -n osd.${OSD_ID}
+
+# Зарегистрировать OSD в кластере
+ceph auth add osd.${OSD_ID} osd 'allow *' mon 'allow profile osd' \
+    -i /var/lib/ceph/osd/ceph-${OSD_ID}/keyring
+
+# Инициализировать OSD
+ceph-osd -i ${OSD_ID} --mkfs --osd-uuid ${OSD_UUID}
+
+ceph osd crush add osd.${OSD_ID} 1.0 root=default
+chown -R ceph:ceph /var/lib/ceph/osd/ceph-${OSD_ID}
+
+echo "Starting OSD..."
+ceph-osd -i ${OSD_ID} --setuser ceph --setgroup ceph &
+sleep 10
+
+echo "Creating RGW pools..."
+for pool in .rgw.root default.rgw.control default.rgw.meta default.rgw.log \
+            default.rgw.buckets.index default.rgw.buckets.data; do
+    ceph osd pool create $pool 8 || true
+    ceph osd pool set $pool size 1 --yes-i-really-mean-it || true
+    ceph osd pool set $pool min_size 1 || true
+    ceph osd pool application enable $pool rgw || true
+done
+
+echo "Creating RadosGW..."
+mkdir -p /var/lib/ceph/radosgw/ceph-rgw.${RGW_NAME}
+ceph auth get-or-create client.rgw.${RGW_NAME} osd 'allow rwx' mon 'allow rw' \
+    -o /var/lib/ceph/radosgw/ceph-rgw.${RGW_NAME}/keyring
+chown -R ceph:ceph /var/lib/ceph/radosgw
+
+# Настроить realm/zonegroup/zone
+radosgw-admin realm create --rgw-realm=default --default || true
+radosgw-admin zonegroup create --rgw-zonegroup=default \
+    --endpoints=http://0.0.0.0:7480 --master --default || true
+radosgw-admin zone create --rgw-zonegroup=default --rgw-zone=default \
+    --endpoints=http://0.0.0.0:7480 --master --default || true
+radosgw-admin period update --commit || true
+
+radosgw -n client.rgw.${RGW_NAME} --setuser ceph --setgroup ceph &
+sleep 5
+
+radosgw-admin user create --uid=s3user --display-name="S3 User" \
+    --access-key=s3access --secret-key=s3secret || true
+
+echo "========================================"
+echo "Ceph cluster initialized!"
+echo "S3 endpoint: http://localhost:7480"
+echo "Access Key: s3access"
+echo "Secret Key: s3secret"
+echo "========================================"
+ceph -s
+
+tail -f /dev/null
+Шаг 3: Dockerfile остается без изменений
+Убедитесь что Dockerfile правильный:
+
+text
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Установка Ceph Quincy (v17)
+RUN apt-get update && \
+    apt-get install -y wget gnupg2 ca-certificates uuid-runtime && \
+    wget -q -O- 'https://download.ceph.com/keys/release.asc' | apt-key add - && \
+    echo "deb https://download.ceph.com/debian-quincy/ jammy main" > /etc/apt/sources.list.d/ceph.list && \
+    apt-get update && \
+    apt-get install -y ceph ceph-common radosgw xfsprogs && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+EXPOSE 7480 8080
+
+ENTRYPOINT ["/entrypoint.sh"]
+Шаг 4: Запуск
+bash
+# Пересобрать образ
+docker-compose build --no-cache
+
+# Запустить
+docker-compose up -d
+
+# Следить за логами
+docker-compose logs -f
+Через 1-2 минуты должен быть готовый кластер с RGW на порту 7480 и S3 пользователем.​
+
+добавьь в докерфайл установку cerl, netstat, udevadm
+1 шаг выполнен
+Вот обновлённый Dockerfile с curl, netstat, udevadm:
+
+text
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Установка Ceph Quincy (v17)
+RUN apt-get update && \
+    apt-get install -y wget gnupg2 ca-certificates uuid-runtime && \
+    wget -q -O- 'https://download.ceph.com/keys/release.asc' | apt-key add - && \
+    echo "deb https://download.ceph.com/debian-quincy/ jammy main" > /etc/apt/sources.list.d/ceph.list && \
+    apt-get update && \
+    apt-get install -y ceph ceph-common radosgw xfsprogs && \
+    apt-get install -y curl net-tools iproute2 udev && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+EXPOSE 7480 8080
+
+ENTRYPOINT ["/entrypoint.sh"]
+Пояснения:
+
+curl - для тестирования HTTP
+
+net-tools - содержит netstat
+
+iproute2 - содержит ss (современная альтернатива netstat)
+
+udev - содержит udevadm
+
+Теперь можно пересобрать:
+
+bash
+docker-compose build --no-cache
+docker-compose up -d
+docker-compose logs -f

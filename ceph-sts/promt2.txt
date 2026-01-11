@@ -1,0 +1,1 @@
+﻿Добавь пожалуйста команды для создания в чистом keycloak v25 realm, client, groups и users

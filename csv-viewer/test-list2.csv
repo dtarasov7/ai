@@ -1,0 +1,7 @@
+Server,User,Sudo,Key
+"o4n01","kanov","true","ssh-rsa ABMcmFS3CXnZpCw== rsa-key-20201123"
+"o4n02","kanov","true","ssh-rsa AAAAAAB3NzaC1yc2EAACw== rsa-key-20201122"
+"o4n02","kanov","true","ssh-rsa AAAAAAB3NzaC
+1yc2EAACw== rs
+a-key-20201123"
+"o4n02","kanov","true","ssh-rsa AAAAAAB3NzaC1yc2EAA22"

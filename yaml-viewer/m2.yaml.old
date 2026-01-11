@@ -9,3 +9,7 @@ docker_dns_options2:
   - "timeout:2"
   - "attempts:2"
 
+a:
+  - c
+  - b
+

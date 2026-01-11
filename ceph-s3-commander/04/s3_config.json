@@ -1,0 +1,10 @@
+{
+  "endpoints": [
+    {
+      "name": "Local Ceph",
+      "url": "http://localhost:7480",
+      "access_key": "s3access",
+      "secret_key": "s3secret"
+    }
+  ]
+}

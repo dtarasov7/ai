@@ -1,0 +1,51 @@
+@startuml
+!define RECTANGLE class
+
+skinparam backgroundColor #FEFEFE
+
+package "Сравнение eBPF vs SDK" {
+
+  card "**Запрос с очередью**" as scenario {
+
+    rectangle "Client" as client
+
+    rectangle "Network Layer\n(eBPF наблюдает здесь)" as network #LightBlue {
+      rectangle "Queue\n(ожидание)" as queue #Orange
+      rectangle "Processing\n(обработка)" as processing #LightGreen
+    }
+
+    rectangle "Application Layer\n(SDK наблюдает здесь)" as appLayer #LightGreen {
+      rectangle "Handler\nExecution" as handler
+    }
+
+  }
+
+}
+
+client -down-> network : "Request Start"
+network -down-> appLayer : "Handler Called"
+appLayer -up-> network : "Response"
+network -up-> client : "Request End"
+
+note right of queue
+  **eBPF измеряет:**
+  Queue Time + Processing Time
+  = Полное время запроса
+  (что видит клиент)
+end note
+
+note left of handler
+  **SDK измеряет:**
+  Только Processing Time
+  (время активной обработки)
+
+  Не включает Queue Time!
+end note
+
+legend right
+  |<#LightBlue> eBPF |
+  |<#LightGreen> SDK |
+  |<#Orange> Критическая разница |
+endlegend
+
+@enduml
