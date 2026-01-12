@@ -1,0 +1,22 @@
+﻿{
+  "endpoints": [
+    {
+      "name": "Local Ceph",
+      "url": "http://localhost:7480",
+      "access_key": "s3access",
+      "secret_key": "s3secret"
+    },
+    {
+      "name": "REmote Ceph",
+      "url": "http://192.168.1.23:7480",
+      "access_key": "s3access",
+      "secret_key": "s3secret"
+    },
+    {
+      "name": "Error",
+      "url": "http://localhost:7481",
+      "access_key": "s3access",
+      "secret_key": "s3secret"
+    }
+  ]
+}
