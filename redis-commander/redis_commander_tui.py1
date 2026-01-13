@@ -1,0 +1,739 @@
+﻿#!/usr/bin/env python3
+"""
+Redis Commander TUI - Terminal User Interface в стиле Redis Commander
+Полная функциональность: просмотр ключей, выполнение команд, добавление ключей
+"""
+
+import urwid
+import redis
+import json
+import os
+import sys
+import time
+from datetime import datetime
+from typing import List, Dict, Any, Optional, Tuple
+from collections import OrderedDict, defaultdict
+import logging
+
+# Настройка логирования
+logging.basicConfig(
+    filename='redis_tui_audit.log',
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger('redis_commander_tui')
+
+
+class ConnectionProfile:
+    """Профиль подключения к Redis"""
+    def __init__(self, name: str, host: str = 'localhost', port: int = 6379,
+                 password: Optional[str] = None, username: Optional[str] = None,
+                 db: int = 0, ssl: bool = False, ssl_ca_certs: Optional[str] = None,
+                 ssl_certfile: Optional[str] = None, ssl_keyfile: Optional[str] = None,
+                 socket_path: Optional[str] = None, readonly: bool = False):
+        self.name = name
+        self.host = host
+        self.port = port
+        self.password = password
+        self.username = username
+        self.db = db
+        self.ssl = ssl
+        self.ssl_ca_certs = ssl_ca_certs
+        self.ssl_certfile = ssl_certfile
+        self.ssl_keyfile = ssl_keyfile
+        self.socket_path = socket_path
+        self.readonly = readonly
+
+    def to_dict(self) -> Dict:
+        return {
+            'name': self.name,
+            'host': self.host,
+            'port': self.port,
+            'db': self.db,
+            'ssl': self.ssl,
+            'readonly': self.readonly
+        }
+
+
+class RedisConnection:
+    """Менеджер подключений к Redis"""
+    def __init__(self, profile: ConnectionProfile):
+        self.profile = profile
+        self.client: Optional[redis.Redis] = None
+        self.connected = False
+
+    def connect(self) -> Tuple[bool, str]:
+        """Подключение к Redis"""
+        try:
+            kwargs = {
+                'db': self.profile.db,
+                'socket_timeout': 5,
+                'decode_responses': False
+            }
+
+            if self.profile.socket_path:
+                kwargs['unix_socket_path'] = self.profile.socket_path
+            else:
+                kwargs['host'] = self.profile.host
+                kwargs['port'] = self.profile.port
+
+            if self.profile.password:
+                kwargs['password'] = self.profile.password
+
+            if self.profile.username:
+                kwargs['username'] = self.profile.username
+
+            if self.profile.ssl:
+                kwargs['ssl'] = True
+                if self.profile.ssl_ca_certs:
+                    kwargs['ssl_ca_certs'] = self.profile.ssl_ca_certs
+                if self.profile.ssl_certfile:
+                    kwargs['ssl_certfile'] = self.profile.ssl_certfile
+                if self.profile.ssl_keyfile:
+                    kwargs['ssl_keyfile'] = self.profile.ssl_keyfile
+
+            self.client = redis.Redis(**kwargs)
+            self.client.ping()
+            self.connected = True
+            logger.info(f"Connected to {self.profile.name}")
+            return True, "Connected"
+        except Exception as e:
+            self.connected = False
+            logger.error(f"Connection failed: {e}")
+            return False, str(e)
+
+    def disconnect(self):
+        if self.client:
+            self.client.close()
+            self.connected = False
+
+
+class KeyTreeNode:
+    """Узел дерева ключей"""
+    def __init__(self, name: str, full_path: str = '', is_key: bool = False):
+        self.name = name
+        self.full_path = full_path
+        self.is_key = is_key
+        self.children: Dict[str, 'KeyTreeNode'] = {}
+        self.expanded = False
+        self.key_count = 0
+
+    def add_key(self, parts: List[str], full_key: str, separator: str = ':'):
+        """Добавление ключа в дерево"""
+        if not parts:
+            return
+
+        if len(parts) == 1:
+            # Это конечный ключ
+            if parts[0] not in self.children:
+                self.children[parts[0]] = KeyTreeNode(parts[0], full_key, is_key=True)
+                self.key_count += 1
+        else:
+            # Это промежуточная группа
+            prefix = parts[0]
+            if prefix not in self.children:
+                path = f"{self.full_path}{separator}{prefix}" if self.full_path else prefix
+                self.children[prefix] = KeyTreeNode(prefix, path, is_key=False)
+
+            self.children[prefix].add_key(parts[1:], full_key, separator)
+            self.key_count += 1
+
+
+class AddKeyDialog(urwid.WidgetWrap):
+    """Диалог добавления нового ключа"""
+    signals = ['close']
+
+    def __init__(self, connection: RedisConnection, on_success_callback):
+        self.connection = connection
+        self.on_success = on_success_callback
+
+        # Поля ввода
+        self.key_edit = urwid.Edit('Key: ')
+        self.type_group = []
+        self.type_buttons = [
+            urwid.RadioButton(self.type_group, 'String', state=True),
+            urwid.RadioButton(self.type_group, 'Hash'),
+            urwid.RadioButton(self.type_group, 'List'),
+            urwid.RadioButton(self.type_group, 'Set'),
+            urwid.RadioButton(self.type_group, 'ZSet'),
+        ]
+        self.value_edit = urwid.Edit('Value: ', multiline=True)
+        self.ttl_edit = urwid.Edit('TTL (seconds, optional): ')
+
+        # Кнопки
+        save_btn = urwid.Button('Save', on_press=self.on_save)
+        cancel_btn = urwid.Button('Cancel', on_press=self.on_cancel)
+
+        # Компоновка
+        body = [
+            urwid.Text('Add New Key', align='center'),
+            urwid.Divider(),
+            self.key_edit,
+            urwid.Divider(),
+            urwid.Text('Type:'),
+        ]
+        body.extend(self.type_buttons)
+        body.extend([
+            urwid.Divider(),
+            self.value_edit,
+            urwid.Divider(),
+            self.ttl_edit,
+            urwid.Divider(),
+            urwid.Columns([
+                urwid.AttrMap(save_btn, 'button', 'button_focus'),
+                urwid.AttrMap(cancel_btn, 'button', 'button_focus'),
+            ]),
+        ])
+
+        pile = urwid.Pile(body)
+        fill = urwid.Filler(pile, valign='top')
+        padding = urwid.Padding(fill, left=2, right=2)
+        linebox = urwid.LineBox(padding, title='Add Key')
+
+        super().__init__(urwid.AttrMap(linebox, 'dialog'))
+
+    def get_selected_type(self) -> str:
+        """Получить выбранный тип"""
+        for i, btn in enumerate(self.type_buttons):
+            if btn.state:
+                return ['string', 'hash', 'list', 'set', 'zset'][i]
+        return 'string'
+
+    def on_save(self, button):
+        """Сохранение ключа"""
+        key = self.key_edit.get_edit_text().strip()
+        value = self.value_edit.get_edit_text().strip()
+        key_type = self.get_selected_type()
+        ttl_text = self.ttl_edit.get_edit_text().strip()
+
+        if not key:
+            return
+
+        try:
+            ttl = int(ttl_text) if ttl_text else None
+
+            # Создаем ключ в зависимости от типа
+            if key_type == 'string':
+                self.connection.client.set(key, value)
+            elif key_type == 'hash':
+                # Парсим как key:value пары
+                pairs = {}
+                for line in value.split('\n'):
+                    if ':' in line:
+                        k, v = line.split(':', 1)
+                        pairs[k.strip()] = v.strip()
+                if pairs:
+                    self.connection.client.hset(key, mapping=pairs)
+            elif key_type == 'list':
+                items = [item.strip() for item in value.split('\n') if item.strip()]
+                if items:
+                    self.connection.client.rpush(key, *items)
+            elif key_type == 'set':
+                items = [item.strip() for item in value.split('\n') if item.strip()]
+                if items:
+                    self.connection.client.sadd(key, *items)
+            elif key_type == 'zset':
+                # Парсим как member:score пары
+                pairs = {}
+                for line in value.split('\n'):
+                    if ':' in line:
+                        member, score = line.rsplit(':', 1)
+                        try:
+                            pairs[member.strip()] = float(score.strip())
+                        except ValueError:
+                            pass
+                if pairs:
+                    self.connection.client.zadd(key, pairs)
+
+            # Устанавливаем TTL если указан
+            if ttl:
+                self.connection.client.expire(key, ttl)
+
+            logger.info(f"Created key: {key} (type: {key_type})")
+            self.on_success()
+            self._emit('close')
+
+        except Exception as e:
+            logger.error(f"Failed to create key: {e}")
+
+    def on_cancel(self, button):
+        """Отмена"""
+        self._emit('close')
+
+
+class RedisCommanderUI:
+    """Главное окно в стиле Redis Commander"""
+
+    palette = [
+        ('header', 'white', 'dark blue', 'bold'),
+        ('header_text', 'white', 'dark blue'),
+        ('footer', 'white', 'dark blue'),
+        ('sidebar', 'light gray', 'dark blue'),
+        ('sidebar_focus', 'white', 'dark blue', 'bold'),
+        ('connection', 'light cyan', 'dark blue'),
+        ('connection_selected', 'white', 'dark blue', 'bold'),
+        ('key_folder', 'light cyan', 'dark blue'),
+        ('key_folder_focus', 'white', 'dark blue', 'bold'),
+        ('key_item', 'light blue', 'dark blue'),
+        ('key_item_focus', 'white', 'dark blue', 'bold'),
+        ('button', 'white', 'dark blue'),
+        ('button_focus', 'white', 'light blue', 'bold'),
+        ('button_danger', 'white', 'dark red'),
+        ('info_label', 'light cyan', 'dark blue'),
+        ('info_value', 'white', 'dark blue'),
+        ('tab_active', 'white', 'light blue', 'bold'),
+        ('tab_inactive', 'light gray', 'dark blue'),
+        ('error', 'light red', 'dark blue'),
+        ('success', 'light green', 'dark blue'),
+        ('dialog', 'black', 'light cyan'),
+        ('background', 'white', 'dark blue'),
+    ]
+
+    def __init__(self):
+        self.connections: Dict[str, RedisConnection] = {}
+        self.current_connection: Optional[RedisConnection] = None
+        self.profiles = self.load_profiles()
+        self.key_tree_root = KeyTreeNode('root')
+        self.current_key: Optional[bytes] = None
+        self.separator = ':'
+        self.console_mode = False
+
+        # Создаем интерфейс
+        self.create_ui()
+
+        # Автоматически подключаемся к первому профилю
+        if self.profiles:
+            first_profile = list(self.profiles.values())[0]
+            self.connect_to_profile(first_profile)
+
+        self.loop = urwid.MainLoop(
+            self.main_frame,
+            palette=self.palette,
+            unhandled_input=self.handle_input,
+            pop_ups=True
+        )
+
+    def load_profiles(self) -> Dict[str, ConnectionProfile]:
+        """Загрузка профилей"""
+        profiles = {}
+        profiles_file = 'redis_profiles.json'
+
+        if os.path.exists(profiles_file):
+            try:
+                with open(profiles_file, 'r') as f:
+                    data = json.load(f)
+                    for name, config in data.items():
+                        clean_config = {k: v for k, v in config.items() 
+                                       if k in ['name', 'host', 'port', 'password', 
+                                               'username', 'db', 'ssl', 'socket_path', 'readonly']}
+                        profiles[name] = ConnectionProfile(**clean_config)
+            except Exception as e:
+                logger.error(f"Failed to load profiles: {e}")
+
+        # Профили по умолчанию
+        if not profiles:
+            profiles['local-1'] = ConnectionProfile('local-1', 'localhost', 6379, db=0)
+            profiles['local-2'] = ConnectionProfile('local-2', 'localhost', 6379, db=1)
+            profiles['local-3'] = ConnectionProfile('local-3', 'localhost', 6379, db=2)
+
+        return profiles
+
+    def create_ui(self):
+        """Создание интерфейса"""
+        # Header
+        header_text = urwid.Text([
+            ('header_text', ' ● '),
+            ('header_text', 'Redis Commander TUI')
+        ], align='left')
+        self.header = urwid.AttrMap(
+            urwid.Padding(header_text, left=1, right=1),
+            'header'
+        )
+
+        # Toolbar
+        self.refresh_btn = urwid.Button('⟳ Refresh')
+        self.commands_btn = urwid.Button('⌘ Commands')
+        self.more_btn = urwid.Button('⋯ More...')
+        self.add_key_btn = urwid.Button('Add New Key...')
+        self.disconnect_btn = urwid.Button('Disconnect')
+
+        urwid.connect_signal(self.refresh_btn, 'click', lambda b: self.refresh_keys())
+        urwid.connect_signal(self.commands_btn, 'click', lambda b: self.toggle_console())
+        urwid.connect_signal(self.add_key_btn, 'click', lambda b: self.show_add_key_dialog())
+        urwid.connect_signal(self.disconnect_btn, 'click', lambda b: self.disconnect())
+
+        toolbar = urwid.Columns([
+            ('pack', urwid.AttrMap(self.refresh_btn, 'button', 'button_focus')),
+            ('pack', urwid.Text(' ')),
+            ('pack', urwid.AttrMap(self.commands_btn, 'button', 'button_focus')),
+            ('pack', urwid.Text(' ')),
+            ('pack', urwid.AttrMap(self.more_btn, 'button', 'button_focus')),
+            ('weight', 1, urwid.Text('')),
+            ('pack', urwid.AttrMap(self.add_key_btn, 'button', 'button_focus')),
+            ('pack', urwid.Text(' ')),
+            ('pack', urwid.AttrMap(self.disconnect_btn, 'button_danger', 'button_focus')),
+        ], dividechars=0)
+
+        # Левая панель
+        self.connection_tree = urwid.SimpleListWalker([])
+        self.connection_listbox = urwid.ListBox(self.connection_tree)
+
+        left_panel = urwid.LineBox(
+            urwid.AttrMap(self.connection_listbox, 'sidebar'),
+            title='Connections & Keys'
+        )
+
+        # Правая панель
+        self.detail_walker = urwid.SimpleListWalker([])
+        self.detail_listbox = urwid.ListBox(self.detail_walker)
+
+        right_panel = urwid.LineBox(
+            urwid.AttrMap(self.detail_listbox, 'background'),
+            title='Details'
+        )
+
+        # Основная область
+        content = urwid.Columns([
+            ('weight', 1, left_panel),
+            ('weight', 3, right_panel),
+        ], dividechars=1)
+
+        # Tabs
+        self.tab_text = urwid.Text('')
+
+        # Статус и консоль
+        self.status_text = urwid.Text('Ready')
+        self.command_prompt = urwid.Edit('redis> ')
+        urwid.connect_signal(self.command_prompt, 'change', self.on_command_change)
+
+        # Результат выполнения команды
+        self.command_result = urwid.Text('')
+
+        # Footer pile
+        self.footer_pile = urwid.Pile([
+            urwid.AttrMap(self.tab_text, 'footer'),
+            urwid.AttrMap(self.status_text, 'footer'),
+        ])
+
+        # Собираем
+        body = urwid.Pile([
+            ('pack', urwid.AttrMap(urwid.Padding(toolbar, left=1, right=1), 'background')),
+            ('pack', urwid.Divider('─')),
+            ('weight', 1, urwid.AttrMap(content, 'background')),
+            ('pack', urwid.Divider('─')),
+            ('pack', self.footer_pile),
+        ])
+
+        self.main_frame = urwid.Frame(
+            header=self.header,
+            body=urwid.AttrMap(body, 'background')
+        )
+
+        self.update_connection_tree()
+
+    def on_command_change(self, edit, new_text):
+        """Обработка изменения команды"""
+        pass
+
+    def toggle_console(self):
+        """Переключение консоли"""
+        if self.console_mode:
+            # Выключаем консоль
+            self.footer_pile.contents = [
+                (urwid.AttrMap(self.tab_text, 'footer'), ('pack', None)),
+                (urwid.AttrMap(self.status_text, 'footer'), ('pack', None)),
+            ]
+            self.console_mode = False
+        else:
+            # Включаем консоль
+            self.footer_pile.contents = [
+                (urwid.AttrMap(self.tab_text, 'footer'), ('pack', None)),
+                (urwid.AttrMap(self.status_text, 'footer'), ('pack', None)),
+                (urwid.AttrMap(self.command_prompt, 'footer'), ('pack', None)),
+                (urwid.AttrMap(self.command_result, 'footer'), ('pack', None)),
+            ]
+            self.console_mode = True
+            # Фокус на промпт
+            self.footer_pile.focus_position = 2
+
+    def execute_command(self):
+        """Выполнение команды из консоли"""
+        if not self.current_connection or not self.current_connection.connected:
+            self.command_result.set_text(('error', 'Not connected'))
+            return
+
+        command = self.command_prompt.get_edit_text().strip()
+        if not command:
+            return
+
+        try:
+            # Разбираем команду
+            parts = command.split()
+            cmd = parts[0].upper()
+            args = parts[1:]
+
+            # Выполняем
+            result = self.current_connection.client.execute_command(cmd, *args)
+
+            # Форматируем результат
+            if isinstance(result, bytes):
+                result_str = result.decode('utf-8', errors='replace')
+            elif isinstance(result, list):
+                result_str = '\n'.join([
+                    item.decode('utf-8', errors='replace') if isinstance(item, bytes) else str(item)
+                    for item in result
+                ])
+            else:
+                result_str = str(result)
+
+            self.command_result.set_text(('success', f'Result: {result_str}'))
+            logger.info(f"Executed: {command}")
+
+            # Очищаем промпт
+            self.command_prompt.set_edit_text('')
+
+            # Обновляем если команда могла изменить данные
+            if cmd in ['SET', 'DEL', 'HSET', 'LPUSH', 'RPUSH', 'SADD', 'ZADD']:
+                self.refresh_keys()
+
+        except Exception as e:
+            self.command_result.set_text(('error', f'Error: {str(e)}'))
+            logger.error(f"Command failed: {e}")
+
+    def update_connection_tree(self):
+        """Обновление дерева подключений"""
+        self.connection_tree[:] = []
+
+        for name, profile in self.profiles.items():
+            conn = self.connections.get(name)
+
+            if conn and conn.connected:
+                icon = '● '
+                style = 'connection'
+            else:
+                icon = '○ '
+                style = 'connection'
+
+            label = f"{icon}{name} ({profile.host}:{profile.port}:{profile.db})"
+
+            btn = urwid.Button(label, on_press=self.on_connection_select, user_data=name)
+
+            if conn and conn.connected:
+                item = urwid.AttrMap(btn, style, 'connection_selected')
+            else:
+                item = urwid.AttrMap(btn, style, 'sidebar_focus')
+
+            self.connection_tree.append(item)
+
+            # Дерево ключей для активного подключения
+            if conn and conn.connected and self.current_connection == conn:
+                tree_items = self.build_tree_items(self.key_tree_root, level=1)
+                self.connection_tree.extend(tree_items)
+
+        self.update_tabs()
+
+    def build_tree_items(self, node: KeyTreeNode, level: int = 0) -> List:
+        """Построение элементов дерева"""
+        items = []
+
+        for name, child in sorted(node.children.items()):
+            indent = '  ' * level
+
+            if child.is_key:
+                icon = 'abc '
+                label = f"{indent}└─ {icon}{name}"
+                btn = urwid.Button(label, on_press=self.on_key_select, user_data=child.full_path)
+                item = urwid.AttrMap(btn, 'key_item', 'key_item_focus')
+            else:
+                icon = '▸ ' if not child.expanded else '▾ '
+                count = f" ({child.key_count})"
+                label = f"{indent}└─ {icon}{name}{count}"
+                btn = urwid.Button(label, on_press=self.on_folder_toggle, user_data=child)
+                item = urwid.AttrMap(btn, 'key_folder', 'key_folder_focus')
+
+            items.append(item)
+
+            if not child.is_key and child.expanded:
+                items.extend(self.build_tree_items(child, level + 1))
+
+        return items
+
+    def on_connection_select(self, button, connection_name: str):
+        """Выбор подключения"""
+        profile = self.profiles.get(connection_name)
+        if profile:
+            if connection_name in self.connections:
+                self.current_connection = self.connections[connection_name]
+            else:
+                self.connect_to_profile(profile)
+
+            self.refresh_keys()
+            self.update_connection_tree()
+
+    def on_folder_toggle(self, button, node: KeyTreeNode):
+        """Переключение папки"""
+        node.expanded = not node.expanded
+        self.update_connection_tree()
+
+    def on_key_select(self, button, key_path: str):
+        """Выбор ключа"""
+        if not self.current_connection or not self.current_connection.connected:
+            return
+
+        self.current_key = key_path.encode('utf-8')
+        self.display_key_details(self.current_key)
+
+    def connect_to_profile(self, profile: ConnectionProfile):
+        """Подключение к профилю"""
+        conn = RedisConnection(profile)
+        success, message = conn.connect()
+
+        if success:
+            self.connections[profile.name] = conn
+            self.current_connection = conn
+            self.set_status(f"Connected to {profile.name}", 'success')
+            self.refresh_keys()
+        else:
+            self.set_status(f"Connection failed: {message}", 'error')
+
+    def disconnect(self):
+        """Отключение"""
+        if self.current_connection:
+            self.current_connection.disconnect()
+            self.set_status("Disconnected", 'success')
+
+    def refresh_keys(self):
+        """Обновление списка ключей"""
+        if not self.current_connection or not self.current_connection.connected:
+            return
+
+        try:
+            cursor = 0
+            keys = []
+
+            while True:
+                cursor, batch = self.current_connection.client.scan(
+                    cursor, match='*', count=100
+                )
+                keys.extend(batch)
+                if cursor == 0:
+                    break
+                if len(keys) >= 1000:
+                    break
+
+            # Строим дерево
+            self.key_tree_root = KeyTreeNode('root')
+
+            for key in keys:
+                try:
+                    key_str = key.decode('utf-8', errors='replace')
+                    parts = key_str.split(self.separator)
+                    self.key_tree_root.add_key(parts, key_str, self.separator)
+                except Exception as e:
+                    logger.error(f"Error processing key: {e}")
+
+            self.update_connection_tree()
+            self.set_status(f"Loaded {len(keys)} keys")
+
+        except Exception as e:
+            self.set_status(f"Error loading keys: {e}", 'error')
+            logger.error(f"Error loading keys: {e}")
+
+    def display_key_details(self, key: bytes):
+        """Отображение деталей ключа"""
+        if not self.current_connection or not self.current_connection.connected:
+            return
+
+        try:
+            client = self.current_connection.client
+            key_str = key.decode('utf-8', errors='replace')
+
+            key_type = client.type(key).decode('utf-8')
+            ttl = client.ttl(key)
+
+            self.detail_walker[:] = []
+
+            self.detail_walker.append(urwid.Text([
+                ('info_label', 'Key: '),
+                ('info_value', key_str)
+            ]))
+            self.detail_walker.append(urwid.Divider())
+
+            info_items = [
+                ('Type', key_type),
+                ('TTL', f"{ttl}s" if ttl > 0 else 'No expiration' if ttl == -1 else 'N/A'),
+            ]
+
+            if key_type == 'string':
+                size = client.strlen(key)
+                info_items.append(('Size', f"{size} bytes"))
+            elif key_type == 'list':
+                size = client.llen(key)
+                info_items.append(('Length', str(size)))
+            elif key_type == 'set':
+                size = client.scard(key)
+                info_items.append(('Members', str(size)))
+            elif key_type == 'zset':
+                size = client.zcard(key)
+                info_items.append(('Members', str(size)))
+            elif key_type == 'hash':
+                size = client.hlen(key)
+                info_items.append(('Fields', str(size)))
+
+            for label, value in info_items:
+                row = urwid.Columns([
+                    ('weight', 1, urwid.AttrMap(urwid.Text(label), 'info_label')),
+                    ('weight', 2, urwid.AttrMap(urwid.Text(str(value)), 'info_value')),
+                ])
+                self.detail_walker.append(row)
+
+            self.detail_walker.append(urwid.Divider())
+            self.detail_walker.append(urwid.Text(('info_label', 'Value:')))
+            self.detail_walker.append(urwid.Divider())
+
+            # Значение
+            if key_type == 'string':
+                value = client.get(key)
+                try:
+                    value_str = value.decode('utf-8', errors='replace')
+                    self.detail_walker.append(urwid.Text(value_str))
+                except:
+                    self.detail_walker.append(urwid.Text(f'<binary: {len(value)} bytes>'))
+
+            elif key_type == 'hash':
+                hash_data = client.hgetall(key)
+                for field, val in hash_data.items():
+                    try:
+                        field_str = field.decode('utf-8', errors='replace')
+                        val_str = val.decode('utf-8', errors='replace')
+                        row = urwid.Columns([
+                            ('weight', 1, urwid.Text(('key_folder', field_str))),
+                            ('weight', 2, urwid.Text(val_str)),
+                        ])
+                        self.detail_walker.append(row)
+                    except:
+                        pass
+
+            elif key_type == 'list':
+                list_data = client.lrange(key, 0, 99)
+                for idx, item in enumerate(list_data):
+                    try:
+                        item_str = item.decode('utf-8', errors='replace')
+                        self.detail_walker.append(urwid.Text(f"[{idx}] {item_str}"))
+                    except:
+                        pass
+
+            elif key_type == 'set':
+                set_data = list(client.smembers(key))[:100]
+                for item in set_data:
+                    try:
+                        item_str = item.decode('utf-8', errors='replace')
+                        self.detail_walker.append(urwid.Text(f"• {item_str}"))
+                    except:
+                        pass
+
+            elif key_type == 'zset':
+                zset_data = client.zrange(key, 0, 99, withscores=True)
+                for member, score in zset_data:
+                    try:
+                        member_str = member.decode('utf-
