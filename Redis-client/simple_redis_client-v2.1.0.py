@@ -1,5 +1,5 @@
 """
-Simple Redis Client - Production Ready v2.1.5
+Simple Redis Client - Production Ready v2.1.0
 
 Новые возможности:
 - Auto-reconnect с экспоненциальным backoff
@@ -15,12 +15,9 @@ Simple Redis Client - Production Ready v2.1.5
 - Callbacks для мониторинга
 - Lua scripts (EVAL, EVALSHA)
 - NullHandler для библиотек
-- Обратная совместимость с v1.0.0
-- cluster_nodes property как alias для cluster_pools
-- scan_all_nodes_iter работает с ConnectionPool
 """
 
-__version__ = "2.1.5"
+__version__ = "2.1.0"
 __author__ = "Dmitry Tarasov"
 
 __all__ = [
@@ -497,21 +494,6 @@ class ConnectionPool:
             self._in_use.clear()
             self._created_connections = 0
 
-    def execute_command(self, *args, **kwargs) -> Any:
-        """Обратная совместимость с v1.0.0: выполнить команду через пул
-
-        Автоматически получает соединение из пула, выполняет команду и возвращает соединение.
-        Это позволяет использовать ConnectionPool как RedisConnection из v1.0.0.
-
-        Example:
-            pool = client.cluster_nodes['172.22.0.6:7004']
-            response = pool.execute_command('SCAN', 0, 'MATCH', 'user:*')
-        """
-        conn = self.get_connection()
-        try:
-            return conn.execute_command(*args, **kwargs)
-        finally:
-            self.release(conn)
 
 # ============ Cluster Node ============
 
@@ -610,20 +592,6 @@ class RedisClient:
 
         if self.is_cluster:
             self._load_cluster_topology()
-
-    # ============ Backward Compatibility Properties ============
-
-    @property
-    def cluster_nodes(self) -> Dict[str, ConnectionPool]:
-        """Backward compatibility: cluster_nodes теперь указывает на cluster_pools
-
-        В v1.0.0: cluster_nodes был Dict[str, RedisConnection]
-        В v2.1.0+: cluster_pools - Dict[str, ConnectionPool]
-
-        Для совместимости возвращаем cluster_pools.
-        Чтобы получить соединение: pool.get_connection()
-        """
-        return self.cluster_pools
 
     def _discover_master_from_sentinel(self) -> Tuple[str, int]:
         """Получить адрес мастера через Sentinel"""
@@ -1157,26 +1125,6 @@ class RedisClient:
         """EXPIRE"""
         return self.execute_command('EXPIRE', key, seconds, key=key)
 
-    def type(self, key: Union[str, bytes]) -> bytes:
-        """TYPE - получить тип ключа"""
-        return self.execute_command('TYPE', key, key=key, for_read=True)
-
-    def rename(self, old_key: Union[str, bytes], new_key: Union[str, bytes]) -> str:
-        """RENAME - переименовать ключ"""
-        return self.execute_command('RENAME', old_key, new_key, key=old_key)
-
-    def strlen(self, key: Union[str, bytes]) -> int:
-        """STRLEN - длина строкового значения"""
-        return self.execute_command('STRLEN', key, key=key, for_read=True)
-
-    def incrby(self, key: Union[str, bytes], amount: int) -> int:
-        """INCRBY - увеличить на значение"""
-        return self.execute_command('INCRBY', key, amount, key=key)
-
-    def decrby(self, key: Union[str, bytes], amount: int) -> int:
-        """DECRBY - уменьшить на значение"""
-        return self.execute_command('DECRBY', key, amount, key=key)
-
     def persist(self, key: Union[str, bytes]) -> int:
         """PERSIST"""
         return self.execute_command('PERSIST', key, key=key)
@@ -1314,19 +1262,6 @@ class RedisClient:
         """ZREM"""
         return self.execute_command('ZREM', key, *members, key=key)
 
-    def select(self, db: int):
-        """SELECT - выбрать базу данных (не работает в кластере)"""
-        if self.is_cluster:
-            raise RedisError('SELECT not allowed in cluster mode')
-
-        # Выполняем SELECT через main_pool
-        conn = self.main_pool.get_connection()
-        try:
-            conn.execute_command('SELECT', db)
-            self.db = db
-        finally:
-            self.main_pool.release(conn)
-
     # ============ Scan ============
 
     def scan(self, cursor: int = 0, match: Optional[str] = None,
@@ -1351,47 +1286,6 @@ class RedisClient:
                 yield key
             if cursor == 0:
                 break
-
-    def scan_all_nodes_iter(self, match: Optional[str] = None, count: int = 100) -> Iterator[bytes]:
-        """Итератор по ВСЕМ ключам кластера (все узлы)
-
-        Совместимость с v1.0.0: работает с cluster_pools (ConnectionPool)
-        """
-        if not self.is_cluster:
-            yield from self.scan_iter(match=match, count=count)
-            return
-
-        seen_keys = set()
-        for node_id, pool in self.cluster_pools.items():
-            logger.debug(f"Scanning node {node_id}")
-            conn = pool.get_connection()
-            try:
-                cursor = 0
-                while True:
-                    args = ['SCAN', cursor]
-                    if match:
-                        args.extend(['MATCH', match])
-                    if count:
-                        args.extend(['COUNT', count])
-
-                    try:
-                        response = conn.execute_command(*args)
-                        cursor = int(response[0])
-                        keys = response[1]
-
-                        for key in keys:
-                            if key not in seen_keys:
-                                seen_keys.add(key)
-                                yield key
-
-                        if cursor == 0:
-                            break
-
-                    except Exception as e:
-                        logger.error(f"Error scanning node {node_id}: {e}")
-                        break
-            finally:
-                pool.release(conn)
 
     # ============ Cluster Utilities ============
 
@@ -1433,218 +1327,6 @@ class RedisClient:
             pool.close_all()
 
         self.cluster_pools.clear()
-
-
-    # ============ Недостающие методы из v1.0.0 ============
-
-    def info(self, section: Optional[str] = None) -> Dict[str, Any]:
-        """INFO - информация о сервере"""
-        if section:
-            response = self.execute_command('INFO', section, for_read=True)
-        else:
-            response = self.execute_command('INFO', for_read=True)
-
-        if isinstance(response, bytes):
-            response = response.decode('utf-8')
-
-        result = {}
-        current_section = None
-        for line in response.split('\n'):
-            line = line.strip()
-            if not line or line.startswith('#'):
-                if line.startswith('#'):
-                    current_section = line[1:].strip().lower()
-                    result[current_section] = {}
-                continue
-
-            if ':' in line:
-                key, value = line.split(':', 1)
-                try:
-                    value = float(value) if '.' in value else int(value)
-                except:
-                    pass
-
-                if current_section:
-                    result[current_section][key] = value
-                else:
-                    result[key] = value
-
-        return result
-
-    def dbsize(self) -> int:
-        """DBSIZE - количество ключей в текущей БД"""
-        if self.is_cluster:
-            logger.warning("DBSIZE in cluster mode returns approximate count")
-        return self.execute_command('DBSIZE', for_read=True)
-
-    def flushdb(self, asynchronous: bool = False) -> str:
-        """FLUSHDB - очистить текущую БД"""
-        if self.is_cluster:
-            raise RedisError('FLUSHDB requires cluster-wide operation')
-
-        if asynchronous:
-            return self.execute_command('FLUSHDB', 'ASYNC')
-        return self.execute_command('FLUSHDB')
-
-    def flushall(self, asynchronous: bool = False) -> str:
-        """FLUSHALL - очистить все БД"""
-        if asynchronous:
-            return self.execute_command('FLUSHALL', 'ASYNC')
-        return self.execute_command('FLUSHALL')
-
-    def keys(self, pattern: str = '*') -> List[bytes]:
-        """KEYS - получить все ключи по паттерну (осторожно на продакшене!)"""
-        return self.execute_command('KEYS', pattern, for_read=True)
-
-    def hscan(self, key: Union[str, bytes], cursor: int = 0,
-              match: Optional[str] = None, count: Optional[int] = None) -> Tuple[int, Dict]:
-        """HSCAN - итеративное сканирование hash"""
-        args = ['HSCAN', key, cursor]
-        if match:
-            args.extend(['MATCH', match])
-        if count:
-            args.extend(['COUNT', count])
-
-        response = self.execute_command(*args, key=key, for_read=True)
-        new_cursor = int(response[0])
-        items = response[1]
-        result = {}
-        for i in range(0, len(items), 2):
-            result[items[i]] = items[i + 1]
-        return new_cursor, result
-
-    def hscan_iter(self, key: Union[str, bytes], match: Optional[str] = None,
-                   count: int = 100) -> Iterator[Tuple[bytes, bytes]]:
-        """HSCAN итератор"""
-        cursor = 0
-        while True:
-            cursor, data = self.hscan(key, cursor, match=match, count=count)
-            for field, value in data.items():
-                yield field, value
-            if cursor == 0:
-                break
-
-    def sscan(self, key: Union[str, bytes], cursor: int = 0,
-              match: Optional[str] = None, count: Optional[int] = None) -> Tuple[int, List[bytes]]:
-        """SSCAN - итеративное сканирование set"""
-        args = ['SSCAN', key, cursor]
-        if match:
-            args.extend(['MATCH', match])
-        if count:
-            args.extend(['COUNT', count])
-
-        response = self.execute_command(*args, key=key, for_read=True)
-        return int(response[0]), response[1]
-
-    def sscan_iter(self, key: Union[str, bytes], match: Optional[str] = None,
-                   count: int = 100) -> Iterator[bytes]:
-        """SSCAN итератор"""
-        cursor = 0
-        while True:
-            cursor, members = self.sscan(key, cursor, match=match, count=count)
-            for member in members:
-                yield member
-            if cursor == 0:
-                break
-
-    def zscan(self, key: Union[str, bytes], cursor: int = 0,
-              match: Optional[str] = None, count: Optional[int] = None) -> Tuple[int, List]:
-        """ZSCAN - итеративное сканирование sorted set"""
-        args = ['ZSCAN', key, cursor]
-        if match:
-            args.extend(['MATCH', match])
-        if count:
-            args.extend(['COUNT', count])
-
-        response = self.execute_command(*args, key=key, for_read=True)
-        new_cursor = int(response[0])
-        items = response[1]
-        result = []
-        for i in range(0, len(items), 2):
-            result.append((items[i], float(items[i + 1])))
-        return new_cursor, result
-
-    def zscan_iter(self, key: Union[str, bytes], match: Optional[str] = None,
-                   count: int = 100) -> Iterator[Tuple[bytes, float]]:
-        """ZSCAN итератор"""
-        cursor = 0
-        while True:
-            cursor, items = self.zscan(key, cursor, match=match, count=count)
-            for member, score in items:
-                yield member, score
-            if cursor == 0:
-                break
-
-    def config_get(self, parameter: str) -> Dict:
-        """CONFIG GET - получить параметр конфигурации"""
-        response = self.execute_command('CONFIG', 'GET', parameter)
-        result = {}
-        for i in range(0, len(response), 2):
-            key = response[i]
-            if isinstance(key, bytes):
-                key = key.decode('utf-8')
-            value = response[i + 1]
-            if isinstance(value, bytes):
-                value = value.decode('utf-8')
-            result[key] = value
-        return result
-
-    def client_list(self) -> str:
-        """CLIENT LIST - список подключённых клиентов"""
-        response = self.execute_command('CLIENT', 'LIST')
-        if isinstance(response, bytes):
-            return response.decode('utf-8')
-        return response
-
-    def cluster_keyslot(self, key: Union[str, bytes]) -> int:
-        """CLUSTER KEYSLOT - вычислить slot для ключа"""
-        if not self.is_cluster:
-            return self._get_slot(key)
-
-        try:
-            return self.execute_command('CLUSTER', 'KEYSLOT', key)
-        except:
-            return self._get_slot(key)
-
-    def get_node_from_key(self, key: Union[str, bytes]) -> ClusterNode:
-        """Получить узел кластера для ключа"""
-        if not self.is_cluster:
-            return ClusterNode(
-                host=self.host,
-                port=self.port,
-                node_id=f"{self.host}:{self.port}",
-                slots=[],
-                role='master'
-            )
-
-        slot = self._get_slot(key)
-        node_id = self.cluster_slots.get(slot)
-
-        if node_id and node_id in self.cluster_nodes_info:
-            node_info = self.cluster_nodes_info[node_id]
-            return node_info
-
-        return ClusterNode(
-            host=self.host,
-            port=self.port,
-            node_id=f"{self.host}:{self.port}",
-            slots=[slot],
-            role='master'
-        )
-
-    def cluster_info(self) -> str:
-        """CLUSTER INFO - информация о кластере"""
-        response = self.execute_command('CLUSTER', 'INFO')
-        if isinstance(response, bytes):
-            return response.decode('utf-8')
-        return response
-
-    # def cluster_nodes(self) -> str:
-    #     """CLUSTER NODES - информация об узлах кластера"""
-    #     response = self.execute_command('CLUSTER', 'NODES')
-    #     if isinstance(response, bytes):
-    #         return response.decode('utf-8')
-    #     return response
 
 
 # ============ Script Helper ============

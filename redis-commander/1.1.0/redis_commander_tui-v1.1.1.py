@@ -2587,22 +2587,11 @@ class RedisCommanderUI:
 
             # Проверяем, является ли это кластером
             if client.is_cluster and client.cluster_nodes:
-
-                # Фильтруем только мастера из cluster_nodes_info
-                master_nodes = {
-                    node_id: pool
-                    for node_id, pool in client.cluster_nodes.items()
-                    if node_id in client.cluster_nodes_info
-                       and client.cluster_nodes_info[node_id].role == 'master'
-                }
                 # Сканируем КАЖДЫЙ мастер узел в кластере
-                logger.info(f"Scanning {len(master_nodes)} master nodes...")
+                logger.info(f"Scanning {len(client.cluster_nodes)} cluster nodes...")
 
-                # logger.info(f"Scanning {len(client.cluster_nodes)} cluster nodes...")
-                for node_id, node_conn in master_nodes.items():
-                    logger.info(f"Scanning master node: {node_id}")
-                # for node_id, node_conn in client.cluster_nodes.items():
-                #    logger.info(f"Scanning node: {node_id}")
+                for node_id, node_conn in client.cluster_nodes.items():
+                    logger.info(f"Scanning node: {node_id}")
 
                     try:
                         # SCAN на конкретном узле
