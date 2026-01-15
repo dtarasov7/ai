@@ -1,0 +1,736 @@
+@startuml class_diagram
+title Redis Commander TUI - Class Diagram
+
+' ============= Модели данных =============
+package "Data Models" {
+    class ConnectionProfile {
+        +name: str
+        +host: str
+        +port: int
+        +password: Optional[str]
+        +username: Optional[str]
+        +ssl: bool
+        +ssl_ca_certs: Optional[str]
+        +ssl_certfile: Optional[str]
+        +ssl_keyfile: Optional[str]
+        +socket_path: Optional[str]
+        +readonly: bool
+        +cluster_mode: bool
+        +cluster_nodes: List[Tuple[str, int]]
+        --
+        +to_dict(): Dict
+    }
+
+    class RedisConnection {
+        +profile: ConnectionProfile
+        +client: Optional[Redis]
+        +cluster_client: Optional[RedisCluster]
+        +connected: bool
+        +current_db: int
+        +is_cluster: bool
+        --
+        +connect(): Tuple[bool, str]
+        +disconnect(): void
+        +select_db(db: int): Tuple[bool, str]
+        +active_client: Property
+        -_connect_standalone(): Tuple[bool, str]
+        -_connect_cluster(): Tuple[bool, str]
+    }
+}
+
+' ============= UI Компоненты =============
+package "UI Components" {
+    class KeyListItem {
+        +key: bytes
+        +key_type: str
+        +marked: bool
+        +on_select_callback: Callable
+        --
+        +toggle_mark(): void
+        +update_display(): void
+        +keypress(size, key): str
+    }
+
+    class KeyListView {
+        +all_keys: List[Tuple[bytes, str]]
+        +filtered_keys: List[Tuple[bytes, str]]
+        +filter_pattern: Optional[str]
+        +marked_keys: Set[bytes]
+        +key_cache: Dict[bytes, KeyListItem]
+        --
+        +set_keys(keys_with_types): void
+        +apply_filter(pattern): void
+        +refresh_display(): void
+        +get_focused_key(): Optional[bytes]
+        +get_marked_keys(): List[bytes]
+        +mark_by_pattern(pattern): void
+        +unmark_all(): void
+        +toggle_mark_focused(): void
+        -on_key_selected(key): void
+    }
+
+    class AddKeyDialog {
+        +connection: RedisConnection
+        +edit_key: Optional[bytes]
+        +current_type: str
+        +value_changed: bool
+        --
+        +load_key_data(key): void
+        +update_value_widget(key_type): void
+        +on_save(button): void
+        +show_error(message): void
+        +show_confirm_dialog(): void
+        -on_type_changed(button, state, type): void
+    }
+
+    class ScrollBar {
+        +widget: Widget
+        +scrollbar_width: int
+        +listbox: ListBox
+        --
+        +render(size, focus): Canvas
+        -_find_listbox(widget): Optional[ListBox]
+    }
+
+    class CommandPromptWrapper {
+        +edit_widget: Edit
+        +on_up: Callable
+        +on_down: Callable
+        +on_enter: Callable
+        --
+        +keypress(size, key): str
+    }
+}
+
+' ============= Главный класс =============
+package "Main Application" {
+    class RedisCommanderUI {
+        +connections: Dict[str, RedisConnection]
+        +current_connection: Optional[RedisConnection]
+        +profiles: Dict[str, ConnectionProfile]
+        +key_list_view: KeyListView
+        +current_key: Optional[bytes]
+        +console_mode: bool
+        +command_history: List[str]
+        +history_index: int
+        --
+        +create_ui(): void
+        +run(): void
+        +connect_to_profile(profile): void
+        +disconnect(): void
+        +refresh_keys(): void
+        +on_key_select(key): void
+        +display_key_details(key): void
+        +delete_key(key): void
+        +execute_console_command(): void
+        +toggle_console(): void
+        +show_add_key_dialog(): void
+        +handle_input(key): void
+        --
+        +load_profiles(): Dict
+        -_load_plaintext_config(path): dict
+        -_load_encrypted_config(path): dict
+        -_load_from_vault(): dict
+        -_parse_profiles(data): Dict
+        -_scan_cluster_keys_with_types_iter(): List
+    }
+}
+
+' ============= Отношения =============
+RedisCommanderUI "1" *-- "many" RedisConnection : manages
+RedisCommanderUI "1" *-- "1" KeyListView : contains
+RedisConnection "1" o-- "1" ConnectionProfile : uses
+KeyListView "1" *-- "many" KeyListItem : contains
+AddKeyDialog "1" o-- "1" RedisConnection : uses
+
+@enduml
+
+' ============================================================
+' ============================================================
+
+@startuml sequence_connect
+title Sequence Diagram - Connection Flow
+
+actor User
+participant "RedisCommanderUI" as UI
+participant "RedisConnection" as Conn
+participant "ConnectionProfile" as Profile
+participant "Redis Client" as Client
+
+User -> UI: select server in tree
+activate UI
+
+UI -> UI: on_server_select(profile_name)
+UI -> Profile: get profile
+
+alt profile exists in connections
+    UI -> Conn: get existing connection
+    UI -> UI: set as current_connection
+else new connection needed
+    UI -> Profile: read profile config
+    
+    alt Standalone Mode
+        UI -> Conn: new RedisConnection(profile)
+        activate Conn
+        Conn -> Client: create Redis client
+        Client --> Conn: client instance
+        Conn -> Client: ping()
+        Client --> Conn: PONG
+        Conn --> UI: (True, "Connected")
+        deactivate Conn
+    else Cluster Mode
+        UI -> Conn: new RedisConnection(profile)
+        activate Conn
+        Conn -> Client: create RedisCluster client
+        Client --> Conn: cluster_client instance
+        Conn -> Client: ping()
+        Client --> Conn: PONG
+        Conn -> Client: cluster_info()
+        Client --> Conn: cluster state
+        Conn --> UI: (True, "Connected to cluster")
+        deactivate Conn
+    end
+    
+    UI -> UI: add to connections dict
+    UI -> UI: set as current_connection
+end
+
+UI -> UI: refresh_keys()
+UI -> UI: update_connection_tree()
+UI -> User: show success status
+
+deactivate UI
+
+@enduml
+
+' ============================================================
+' ============================================================
+
+@startuml sequence_keys_scan
+title Sequence Diagram - Keys Scanning
+
+actor User
+participant "RedisCommanderUI" as UI
+participant "KeyListView" as KLV
+participant "RedisConnection" as Conn
+participant "Redis Client" as Client
+
+User -> UI: press F11 (refresh)
+activate UI
+
+UI -> UI: refresh_keys()
+UI -> Conn: get active_client
+
+alt Cluster Mode
+    UI -> Client: scan each master node
+    loop for each node
+        Client -> Client: SCAN cursor match * count 100
+        Client --> UI: (new_cursor, keys_batch)
+        
+        loop for each key
+            UI -> Client: TYPE key
+            Client --> UI: key_type
+            UI -> UI: append (key, type) to list
+        end
+    end
+else Standalone Mode
+    UI -> Client: scan_iter(match='*', count=100)
+    loop for each key
+        Client --> UI: key
+        UI -> Client: TYPE key
+        Client --> UI: key_type
+        UI -> UI: append (key, type) to list
+    end
+end
+
+UI -> KLV: set_keys(keys_with_types)
+activate KLV
+
+KLV -> KLV: all_keys = keys_with_types
+KLV -> KLV: filtered_keys = copy
+KLV -> KLV: key_cache.clear()
+KLV -> KLV: refresh_display()
+
+loop for each filtered key
+    alt key in cache
+        KLV -> KLV: reuse cached KeyListItem
+    else create new
+        KLV -> KLV: create KeyListItem
+        KLV -> KLV: add to key_cache
+    end
+    KLV -> KLV: append to walker
+end
+
+KLV -> KLV: update_header()
+deactivate KLV
+
+UI -> UI: update_connection_tree()
+UI -> User: show "Loaded N keys"
+
+deactivate UI
+
+@enduml
+
+' ============================================================
+' ============================================================
+
+@startuml sequence_key_edit
+title Sequence Diagram - Key Edit Flow
+
+actor User
+participant "RedisCommanderUI" as UI
+participant "AddKeyDialog" as Dialog
+participant "RedisConnection" as Conn
+participant "Redis Client" as Client
+
+User -> UI: select key + press F4
+activate UI
+
+UI -> UI: get_selected_key()
+UI -> Dialog: new AddKeyDialog(conn, callback, edit_key)
+activate Dialog
+
+Dialog -> Client: TYPE key
+Client --> Dialog: key_type
+
+Dialog -> Dialog: set type radio button
+Dialog -> Dialog: update_value_widget(key_type)
+
+alt String
+    Dialog -> Client: GET key
+    Client --> Dialog: value
+    Dialog -> Dialog: set_edit_text(value)
+else Hash
+    Dialog -> Client: HGETALL key
+    Client --> Dialog: {field: value, ...}
+    Dialog -> Dialog: format as "field:value" lines
+else List
+    Dialog -> Client: LRANGE key 0 -1
+    Client --> Dialog: [item1, item2, ...]
+    Dialog -> Dialog: format as lines
+else Set/ZSet/etc
+    Dialog -> Client: respective command
+    Client --> Dialog: data
+    Dialog -> Dialog: format appropriately
+end
+
+Dialog -> Client: TTL key
+Client --> Dialog: ttl_value
+Dialog -> Dialog: set TTL field
+
+Dialog -> User: show dialog
+deactivate Dialog
+
+User -> Dialog: edit value
+User -> Dialog: press F7 (Save)
+activate Dialog
+
+Dialog -> Dialog: validate input
+
+alt Valid
+    Dialog -> Dialog: parse value by type
+    
+    alt type changed
+        Dialog -> Client: DEL key
+        Client --> Dialog: OK
+    end
+    
+    alt String
+        Dialog -> Client: SET key value
+    else Hash
+        Dialog -> Client: HSET key mapping={...}
+    else List
+        Dialog -> Client: RPUSH key *items
+    else others
+        Dialog -> Client: appropriate command
+    end
+    
+    Client --> Dialog: OK
+    
+    opt TTL specified
+        Dialog -> Client: EXPIRE key ttl
+        Client --> Dialog: OK
+    end
+    
+    Dialog -> UI: on_success_callback()
+    Dialog -> Dialog: emit 'close' signal
+else Invalid
+    Dialog -> Dialog: show_error(message)
+    Dialog -> User: display error
+end
+
+deactivate Dialog
+
+UI -> UI: refresh_keys()
+UI -> User: show success status
+
+deactivate UI
+
+@enduml
+
+' ============================================================
+' ============================================================
+
+@startuml component_diagram
+title Component Diagram - System Architecture
+
+package "Redis Commander TUI" {
+    
+    [Main Application] as Main
+    [UI Layer] as UI
+    [Connection Manager] as ConnMgr
+    [Configuration Loader] as ConfigLoader
+    [Console Interface] as Console
+    
+    package "UI Components" {
+        [KeyListView] as KLV
+        [AddKeyDialog] as Dialog
+        [ScrollBar] as SB
+        [Detail Panel] as DP
+    }
+    
+    package "Data Layer" {
+        [Connection Pool] as Pool
+        [Profile Storage] as Storage
+    }
+}
+
+cloud "External Systems" {
+    database "Redis Standalone" as RedisDB
+    database "Redis Cluster" as ClusterDB
+    storage "Config File" as ConfigFile
+    storage "Encrypted Config" as EncFile
+    storage "HashiCorp Vault" as Vault
+}
+
+Main --> UI : manages
+Main --> ConnMgr : uses
+Main --> Console : contains
+
+UI --> KLV : contains
+UI --> Dialog : shows
+UI --> SB : wraps
+UI --> DP : displays
+
+ConnMgr --> Pool : maintains
+Pool --> RedisDB : connects
+Pool --> ClusterDB : connects
+
+ConfigLoader --> ConfigFile : reads
+ConfigLoader --> EncFile : decrypts
+ConfigLoader --> Vault : fetches
+
+Main --> ConfigLoader : loads profiles
+ConnMgr --> Storage : stores connections
+
+@enduml
+
+' ============================================================
+' ============================================================
+
+@startuml deployment_diagram
+title Deployment Diagram
+
+node "User Workstation" {
+    component "Terminal" as Term {
+        [Redis Commander TUI] as App
+    }
+    
+    file "redis_profiles.json" as PlainConf
+    file "redis_profiles.enc" as EncConf
+    file "~/.redis_commander_history" as History
+    file "redis_tui_audit.log" as Log
+}
+
+node "Redis Server 1" {
+    database "Redis Standalone" as Redis1 {
+        [DB0]
+        [DB1]
+        [DB2]
+    }
+}
+
+node "Redis Cluster" {
+    node "Master Node 1" {
+        database "Redis" as CM1
+    }
+    node "Master Node 2" {
+        database "Redis" as CM2
+    }
+    node "Master Node 3" {
+        database "Redis" as CM3
+    }
+}
+
+node "HashiCorp Vault Server" {
+    storage "KV Secret Engine" as VaultKV {
+        [redis-commander profiles]
+    }
+}
+
+App --> PlainConf : reads (mode 1)
+App --> EncConf : decrypts (mode 2)
+App --> VaultKV : fetches (mode 3)
+App --> History : saves/loads
+App --> Log : writes
+
+App --> Redis1 : TCP 6379\n(standalone)
+App --> CM1 : TCP 7000\n(cluster)
+App --> CM2 : TCP 7001\n(cluster)
+App --> CM3 : TCP 7002\n(cluster)
+
+@enduml
+
+' ============================================================
+' ============================================================
+
+@startuml state_diagram
+title State Diagram - Application States
+
+[*] --> Startup
+
+Startup --> LoadingConfig : load profiles
+LoadingConfig --> NoConnections : profiles loaded
+LoadingConfig --> Error : load failed
+
+NoConnections --> Connecting : select profile
+Connecting --> Connected : connection success
+Connecting --> Disconnected : connection failed
+
+Connected --> ViewingKeys : load keys
+ViewingKeys --> ViewingKeyDetails : select key
+ViewingKeyDetails --> ViewingKeys : back to list
+
+ViewingKeys --> ConsoleMode : press F2
+ConsoleMode --> ViewingKeys : press F2/Esc
+
+ViewingKeys --> EditingKey : press F4
+EditingKey --> ViewingKeys : save/cancel
+
+ViewingKeys --> AddingKey : press F3
+AddingKey --> ViewingKeys : save/cancel
+
+Connected --> Disconnected : disconnect (F9)
+Disconnected --> Connecting : reconnect
+
+ViewingKeys --> FilteringKeys : press /
+FilteringKeys --> ViewingKeys : apply filter
+
+ViewingKeys --> MarkingKeys : space/Ctrl+A
+MarkingKeys --> DeletingKeys : press F8
+DeletingKeys --> ViewingKeys : confirm
+
+ViewingKeys --> [*] : press F10
+ConsoleMode --> [*] : press F10
+
+Error --> [*] : exit
+
+@enduml
+
+' ============================================================
+' ============================================================
+
+@startuml activity_diagram
+title Activity Diagram - Refresh Keys
+
+start
+
+:User presses F11;
+
+:Get current connection;
+
+if (Connection exists?) then (yes)
+    
+    if (Cluster mode?) then (yes)
+        
+        partition "Cluster Scan" {
+            :Get cluster nodes;
+            
+            repeat
+                :Select next master node;
+                :Initialize cursor = 0;
+                
+                repeat
+                    :Execute SCAN cursor MATCH * COUNT 100;
+                    :Receive (new_cursor, keys);
+                    
+                    repeat :for each key;
+                        :Execute TYPE key;
+                        :Append (key, type) to list;
+                    repeat while (more keys in batch?)
+                    
+                    :cursor = new_cursor;
+                repeat while (cursor != 0 AND count < 5000?)
+                
+            repeat while (more nodes?)
+        }
+        
+    else (no - Standalone)
+        
+        partition "Standalone Scan" {
+            :Start scan_iter(match='*', count=100);
+            
+            repeat
+                :Get next key from iterator;
+                :Execute TYPE key;
+                :Append (key, type) to list;
+            repeat while (more keys AND count < 5000?)
+        }
+        
+    endif
+    
+    :Remove duplicates;
+    :Update KeyListView with keys;
+    :Clear key_cache;
+    :Refresh display;
+    
+    partition "Render List" {
+        repeat :for each filtered key;
+            
+            if (Key in cache?) then (yes)
+                :Reuse cached KeyListItem;
+                :Update marked status;
+            else (no)
+                :Create new KeyListItem;
+                :Set callback;
+                :Add to cache;
+            endif
+            
+            :Wrap in AttrMap;
+            :Append to walker;
+        repeat while (more keys?)
+    }
+    
+    :Update header with key count;
+    :Update connection tree;
+    :Show success status;
+    
+else (no)
+    :Show error: "Not connected";
+endif
+
+stop
+
+@enduml
+
+' ============================================================
+' ============================================================
+
+@startuml mindmap
+title Redis Commander TUI - Feature Mind Map
+
+* Redis Commander TUI
+** Connection Management
+*** Profiles
+**** Plaintext config
+**** Encrypted config
+**** Vault integration
+*** Types
+**** Standalone Redis
+**** Redis Cluster
+**** Unix Socket
+*** Security
+**** SSL/TLS
+**** Authentication
+**** Readonly mode
+
+** Key Management
+*** Operations
+**** View keys
+**** Add new key
+**** Edit key
+**** Delete key
+**** Bulk delete
+*** Types Support
+**** String
+**** Hash
+**** List
+**** Set
+**** Sorted Set
+**** Bitmap
+**** Stream
+*** Features
+**** Filtering
+**** Marking
+**** Sorting
+**** Search patterns
+
+** Console Interface
+*** Command Execution
+**** All Redis commands
+**** Cluster-aware
+**** Autocomplete (future)
+*** History
+**** Command history
+**** Up/Down navigation
+**** Persistent storage
+*** Features
+**** Syntax highlighting (future)
+**** Multi-line input (future)
+
+** UI Components
+*** Panels
+**** Connections tree
+**** Key list
+**** Details panel
+**** Console panel
+*** Navigation
+**** Tab switching
+**** Keyboard shortcuts
+**** Mouse support (partial)
+*** Visualization
+**** Type icons
+**** Progress indicators
+**** Scrollbars
+**** Status bar
+
+** Data Handling
+*** Encoding
+**** UTF-8 support
+**** Binary data display
+**** Error handling
+*** Performance
+**** Key caching
+**** Lazy loading
+**** Scan optimization
+*** Limits
+**** 5000 keys per scan
+**** 100 items display
+**** History: 100 commands
+
+** Cluster Support
+*** Features
+**** Auto node discovery
+**** Slot calculation
+**** Cross-slot detection
+*** Limitations
+**** DB0 only
+**** No SELECT
+**** Hash tags required
+
+** Security Modes
+*** Mode 1: Plaintext
+**** Simple
+**** Development friendly
+**** Not for production
+*** Mode 2: Encrypted
+**** AES encryption
+**** PBKDF2 key derivation
+**** Password protected
+*** Mode 3: Vault
+**** Centralized secrets
+**** Audit logs
+**** Role-based access
+
+** Logging & Audit
+*** Audit Log
+**** All connections
+**** All commands
+**** All errors
+*** Debug Log
+**** Detailed tracing
+**** Performance metrics
+
+@enduml
+
+@enduml

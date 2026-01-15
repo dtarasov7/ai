@@ -1,0 +1,912 @@
+# Simple Redis Client - Документация разработчика
+
+## Содержание
+1. [Архитектура](#архитектура)
+2. [Классы и компоненты](#классы-и-компоненты)
+3. [RESP протокол](#resp-протокол)
+4. [Кластер Redis](#кластер-redis)
+5. [Расширение функционала](#расширение-функционала)
+6. [Тестирование](#тестирование)
+7. [Оптимизация](#оптимизация)
+
+## Архитектура
+
+### Общая структура
+
+```plantuml
+@startuml
+package "Simple Redis Client" {
+  class RedisClient {
+    - connection: RedisConnection
+    - cluster_nodes: Dict[str, RedisConnection]
+    - cluster_slots: Dict[int, str]
+    + execute_command(*args)
+    + get(), set(), hget(), etc.
+    + scan_iter(), hscan_iter()
+  }
+  
+  class RedisConnection {
+    - sock: socket.socket
+    + execute_command(*args)
+    + close()
+    + ping()
+  }
+  
+  class RESPParser {
+    + encode_command(*args): bytes
+    + decode_response(sock): Any
+    - _read_line(sock): bytes
+  }
+  
+  class RedisPipeline {
+    - client: RedisClient
+    - commands: List
+    + execute(): List
+    + __enter__(), __exit__()
+  }
+  
+  class ClusterNode {
+    + host: str
+    + port: int
+    + node_id: str
+    + slots: List[int]
+  }
+  
+  RedisClient "1" *-- "1..*" RedisConnection
+  RedisClient --> RESPParser : uses
+  RedisClient --> ClusterNode : creates
+  RedisConnection --> RESPParser : uses
+  RedisPipeline --> RedisClient : uses
+}
+
+@enduml
+```
+
+### Диаграмма последовательности: Выполнение команды
+
+```plantuml
+@startuml
+actor User
+participant RedisClient
+participant RedisConnection
+participant RESPParser
+participant Socket
+
+User -> RedisClient: execute_command("GET", "key")
+activate RedisClient
+
+alt is_cluster == True
+  RedisClient -> RedisClient: _get_slot("key")
+  RedisClient -> RedisClient: _get_connection_for_key("key")
+end
+
+RedisClient -> RESPParser: encode_command("GET", "key")
+activate RESPParser
+RESPParser --> RedisClient: bytes
+deactivate RESPParser
+
+RedisClient -> RedisConnection: execute_command("GET", "key")
+activate RedisConnection
+
+RedisConnection -> Socket: sendall(encoded_command)
+RedisConnection -> RESPParser: decode_response(sock)
+activate RESPParser
+
+RESPParser -> Socket: recv() [read response]
+RESPParser --> RedisConnection: decoded_value
+deactivate RESPParser
+
+alt Error: MOVED
+  RedisConnection --> RedisClient: RedisError("MOVED ...")
+  RedisClient -> RedisClient: update cluster topology
+  RedisClient -> RedisConnection: retry on new node
+end
+
+RedisConnection --> RedisClient: value
+deactivate RedisConnection
+
+RedisClient --> User: value
+deactivate RedisClient
+@enduml
+```
+
+### Диаграмма классов исключений
+
+```plantuml
+@startuml
+class Exception
+
+class RedisError {
+  Base exception for Redis errors
+}
+
+class RedisConnectionError {
+  Connection-related errors
+}
+
+class RedisClusterError {
+  Cluster-specific errors
+}
+
+Exception <|-- RedisError
+RedisError <|-- RedisConnectionError
+RedisError <|-- RedisClusterError
+@enduml
+```
+
+## Классы и компоненты
+
+### RESPParser
+
+Отвечает за кодирование/декодирование протокола RESP (REdis Serialization Protocol).
+
+#### Методы
+
+**encode_command(*args) -> bytes**
+- Кодирует команду в формат RESP
+- Поддерживает типы: str, bytes, int, float
+- Формат: `*N\r\n$len\r\ndata\r\n...`
+
+```python
+# Пример кодирования
+# SET key value -> *3\r\n$3\r\nSET\r\n$3\r\nkey\r\n$5\r\nvalue\r\n
+```
+
+**decode_response(sock) -> Any**
+- Декодирует ответ от сервера
+- Поддерживает типы RESP:
+  - `+` Simple String
+  - `-` Error
+  - `:` Integer
+  - `$` Bulk String
+  - `*` Array
+
+**_read_line(sock) -> bytes**
+- Читает строку до `\r\n`
+- Внутренний метод для парсинга
+
+#### Расширение парсера
+
+Для добавления новых типов данных (например, RESP3):
+
+```python
+@staticmethod
+def decode_response(sock) -> Any:
+    line = RESPParser._read_line(sock)
+    prefix = chr(line[0])
+    data = line[1:]
+    
+    # Добавить новый тип
+    if prefix == '%':  # Map в RESP3
+        count = int(data)
+        result = {}
+        for _ in range(count):
+            key = RESPParser.decode_response(sock)
+            value = RESPParser.decode_response(sock)
+            result[key] = value
+        return result
+    
+    # Существующая логика...
+```
+
+### RedisConnection
+
+Управляет соединением с одним узлом Redis.
+
+#### Конструктор
+
+```python
+def __init__(
+    self, 
+    host: str = 'localhost', 
+    port: int = 6379,
+    password: Optional[str] = None, 
+    username: Optional[str] = None,
+    db: int = 0, 
+    socket_timeout: int = 5,
+    ssl: bool = False, 
+    ssl_ca_certs: Optional[str] = None,
+    ssl_certfile: Optional[str] = None, 
+    ssl_keyfile: Optional[str] = None,
+    ssl_check_hostname: bool = True
+)
+```
+
+#### Процесс подключения
+
+```plantuml
+@startuml
+start
+:Create socket;
+:Set timeout;
+:Connect to host:port;
+
+if (SSL enabled?) then (yes)
+  :Create SSL context;
+  :Load certificates;
+  :Wrap socket with SSL;
+else (no)
+endif
+
+if (Password provided?) then (yes)
+  if (Username provided?) then (yes)
+    :AUTH username password;
+  else (no)
+    :AUTH password;
+  endif
+else (no)
+endif
+
+if (db != 0?) then (yes)
+  :SELECT db;
+else (no)
+endif
+
+:Log successful connection;
+stop
+@enduml
+```
+
+#### Добавление SSL с сертификатами клиента
+
+```python
+# В методе _connect
+if self.ssl:
+    context = ssl_module.create_default_context()
+    
+    # CA certificates для проверки сервера
+    if self.ssl_ca_certs:
+        context.load_verify_locations(cafile=self.ssl_ca_certs)
+    
+    # Клиентские сертификаты для mTLS
+    if self.ssl_certfile and self.ssl_keyfile:
+        context.load_cert_chain(
+            certfile=self.ssl_certfile, 
+            keyfile=self.ssl_keyfile
+        )
+    
+    # Опциональное отключение проверки hostname
+    if not self.ssl_check_hostname:
+        context.check_hostname = False
+        context.verify_mode = ssl_module.CERT_NONE
+    
+    sock = context.wrap_socket(sock, server_hostname=self.host)
+```
+
+### RedisClient
+
+Основной класс для взаимодействия с Redis.
+
+#### Управление кластером
+
+**_load_cluster_topology()**
+- Загружает информацию о топологии кластера через `CLUSTER SLOTS`
+- Создает соединения ко всем мастер-узлам
+- Строит карту слотов -> узлов
+
+**_get_slot(key) -> int**
+- Вычисляет CRC16 hash slot для ключа
+- Поддерживает hash tags: `{tag}`
+- Возвращает значение в диапазоне 0-16383
+
+```python
+# Примеры hash tags
+key = "user:{123}:profile"  # slot = CRC16("123") % 16384
+key = "{user:123}:settings" # slot = CRC16("user:123") % 16384
+```
+
+**_get_connection_for_key(key) -> RedisConnection**
+- Определяет узел для ключа на основе hash slot
+- Возвращает соответствующее соединение
+
+#### Обработка редиректов
+
+```plantuml
+@startuml
+start
+:Execute command on node;
+
+if (Response OK?) then (yes)
+  :Return result;
+  stop
+else (no)
+  if (Error = MOVED?) then (yes)
+    :Parse new node address;
+    :Update cluster topology;
+    :Retry on new node;
+  else if (Error = ASK?) then (yes)
+    :Create temp connection;
+    :Send ASKING command;
+    :Execute original command;
+    :Close temp connection;
+    :Return result;
+    stop
+  else (other error)
+    :Raise exception;
+    stop
+  endif
+endif
+@enduml
+```
+
+#### Реализация scan_iter
+
+Итератор для эффективного сканирования больших наборов данных:
+
+```python
+def scan_iter(self, match: Optional[str] = None, count: int = 100):
+    cursor = 0
+    while True:
+        cursor, keys = self.scan(cursor, match=match, count=count)
+        for key in keys:
+            yield key
+        if cursor == 0:  # Полный круг завершен
+            break
+```
+
+Аналогичные итераторы: `hscan_iter`, `sscan_iter`, `zscan_iter`
+
+## RESP протокол
+
+### Формат RESP
+
+```
+Simple Strings: +OK\r\n
+Errors: -Error message\r\n
+Integers: :1000\r\n
+Bulk Strings: $6\r\nfoobar\r\n
+Arrays: *2\r\n$3\r\nfoo\r\n$3\r\nbar\r\n
+Null: $-1\r\n
+```
+
+### Пример обмена данными
+
+```
+Client -> Server:
+*3\r\n$3\r\nSET\r\n$4\r\nname\r\n$4\r\nJohn\r\n
+
+Server -> Client:
++OK\r\n
+
+Client -> Server:
+*2\r\n$3\r\nGET\r\n$4\r\nname\r\n
+
+Server -> Client:
+$4\r\nJohn\r\n
+```
+
+### Расширение для новых типов данных
+
+Для поддержки типа данных Streams:
+
+```python
+def xadd(self, key: str, fields: Dict, stream_id: str = '*') -> bytes:
+    """Добавить запись в stream"""
+    args = ['XADD', key, stream_id]
+    for k, v in fields.items():
+        args.extend([k, v])
+    return self.execute_command(*args, key=key)
+
+def xread(self, streams: Dict[str, str], count: Optional[int] = None, 
+          block: Optional[int] = None) -> List:
+    """Читать из streams"""
+    args = ['XREAD']
+    if count:
+        args.extend(['COUNT', count])
+    if block is not None:
+        args.extend(['BLOCK', block])
+    args.append('STREAMS')
+    args.extend(streams.keys())
+    args.extend(streams.values())
+    return self.execute_command(*args)
+```
+
+## Кластер Redis
+
+### Алгоритм CRC16
+
+Используется для вычисления hash slot:
+
+```python
+def _get_slot(self, key: Union[str, bytes]) -> int:
+    if isinstance(key, str):
+        key = key.encode('utf-8')
+    
+    # Извлечение hash tag
+    start = key.find(b'{')
+    if start != -1:
+        end = key.find(b'}', start + 1)
+        if end != -1 and end > start + 1:
+            key = key[start + 1:end]
+    
+    # CRC16 расчет
+    crc = 0
+    for byte in key:
+        crc ^= byte << 8
+        for _ in range(8):
+            if crc & 0x8000:
+                crc = (crc << 1) ^ 0x1021
+            else:
+                crc = crc << 1
+            crc &= 0xFFFF
+    
+    return crc % 16384
+```
+
+### Карта слотов
+
+```plantuml
+@startmindmap
+* Redis Cluster (16384 slots)
+** Node 1
+*** Slots: 0-5460
+*** Master
+** Node 2
+*** Slots: 5461-10922
+*** Master
+** Node 3
+*** Slots: 10923-16383
+*** Master
+@endmindmap
+```
+
+### Сканирование всего кластера
+
+```python
+def scan_all_nodes_iter(self, match: Optional[str] = None, 
+                       count: int = 100) -> Iterator[bytes]:
+    """Итератор по ВСЕМ ключам кластера"""
+    if not self.is_cluster:
+        yield from self.scan_iter(match=match, count=count)
+        return
+    
+    seen_keys = set()  # Избежание дубликатов
+    
+    for node_id, node_conn in self.cluster_nodes.items():
+        cursor = 0
+        while True:
+            args = ['SCAN', cursor]
+            if match:
+                args.extend(['MATCH', match])
+            if count:
+                args.extend(['COUNT', count])
+            
+            response = node_conn.execute_command(*args)
+            cursor = int(response[0])
+            keys = response[1]
+            
+            for key in keys:
+                if key not in seen_keys:
+                    seen_keys.add(key)
+                    yield key
+            
+            if cursor == 0:
+                break
+```
+
+## Расширение функционала
+
+### Добавление новых команд
+
+Пример добавления команды GETEX (Redis 6.2+):
+
+```python
+def getex(self, key: Union[str, bytes], 
+          ex: Optional[int] = None,
+          px: Optional[int] = None,
+          exat: Optional[int] = None,
+          pxat: Optional[int] = None,
+          persist: bool = False) -> Optional[bytes]:
+    """
+    GET с установкой TTL
+    
+    Args:
+        key: Ключ
+        ex: TTL в секундах
+        px: TTL в миллисекундах
+        exat: Unix timestamp истечения (секунды)
+        pxat: Unix timestamp истечения (миллисекунды)
+        persist: Удалить TTL
+    """
+    args = ['GETEX', key]
+    
+    if ex is not None:
+        args.extend(['EX', ex])
+    elif px is not None:
+        args.extend(['PX', px])
+    elif exat is not None:
+        args.extend(['EXAT', exat])
+    elif pxat is not None:
+        args.extend(['PXAT', pxat])
+    elif persist:
+        args.append('PERSIST')
+    
+    return self.execute_command(*args, key=key)
+```
+
+### Добавление Pub/Sub
+
+```python
+class RedisPubSub:
+    """Pub/Sub реализация"""
+    
+    def __init__(self, connection: RedisConnection):
+        self.connection = connection
+        self.subscribed = False
+        
+    def subscribe(self, *channels):
+        """Подписаться на каналы"""
+        self.connection.execute_command('SUBSCRIBE', *channels)
+        self.subscribed = True
+    
+    def listen(self) -> Iterator[Dict]:
+        """Слушать сообщения"""
+        while self.subscribed:
+            response = RESPParser.decode_response(self.connection.sock)
+            if response[0] == b'message':
+                yield {
+                    'type': 'message',
+                    'channel': response[1],
+                    'data': response[2]
+                }
+    
+    def unsubscribe(self, *channels):
+        """Отписаться"""
+        self.connection.execute_command('UNSUBSCRIBE', *channels)
+
+# Добавить в RedisClient
+def pubsub(self) -> RedisPubSub:
+    """Создать Pub/Sub клиент"""
+    # Создать отдельное соединение для Pub/Sub
+    conn = RedisConnection(
+        host=self.host, port=self.port,
+        password=self.password, username=self.username,
+        socket_timeout=None  # Бесконечное ожидание
+    )
+    return RedisPubSub(conn)
+```
+
+### Добавление транзакций
+
+```python
+class RedisTransaction:
+    """MULTI/EXEC транзакция"""
+    
+    def __init__(self, client: RedisClient):
+        self.client = client
+        self.commands = []
+        self.connection = client.connection
+        
+    def __enter__(self):
+        self.connection.execute_command('MULTI')
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if exc_type is None:
+            return self.connection.execute_command('EXEC')
+        else:
+            self.connection.execute_command('DISCARD')
+            return False
+    
+    def execute_command(self, *args, **kwargs):
+        """Добавить команду в транзакцию"""
+        return self.connection.execute_command(*args)
+
+# В RedisClient
+def transaction(self):
+    """Создать транзакцию"""
+    return RedisTransaction(self)
+
+# Использование
+with client.transaction() as tx:
+    tx.execute_command('SET', 'key1', 'value1')
+    tx.execute_command('INCR', 'counter')
+    results = tx.execute_command('GET', 'key1')
+```
+
+### Connection pooling
+
+```python
+from queue import Queue, Empty
+from threading import Lock
+
+class ConnectionPool:
+    """Пул соединений"""
+    
+    def __init__(self, max_connections=10, **connection_kwargs):
+        self.max_connections = max_connections
+        self.connection_kwargs = connection_kwargs
+        self.pool = Queue(maxsize=max_connections)
+        self.active_connections = 0
+        self.lock = Lock()
+    
+    def get_connection(self) -> RedisConnection:
+        """Получить соединение из пула"""
+        try:
+            return self.pool.get_nowait()
+        except Empty:
+            with self.lock:
+                if self.active_connections < self.max_connections:
+                    self.active_connections += 1
+                    return RedisConnection(**self.connection_kwargs)
+            # Ждем освобождения соединения
+            return self.pool.get()
+    
+    def release_connection(self, connection: RedisConnection):
+        """Вернуть соединение в пул"""
+        if connection.ping():
+            self.pool.put(connection)
+        else:
+            # Соединение мертво, создать новое
+            with self.lock:
+                self.active_connections -= 1
+
+# Модифицировать RedisClient
+class RedisClient:
+    def __init__(self, connection_pool: Optional[ConnectionPool] = None, **kwargs):
+        if connection_pool:
+            self.pool = connection_pool
+            self.connection = self.pool.get_connection()
+        else:
+            self.connection = RedisConnection(**kwargs)
+```
+
+## Тестирование
+
+### Unit тесты
+
+```python
+import unittest
+from simple_redis_client import RedisClient, RESPParser
+
+class TestRESPParser(unittest.TestCase):
+    
+    def test_encode_simple_command(self):
+        result = RESPParser.encode_command('PING')
+        expected = b'*1\r\n$4\r\nPING\r\n'
+        self.assertEqual(result, expected)
+    
+    def test_encode_with_args(self):
+        result = RESPParser.encode_command('SET', 'key', 'value')
+        expected = b'*3\r\n$3\r\nSET\r\n$3\r\nkey\r\n$5\r\nvalue\r\n'
+        self.assertEqual(result, expected)
+    
+    def test_slot_calculation(self):
+        client = RedisClient()
+        
+        # Без hash tag
+        slot1 = client._get_slot('mykey')
+        self.assertGreaterEqual(slot1, 0)
+        self.assertLess(slot1, 16384)
+        
+        # С hash tag
+        slot2 = client._get_slot('user:{123}:profile')
+        slot3 = client._get_slot('{123}')
+        self.assertEqual(slot2, slot3)
+
+class TestRedisClient(unittest.TestCase):
+    
+    def setUp(self):
+        self.client = RedisClient(host='localhost', port=6379, db=15)
+        self.client.flushdb()
+    
+    def tearDown(self):
+        self.client.flushdb()
+        self.client.close()
+    
+    def test_set_get(self):
+        self.client.set('test_key', 'test_value')
+        value = self.client.get('test_key')
+        self.assertEqual(value, b'test_value')
+    
+    def test_hash_operations(self):
+        self.client.hset('user', 'name', 'Alice')
+        self.client.hset('user', 'age', 30)
+        
+        name = self.client.hget('user', 'name')
+        self.assertEqual(name, b'Alice')
+        
+        all_data = self.client.hgetall('user')
+        self.assertEqual(len(all_data), 2)
+```
+
+### Интеграционные тесты
+
+```python
+class TestRedisCluster(unittest.TestCase):
+    
+    def setUp(self):
+        self.client = RedisClient(
+            host='cluster-node1',
+            port=7000,
+            is_cluster=True
+        )
+    
+    def test_cluster_operations(self):
+        # Тест распределения по узлам
+        keys = [f'key:{i}' for i in range(100)]
+        
+        for key in keys:
+            self.client.set(key, f'value:{key}')
+        
+        # Проверить что ключи на разных узлах
+        nodes_used = set()
+        for key in keys:
+            node = self.client.get_node_from_key(key)
+            nodes_used.add(node.node_id)
+        
+        # Должно быть несколько узлов
+        self.assertGreater(len(nodes_used), 1)
+    
+    def test_scan_all_nodes(self):
+        # Добавить ключи
+        for i in range(100):
+            self.client.set(f'test:{i}', i)
+        
+        # Просканировать весь кластер
+        found_keys = list(self.client.scan_all_nodes_iter(match='test:*'))
+        self.assertEqual(len(found_keys), 100)
+```
+
+### Benchmark
+
+```python
+import time
+
+def benchmark_operations(client, iterations=10000):
+    """Бенчмарк операций"""
+    
+    # SET
+    start = time.time()
+    for i in range(iterations):
+        client.set(f'bench:key:{i}', f'value:{i}')
+    set_time = time.time() - start
+    
+    # GET
+    start = time.time()
+    for i in range(iterations):
+        client.get(f'bench:key:{i}')
+    get_time = time.time() - start
+    
+    # Pipeline
+    start = time.time()
+    with client.pipeline() as pipe:
+        for i in range(iterations):
+            pipe.get(f'bench:key:{i}')
+        pipe.execute()
+    pipeline_time = time.time() - start
+    
+    print(f"SET: {iterations/set_time:.2f} ops/sec")
+    print(f"GET: {iterations/get_time:.2f} ops/sec")
+    print(f"Pipeline GET: {iterations/pipeline_time:.2f} ops/sec")
+```
+
+## Оптимизация
+
+### 1. Повторное использование соединений
+
+```python
+# Плохо: создавать новый клиент для каждой операции
+for i in range(1000):
+    client = RedisClient()
+    client.set(f'key:{i}', i)
+    client.close()
+
+# Хорошо: использовать один клиент
+client = RedisClient()
+for i in range(1000):
+    client.set(f'key:{i}', i)
+client.close()
+```
+
+### 2. Использование Pipeline
+
+```python
+# Плохо: 1000 round-trips
+for i in range(1000):
+    client.set(f'key:{i}', i)
+
+# Хорошо: 1 round-trip
+with client.pipeline() as pipe:
+    for i in range(1000):
+        pipe.set(f'key:{i}', i)
+    pipe.execute()
+```
+
+### 3. Эффективное сканирование
+
+```python
+# Плохо: блокирует сервер
+all_keys = client.keys('user:*')
+
+# Хорошо: итеративное сканирование
+for key in client.scan_iter(match='user:*', count=1000):
+    process(key)
+```
+
+### 4. Оптимизация декодирования
+
+```python
+# Добавить кеширование для decode_responses
+class RedisClient:
+    def __init__(self, *args, decode_responses=False, **kwargs):
+        self.decode_responses = decode_responses
+        self._decode_cache = {}  # Кеш для частых значений
+    
+    def _decode_response(self, response):
+        if isinstance(response, bytes):
+            # Кешировать короткие часто используемые значения
+            if len(response) < 100:
+                if response not in self._decode_cache:
+                    self._decode_cache[response] = response.decode('utf-8')
+                return self._decode_cache[response]
+            return response.decode('utf-8')
+        # ... остальная логика
+```
+
+### 5. Мониторинг и логирование
+
+```python
+import logging
+from functools import wraps
+import time
+
+def log_slow_commands(threshold=0.1):
+    """Декоратор для логирования медленных команд"""
+    def decorator(func):
+        @wraps(func)
+        def wrapper(self, *args, **kwargs):
+            start = time.time()
+            result = func(self, *args, **kwargs)
+            elapsed = time.time() - start
+            
+            if elapsed > threshold:
+                logger.warning(
+                    f"Slow command: {func.__name__}{args[:2]} "
+                    f"took {elapsed:.3f}s"
+                )
+            return result
+        return wrapper
+    return decorator
+
+# Применить к execute_command
+class RedisClient:
+    @log_slow_commands(threshold=0.1)
+    def execute_command(self, *args, **kwargs):
+        # ... существующий код
+```
+
+## Диаграмма состояний соединения
+
+```plantuml
+@startuml
+[*] --> Disconnected
+
+Disconnected --> Connecting : _connect()
+Connecting --> Connected : Success
+Connecting --> Disconnected : Failure
+
+Connected --> Executing : execute_command()
+Executing --> Connected : Success
+Executing --> Reconnecting : Connection Error
+
+Reconnecting --> Connected : Success
+Reconnecting --> Disconnected : Max Retries
+
+Connected --> Disconnected : close()
+Disconnected --> [*]
+@enduml
+```
+
+## Roadmap для развития
+
+1. **Connection Pooling** - пул соединений для многопоточности
+2. **Pub/Sub** - поддержка publish/subscribe
+3. **Transactions** - MULTI/EXEC транзакции
+4. **Lua Scripts** - выполнение Lua скриптов
+5. **Streams** - поддержка Redis Streams
+6. **Sentinel** - поддержка Redis Sentinel для high availability
+7. **Async/Await** - асинхронная версия клиента
+8. **Retry логика** - автоматические повторы при сбоях
+9. **Metrics** - встроенные метрики производительности
+10. **RESP3** - поддержка RESP3 протокола

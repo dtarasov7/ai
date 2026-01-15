@@ -1,0 +1,465 @@
+# Simple Redis Client - Руководство пользователя
+
+## Содержание
+1. [Введение](#введение)
+2. [Установка](#установка)
+3. [Быстрый старт](#быстрый-старт)
+4. [Подключение к Redis](#подключение-к-redis)
+5. [Работа с данными](#работа-с-данными)
+6. [Работа с кластером](#работа-с-кластером)
+7. [Примеры использования](#примеры-использования)
+
+## Введение
+
+Simple Redis Client - это легковесный Python-клиент для работы с Redis, поддерживающий:
+- Стандартный Redis и Redis Cluster
+- SSL/TLS шифрование
+- Все основные типы данных (String, Hash, List, Set, Sorted Set)
+- Эффективное сканирование больших наборов данных
+- Pipeline для пакетных операций
+
+## Установка
+
+Библиотека не требует дополнительных зависимостей, использует только стандартную библиотеку Python.
+
+```python
+# Скопируйте файл simple_redis_client.py в ваш проект
+from simple_redis_client import RedisClient
+```
+
+## Быстрый старт
+
+```python
+from simple_redis_client import RedisClient
+
+# Подключение к локальному Redis
+client = RedisClient(host='localhost', port=6379)
+
+# Базовые операции
+client.set('key', 'value')
+value = client.get('key')
+print(value)  # b'value'
+
+# Закрытие соединения
+client.close()
+```
+
+## Подключение к Redis
+
+### Стандартное подключение
+
+```python
+client = RedisClient(
+    host='localhost',
+    port=6379,
+    password='yourpassword',  # Опционально
+    db=0,                      # Номер базы данных
+    socket_timeout=5,          # Таймаут в секундах
+    decode_responses=True      # Автоматически декодировать ответы в строки
+)
+```
+
+### Подключение с SSL
+
+```python
+client = RedisClient(
+    host='secure.redis.com',
+    port=6380,
+    ssl=True,
+    ssl_ca_certs='/path/to/ca.pem',
+    ssl_certfile='/path/to/client-cert.pem',
+    ssl_keyfile='/path/to/client-key.pem'
+)
+```
+
+### Подключение к кластеру
+
+```python
+client = RedisClient(
+    host='cluster-node.redis.com',
+    port=6379,
+    is_cluster=True,
+    password='yourpassword'
+)
+```
+
+### Аутентификация с пользователем (Redis 6+)
+
+```python
+client = RedisClient(
+    host='localhost',
+    port=6379,
+    username='myuser',
+    password='mypassword'
+)
+```
+
+## Работа с данными
+
+### Строки (Strings)
+
+```python
+# Установка значения
+client.set('name', 'John')
+client.set('counter', 100)
+
+# С временем жизни (TTL)
+client.set('session', 'data', ex=3600)  # Истечет через 1 час
+client.set('temp', 'value', px=5000)    # Истечет через 5 секунд
+
+# Условная установка
+client.set('key', 'value', nx=True)  # Только если ключ не существует
+client.set('key', 'value', xx=True)  # Только если ключ существует
+
+# Получение значения
+value = client.get('name')
+
+# Инкремент
+client.incr('counter')  # Увеличить на 1
+
+# Длина строки
+length = client.strlen('name')
+```
+
+### Хеши (Hashes)
+
+```python
+# Установка одного поля
+client.hset('user:1', 'name', 'Alice')
+client.hset('user:1', 'age', 30)
+
+# Установка нескольких полей
+client.hset('user:2', mapping={
+    'name': 'Bob',
+    'age': 25,
+    'city': 'Moscow'
+})
+
+# Получение значения поля
+name = client.hget('user:1', 'name')
+
+# Получение всех полей и значений
+user_data = client.hgetall('user:1')
+# Результат: {b'name': b'Alice', b'age': b'30'}
+
+# Количество полей
+count = client.hlen('user:1')
+
+# Сканирование больших хешей
+for field, value in client.hscan_iter('user:1'):
+    print(f"{field}: {value}")
+```
+
+### Списки (Lists)
+
+```python
+# Добавление в начало
+client.lpush('tasks', 'task1', 'task2', 'task3')
+
+# Добавление в конец
+client.rpush('tasks', 'task4', 'task5')
+
+# Получение длины
+length = client.llen('tasks')
+
+# Получение диапазона элементов
+tasks = client.lrange('tasks', 0, -1)  # Все элементы
+first_three = client.lrange('tasks', 0, 2)
+```
+
+### Множества (Sets)
+
+```python
+# Добавление элементов
+client.sadd('tags', 'python', 'redis', 'database')
+
+# Получение всех элементов
+tags = client.smembers('tags')  # Возвращает set
+
+# Количество элементов
+count = client.scard('tags')
+
+# Сканирование больших множеств
+for member in client.sscan_iter('tags'):
+    print(member)
+```
+
+### Упорядоченные множества (Sorted Sets)
+
+```python
+# Добавление элементов с оценками
+client.zadd('leaderboard', {
+    'player1': 100,
+    'player2': 200,
+    'player3': 150
+})
+
+# Получение количества элементов
+count = client.zcard('leaderboard')
+
+# Получение диапазона (по порядку оценок)
+top_players = client.zrange('leaderboard', 0, 2, withscores=True)
+# Результат: [(b'player1', 100.0), (b'player3', 150.0), (b'player2', 200.0)]
+
+# Сканирование больших наборов
+for member, score in client.zscan_iter('leaderboard'):
+    print(f"{member}: {score}")
+```
+
+### Управление ключами
+
+```python
+# Проверка существования
+exists = client.exists('key1', 'key2')  # Возвращает количество существующих
+
+# Удаление
+deleted = client.delete('key1', 'key2')
+
+# Тип ключа
+key_type = client.type('mykey')  # b'string', b'hash', etc.
+
+# Время жизни
+ttl = client.ttl('mykey')  # Секунды до истечения, -1 если бессрочный
+
+# Установка времени жизни
+client.expire('mykey', 3600)  # Истечет через 1 час
+
+# Удаление времени жизни
+client.persist('mykey')
+
+# Переименование
+client.rename('oldkey', 'newkey')
+
+# Получение всех ключей (осторожно на продакшене!)
+keys = client.keys('user:*')
+
+# Безопасное сканирование ключей
+for key in client.scan_iter(match='user:*', count=100):
+    print(key)
+```
+
+## Работа с кластером
+
+### Определение расположения ключей
+
+```python
+# Вычисление hash slot для ключа
+slot = client.keyslot('mykey')
+print(f"Key 'mykey' belongs to slot {slot}")
+
+# Получение узла для ключа
+node = client.get_node_from_key('mykey')
+print(f"Key stored on: {node.host}:{node.port}")
+
+# Список всех узлов кластера
+nodes = client.get_cluster_nodes()
+for node in nodes:
+    print(f"Node {node.node_id}: {len(node.slots)} slots")
+```
+
+### Сканирование всего кластера
+
+```python
+# Сканирование ключей на всех узлах кластера
+for key in client.scan_all_nodes_iter(match='user:*'):
+    print(key)
+```
+
+### Информация о кластере
+
+```python
+# Общая информация
+info = client.cluster_info()
+print(info)
+
+# Список узлов
+nodes = client.cluster_nodes()
+print(nodes)
+```
+
+## Примеры использования
+
+### Пример 1: Счетчик посещений
+
+```python
+client = RedisClient(decode_responses=True)
+
+def increment_page_view(page_id):
+    key = f'pageviews:{page_id}'
+    return client.incr(key)
+
+def get_page_views(page_id):
+    key = f'pageviews:{page_id}'
+    value = client.get(key)
+    return int(value) if value else 0
+
+# Использование
+views = increment_page_view('homepage')
+print(f"Page views: {views}")
+```
+
+### Пример 2: Кеширование данных пользователя
+
+```python
+import json
+
+def cache_user(user_id, user_data, ttl=3600):
+    key = f'user:{user_id}'
+    client.set(key, json.dumps(user_data), ex=ttl)
+
+def get_cached_user(user_id):
+    key = f'user:{user_id}'
+    data = client.get(key)
+    return json.loads(data) if data else None
+
+# Использование
+cache_user(123, {'name': 'Alice', 'email': 'alice@example.com'})
+user = get_cached_user(123)
+```
+
+### Пример 3: Лидерборд
+
+```python
+def add_score(player_name, score):
+    client.zadd('leaderboard', {player_name: score})
+
+def get_top_players(count=10):
+    # desc=True для сортировки от большего к меньшему
+    return client.zrange('leaderboard', 0, count-1, 
+                        withscores=True, desc=True)
+
+# Использование
+add_score('player1', 1500)
+add_score('player2', 2000)
+top = get_top_players(3)
+for player, score in top:
+    print(f"{player.decode()}: {score}")
+```
+
+### Пример 4: Пакетные операции с Pipeline
+
+```python
+# Pipeline позволяет выполнить несколько команд за один round-trip
+with client.pipeline() as pipe:
+    pipe.set('key1', 'value1')
+    pipe.set('key2', 'value2')
+    pipe.incr('counter')
+    pipe.get('key1')
+    results = pipe.execute()
+
+print(results)  # [True, True, 1, b'value1']
+```
+
+### Пример 5: Обработка больших наборов данных
+
+```python
+# Безопасное удаление всех ключей по шаблону
+def delete_by_pattern(pattern):
+    deleted = 0
+    for key in client.scan_iter(match=pattern, count=1000):
+        client.delete(key)
+        deleted += 1
+    return deleted
+
+# Использование
+count = delete_by_pattern('temp:*')
+print(f"Deleted {count} keys")
+```
+
+### Пример 6: Сессии пользователей
+
+```python
+def create_session(session_id, user_id, ttl=1800):
+    client.hset(f'session:{session_id}', mapping={
+        'user_id': user_id,
+        'created_at': str(time.time())
+    })
+    client.expire(f'session:{session_id}', ttl)
+
+def get_session(session_id):
+    data = client.hgetall(f'session:{session_id}')
+    if not data:
+        return None
+    return {k.decode(): v.decode() for k, v in data.items()}
+
+def delete_session(session_id):
+    client.delete(f'session:{session_id}')
+```
+
+## Управление базой данных
+
+```python
+# Проверка соединения
+if client.ping():
+    print("Connected!")
+
+# Информация о сервере
+info = client.info('server')
+print(info)
+
+# Количество ключей в текущей БД
+count = client.dbsize()
+
+# Выбор другой БД (только для не-кластера)
+client.select(1)
+
+# Очистка текущей БД
+client.flushdb()
+
+# Очистка всех БД
+client.flushall()
+```
+
+## Обработка ошибок
+
+```python
+from simple_redis_client import (
+    RedisError, 
+    RedisConnectionError, 
+    RedisClusterError
+)
+
+try:
+    client.set('key', 'value')
+except RedisConnectionError as e:
+    print(f"Connection failed: {e}")
+except RedisClusterError as e:
+    print(f"Cluster error: {e}")
+except RedisError as e:
+    print(f"Redis error: {e}")
+```
+
+## Рекомендации
+
+1. **Всегда закрывайте соединение** после использования:
+   ```python
+   client.close()
+   ```
+
+2. **Используйте decode_responses=True** для автоматического декодирования:
+   ```python
+   client = RedisClient(decode_responses=True)
+   ```
+
+3. **Используйте scan_iter вместо keys** для больших баз данных:
+   ```python
+   # Плохо (блокирует сервер)
+   all_keys = client.keys('*')
+   
+   # Хорошо (постепенная итерация)
+   for key in client.scan_iter(match='user:*'):
+       process(key)
+   ```
+
+4. **Устанавливайте TTL** для временных данных:
+   ```python
+   client.set('cache:data', value, ex=300)  # 5 минут
+   ```
+
+5. **Используйте pipeline** для пакетных операций:
+   ```python
+   with client.pipeline() as pipe:
+       for i in range(100):
+           pipe.set(f'key:{i}', i)
+       pipe.execute()
+   ```
