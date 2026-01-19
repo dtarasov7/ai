@@ -1,0 +1,1 @@
+pip install opentelemetry-sdk opentelemetry-exporter-otlp

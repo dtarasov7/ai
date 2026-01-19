@@ -1,0 +1,218 @@
+# ПАТЧ v2.1.5 - ВСЕ НЕДОСТАЮЩИЕ МЕТОДЫ
+# Добавьте эти методы в класс RedisClient
+# (например, после метода close() перед концом класса)
+
+
+    # ============ Недостающие методы из v1.0.0 ============
+
+    def info(self, section: Optional[str] = None) -> Dict[str, Any]:
+        """INFO - информация о сервере"""
+        if section:
+            response = self.execute_command('INFO', section, for_read=True)
+        else:
+            response = self.execute_command('INFO', for_read=True)
+
+        if isinstance(response, bytes):
+            response = response.decode('utf-8')
+
+        result = {}
+        current_section = None
+        for line in response.split('\n'):
+            line = line.strip()
+            if not line or line.startswith('#'):
+                if line.startswith('#'):
+                    current_section = line[1:].strip().lower()
+                    result[current_section] = {}
+                continue
+
+            if ':' in line:
+                key, value = line.split(':', 1)
+                try:
+                    value = float(value) if '.' in value else int(value)
+                except:
+                    pass
+
+                if current_section:
+                    result[current_section][key] = value
+                else:
+                    result[key] = value
+
+        return result
+
+    def dbsize(self) -> int:
+        """DBSIZE - количество ключей в текущей БД"""
+        if self.is_cluster:
+            logger.warning("DBSIZE in cluster mode returns approximate count")
+        return self.execute_command('DBSIZE', for_read=True)
+
+    def flushdb(self, asynchronous: bool = False) -> str:
+        """FLUSHDB - очистить текущую БД"""
+        if self.is_cluster:
+            raise RedisError('FLUSHDB requires cluster-wide operation')
+
+        if asynchronous:
+            return self.execute_command('FLUSHDB', 'ASYNC')
+        return self.execute_command('FLUSHDB')
+
+    def flushall(self, asynchronous: bool = False) -> str:
+        """FLUSHALL - очистить все БД"""
+        if asynchronous:
+            return self.execute_command('FLUSHALL', 'ASYNC')
+        return self.execute_command('FLUSHALL')
+
+    def keys(self, pattern: str = '*') -> List[bytes]:
+        """KEYS - получить все ключи по паттерну (осторожно на продакшене!)"""
+        return self.execute_command('KEYS', pattern, for_read=True)
+
+    def hscan(self, key: Union[str, bytes], cursor: int = 0, 
+              match: Optional[str] = None, count: Optional[int] = None) -> Tuple[int, Dict]:
+        """HSCAN - итеративное сканирование hash"""
+        args = ['HSCAN', key, cursor]
+        if match:
+            args.extend(['MATCH', match])
+        if count:
+            args.extend(['COUNT', count])
+
+        response = self.execute_command(*args, key=key, for_read=True)
+        new_cursor = int(response[0])
+        items = response[1]
+        result = {}
+        for i in range(0, len(items), 2):
+            result[items[i]] = items[i + 1]
+        return new_cursor, result
+
+    def hscan_iter(self, key: Union[str, bytes], match: Optional[str] = None, 
+                   count: int = 100) -> Iterator[Tuple[bytes, bytes]]:
+        """HSCAN итератор"""
+        cursor = 0
+        while True:
+            cursor, data = self.hscan(key, cursor, match=match, count=count)
+            for field, value in data.items():
+                yield field, value
+            if cursor == 0:
+                break
+
+    def sscan(self, key: Union[str, bytes], cursor: int = 0,
+              match: Optional[str] = None, count: Optional[int] = None) -> Tuple[int, List[bytes]]:
+        """SSCAN - итеративное сканирование set"""
+        args = ['SSCAN', key, cursor]
+        if match:
+            args.extend(['MATCH', match])
+        if count:
+            args.extend(['COUNT', count])
+
+        response = self.execute_command(*args, key=key, for_read=True)
+        return int(response[0]), response[1]
+
+    def sscan_iter(self, key: Union[str, bytes], match: Optional[str] = None,
+                   count: int = 100) -> Iterator[bytes]:
+        """SSCAN итератор"""
+        cursor = 0
+        while True:
+            cursor, members = self.sscan(key, cursor, match=match, count=count)
+            for member in members:
+                yield member
+            if cursor == 0:
+                break
+
+    def zscan(self, key: Union[str, bytes], cursor: int = 0,
+              match: Optional[str] = None, count: Optional[int] = None) -> Tuple[int, List]:
+        """ZSCAN - итеративное сканирование sorted set"""
+        args = ['ZSCAN', key, cursor]
+        if match:
+            args.extend(['MATCH', match])
+        if count:
+            args.extend(['COUNT', count])
+
+        response = self.execute_command(*args, key=key, for_read=True)
+        new_cursor = int(response[0])
+        items = response[1]
+        result = []
+        for i in range(0, len(items), 2):
+            result.append((items[i], float(items[i + 1])))
+        return new_cursor, result
+
+    def zscan_iter(self, key: Union[str, bytes], match: Optional[str] = None,
+                   count: int = 100) -> Iterator[Tuple[bytes, float]]:
+        """ZSCAN итератор"""
+        cursor = 0
+        while True:
+            cursor, items = self.zscan(key, cursor, match=match, count=count)
+            for member, score in items:
+                yield member, score
+            if cursor == 0:
+                break
+
+    def config_get(self, parameter: str) -> Dict:
+        """CONFIG GET - получить параметр конфигурации"""
+        response = self.execute_command('CONFIG', 'GET', parameter)
+        result = {}
+        for i in range(0, len(response), 2):
+            key = response[i]
+            if isinstance(key, bytes):
+                key = key.decode('utf-8')
+            value = response[i + 1]
+            if isinstance(value, bytes):
+                value = value.decode('utf-8')
+            result[key] = value
+        return result
+
+    def client_list(self) -> str:
+        """CLIENT LIST - список подключённых клиентов"""
+        response = self.execute_command('CLIENT', 'LIST')
+        if isinstance(response, bytes):
+            return response.decode('utf-8')
+        return response
+
+    def cluster_keyslot(self, key: Union[str, bytes]) -> int:
+        """CLUSTER KEYSLOT - вычислить slot для ключа"""
+        if not self.is_cluster:
+            return self._get_slot(key)
+
+        try:
+            return self.execute_command('CLUSTER', 'KEYSLOT', key)
+        except:
+            return self._get_slot(key)
+
+    def get_node_from_key(self, key: Union[str, bytes]) -> ClusterNode:
+        """Получить узел кластера для ключа"""
+        if not self.is_cluster:
+            return ClusterNode(
+                host=self.host,
+                port=self.port,
+                node_id=f"{self.host}:{self.port}",
+                slots=[],
+                role='master'
+            )
+
+        slot = self._get_slot(key)
+        node_id = self.cluster_slots.get(slot)
+
+        if node_id and node_id in self.cluster_nodes_info:
+            node_info = self.cluster_nodes_info[node_id]
+            return node_info
+
+        return ClusterNode(
+            host=self.host,
+            port=self.port,
+            node_id=f"{self.host}:{self.port}",
+            slots=[slot],
+            role='master'
+        )
+
+    def cluster_info(self) -> str:
+        """CLUSTER INFO - информация о кластере"""
+        response = self.execute_command('CLUSTER', 'INFO')
+        if isinstance(response, bytes):
+            return response.decode('utf-8')
+        return response
+
+    def cluster_nodes(self) -> str:
+        """CLUSTER NODES - информация об узлах кластера"""
+        response = self.execute_command('CLUSTER', 'NODES')
+        if isinstance(response, bytes):
+            return response.decode('utf-8')
+        return response
+
+
+# После применения обновите __version__ = '2.1.5'

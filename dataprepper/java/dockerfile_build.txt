@@ -1,0 +1,24 @@
+FROM maven:3.9-eclipse-temurin-17 AS builder
+
+WORKDIR /build
+
+# Копируем pom.xml
+COPY pom.xml .
+
+# Загружаем зависимости
+RUN mvn dependency:go-offline
+
+# Копируем исходный код
+COPY src ./src
+
+# Собираем приложение
+RUN mvn clean package -DskipTests
+
+# Скачиваем OpenTelemetry Java Agent
+RUN curl -L https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases/latest/download/opentelemetry-javaagent.jar \
+    -o /build/opentelemetry-javaagent.jar
+
+# Финальный образ для копирования артефактов
+FROM scratch AS export
+COPY --from=builder /build/target/*.jar /
+COPY --from=builder /build/opentelemetry-javaagent.jar /
