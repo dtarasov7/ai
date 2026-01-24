@@ -1,0 +1,29 @@
+{
+  "profiles": {
+    "local": {
+      "bootstrap_servers": "localhost:9092",
+      "security_protocol": "SASL_PLAINTEXT",
+      "sasl_mechanism": "PLAIN",
+      "sasl_username": "admin",
+      "sasl_password": "secret"
+    },
+    "mtls": {
+      "bootstrap_servers": "localhost:29092",
+      "security_protocol": "SSL",
+      "ssl_ca_file": "ca.crt.pem", 
+      "ssl_cert_file": "admin.crt.pem", 
+      "ssl_key_file": "admin.key.pem",
+      "ssl_insecure_skip_verify": true
+    },
+    "ssl": {
+      "bootstrap_servers": "localhost:39092",
+      "security_protocol": "SASL_SSL",
+      "sasl_mechanism": "PLAIN",
+      "sasl_username": "admin",
+      "sasl_password": "admin-secret",
+      "ssl_check_hostname": false,
+      "ssl_insecure_skip_verify": true
+    }
+  },
+  "default_profile": "local"
+}

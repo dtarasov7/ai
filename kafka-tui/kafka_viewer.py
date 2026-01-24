@@ -1,0 +1,3859 @@
+#!/usr/bin/env python3
+
+import urwid
+import threading
+import json
+import os
+import sys
+import ssl
+import argparse
+from collections import deque
+from kafka import KafkaConsumer, KafkaAdminClient, KafkaProducer, TopicPartition
+from kafka.admin import NewTopic, ConfigResource, ConfigResourceType
+from kafka.errors import KafkaError, TopicAlreadyExistsError
+import logging
+import logging.handlers
+import traceback
+import getpass
+import base64
+import requests
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from cryptography.hazmat.backends import default_backend
+from cryptography.fernet import Fernet
+
+__version__ = "v1.8.0"
+__AUTHOR__ = "Taraasov Dmitry"
+
+class SelectableText(urwid.Text):
+    _selectable = True
+
+    def keypress(self, size, key):
+        return key
+
+
+LOG = logging.getLogger("kafka_viewer")
+
+
+def setup_logging(level="INFO", log_file=None):
+    # level: DEBUG/INFO/WARNING/ERROR
+    lvl = getattr(logging, str(level).upper(), logging.INFO)
+    LOG.setLevel(lvl)
+
+    fmt = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+
+    handlers = []
+    #
+    # # stderr handler (по умолчанию всегда есть)
+    # sh = logging.StreamHandler(sys.stderr)
+    # sh.setFormatter(fmt)
+    # sh.setLevel(lvl)
+    # handlers.append(sh)
+
+    # file handler (если задан)
+    if log_file:
+        fh = logging.handlers.RotatingFileHandler(
+            log_file, maxBytes=10 * 1024 * 1024, backupCount=5, encoding="utf-8"
+        )
+        fh.setFormatter(fmt)
+        fh.setLevel(lvl)
+        handlers.append(fh)
+
+    # очистим старые, чтобы не дублировать при повторном запуске/тестах
+    LOG.handlers.clear()
+    for h in handlers:
+        LOG.addHandler(h)
+
+
+# Message row widget: keeps metadata for footer & full view
+class MsgRow(SelectableText):
+    def __init__(self, summary_line, full_text, topic, partition, offset, timestamp=None, key=None, raw_value=None, raw_key=None):
+        super().__init__(summary_line)
+        self.full_text = full_text
+        self.topic = topic
+        self.partition = partition
+        self.offset = offset
+        self.timestamp = timestamp
+        self.key = key
+        self.raw_value = raw_value
+        self.raw_key = raw_key
+
+
+# Message row widget: keeps metadata for footer & full view
+# class MsgRow(SelectableText):
+#     def __init__(self, summary_line, full_text, topic, partition, offset, timestamp=None, key=None):
+#         super().__init__(summary_line)
+#         self.full_text = full_text
+#         self.topic = topic
+#         self.partition = partition
+#         self.offset = offset
+#         self.timestamp = timestamp
+#         self.key = key
+
+
+class DynamicMsgListBox(urwid.ListBox):
+    """ListBox that reformats message rows based on available width"""
+
+    def __init__(self, walker):
+        super().__init__(walker)
+        self.last_width = None
+
+    def render(self, size, focus=False):
+        # size is a tuple (maxcol,) or (maxcol, maxrow)
+        if size:
+            current_width = size[0]
+            if current_width != self.last_width:
+                self.last_width = current_width
+                self._reformat_messages(current_width)
+        return super().render(size, focus)
+
+    def format_all_messages(self, default_width=150):
+        """Manually trigger formatting with default or last known width"""
+        width = self.last_width if self.last_width else default_width
+        self._reformat_messages(width)
+
+    def _reformat_messages(self, width):
+        """Reformat all message rows based on available width"""
+        # Column widths
+        col_timestamp = 28
+        col_topic = 13
+        col_offset = 10
+        col_size = 8  # New column for size
+        col_key = 12
+        # Calculate value width: total width - (other columns + spaces)
+        # 5 spaces between columns
+        col_value = max(20, width - col_timestamp - col_topic - col_offset - col_size - col_key - 5)
+
+        for item in self.body:
+            if isinstance(item, urwid.AttrMap):
+                widget = item.original_widget
+                if isinstance(widget, MsgRow):
+                    # Reformat this message
+                    self._format_msg_row(widget, col_timestamp, col_topic, col_offset, col_size, col_key, col_value)
+
+    def _format_msg_row(self, row, col_timestamp, col_topic, col_offset, col_size, col_key, col_value):
+        """Format a single message row"""
+        # Format timestamp
+        if row.timestamp:
+            from datetime import datetime
+            dt = datetime.fromtimestamp(row.timestamp / 1000.0)
+            timestamp_str = dt.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+        else:
+            timestamp_str = ""
+
+        # Format topic with partition
+        topic_part = f"{row.topic}[{row.partition}]"
+        if len(topic_part) > col_topic:
+            topic_part = topic_part[:col_topic]
+
+        # Format offset
+        offset_str = str(row.offset)
+
+        # Format size
+        if row.full_text:
+            size_bytes = len(row.full_text.encode('utf-8'))
+            if size_bytes < 1024:
+                size_str = f"{size_bytes}B"
+            elif size_bytes < 1024 * 1024:
+                size_str = f"{size_bytes / 1024:.1f}K"
+            else:
+                size_str = f"{size_bytes / (1024 * 1024):.1f}M"
+        else:
+            size_str = "0B"
+
+        # Format key with truncation
+        key_str = (row.key or "").replace("\n", " ").replace("\r", "").replace("\t", " ")
+        if len(key_str) > col_key:
+            key_display = key_str[:col_key - 2] + ".."
+        else:
+            key_display = key_str
+
+        # Format value with truncation
+        val_str = (row.full_text or "").replace("\n", " ").replace("\r", "").replace("\t", " ")
+        if len(val_str) > col_value:
+            val_display = val_str[:col_value - 2] + ".."
+        else:
+            val_display = val_str
+
+        # Build summary line
+        summary = (
+            f"{timestamp_str:<{col_timestamp}} "
+            f"{topic_part:<{col_topic}} "
+            f"{offset_str:<{col_offset}} "
+            f"{size_str:<{col_size}} "
+            f"{key_display:<{col_key}} "
+            f"{val_display}"
+        )
+        row.set_text(summary)
+
+
+# ---------------------- config ----------------------
+
+class ConfigManager:
+    DEFAULT_CONFIG_PATH = "config.json"
+
+    @staticmethod
+    def load_from_encrypted(config_path):
+        """Загрузка конфигурации из зашифрованного файла"""
+        if not os.path.exists(config_path):
+            LOG.error(f"Encrypted config file not found: {config_path}")
+            sys.exit(1)
+
+        try:
+            with open(config_path, 'rb') as f:
+                file_data = f.read()
+
+            # Первые 16 байт - это salt
+            if len(file_data) < 16:
+                print("Encrypted file is corrupted (too short)", file=sys.stderr)
+                sys.exit(1)
+
+            salt = file_data[:16]
+            encrypted_data = file_data[16:]
+
+            # Запрашиваем пароль
+            password = getpass.getpass("Enter decryption password: ")
+
+            # Генерируем ключ (параметры ДОЛЖНЫ совпадать с encryptor.py)
+            kdf = PBKDF2HMAC(
+                algorithm=hashes.SHA256(),
+                length=32,
+                salt=salt,
+                iterations=100000,
+                backend=default_backend()
+            )
+            key = base64.urlsafe_b64encode(kdf.derive(password.encode('utf-8')))
+
+            f = Fernet(key)
+
+            # Расшифровываем
+            try:
+                decrypted_data = f.decrypt(encrypted_data)
+                return json.loads(decrypted_data.decode('utf-8'))
+            except Exception:
+                print("Decryption failed! Invalid password or corrupted file.", file=sys.stderr)
+                sys.exit(1)
+        except Exception as e:
+            print(f"Error loading encrypted config: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    @staticmethod
+    def load_from_vault(vault_url, vault_path):
+        """Загрузка конфигурации из HashiCorp Vault"""
+        print(f"Connecting to Vault: {vault_url}")
+        username = input("Vault Username: ")
+        password = getpass.getpass("Vault Password: ")
+
+        # 1. Login (UserPass)
+        auth_url = f"{vault_url.rstrip('/')}/v1/auth/userpass/login/{username}"
+        try:
+            resp = requests.post(auth_url, json={"password": password}, timeout=10)
+            resp.raise_for_status()
+            token = resp.json()["auth"]["client_token"]
+        except Exception as e:
+            print(f"Vault login failed: {e}", file=sys.stderr)
+            sys.exit(1)
+
+        # 2. Get Secret
+        secret_url = f"{vault_url.rstrip('/')}/v1/{vault_path}"
+        try:
+            resp = requests.get(secret_url, headers={"X-Vault-Token": token}, timeout=10)
+            resp.raise_for_status()
+            data = resp.json()
+
+            # Обработка структуры KV V1 и KV V2
+            # V2 возвращает data['data']['data'], V1 возвращает data['data']
+            if 'data' in data and isinstance(data['data'], dict) and 'data' in data['data']:
+                return data['data']['data']
+            elif 'data' in data:
+                return data['data']
+            else:
+                # Fallback, если структура нестандартная
+                return data
+        except Exception as e:
+            print(f"Vault read failed: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    @staticmethod
+    def load_config(cli_args=None):
+        """Определяет источник конфигурации и загружает её"""
+        config_data = {}
+
+        # Приоритет 1: HashiCorp Vault
+        if cli_args and cli_args.vault_url and cli_args.vault_path:
+            config_data = ConfigManager.load_from_vault(cli_args.vault_url, cli_args.vault_path)
+
+        # Приоритет 2: Зашифрованный файл
+        elif cli_args and cli_args.encrypted_config:
+            config_data = ConfigManager.load_from_encrypted(cli_args.encrypted_config)
+
+        # Приоритет 3: Обычный файл (по умолчанию)
+        else:
+            path = cli_args.config if cli_args else ConfigManager.DEFAULT_CONFIG_PATH
+            if os.path.exists(path):
+                try:
+                    with open(path, "r") as f:
+                        config_data = json.load(f)
+                except Exception as e:
+                    LOG.warning("Failed to load config from %s: %s", path, e, exc_info=True)
+            else:
+                # Если дефолтного конфига нет, просто возвращаем пустое, чтобы работать на аргументах CLI
+                pass
+
+        return config_data.get("profiles", {}), config_data.get("default_profile")
+
+    @staticmethod
+    def get_connection_params(profile_name=None, cli_args=None):
+        profiles, default_profile = ConfigManager.load_config(cli_args)
+
+        if cli_args and cli_args.profile:
+            profile_name = cli_args.profile
+        elif not profile_name:
+            profile_name = default_profile or "default"
+
+        params = profiles.get(profile_name, {}).copy()
+
+        # Mapping env vars to config params
+        env_mappings = {
+            "KAFKA_BOOTSTRAP_SERVERS": "bootstrap_servers",
+            "KAFKA_SECURITY_PROTOCOL": "security_protocol",
+            "KAFKA_SSL_CA_FILE": "ssl_ca_file",
+            "KAFKA_SSL_CERT_FILE": "ssl_cert_file",
+            "KAFKA_SSL_KEY_FILE": "ssl_key_file",
+            "KAFKA_SSL_PASSWORD": "ssl_password",
+            "KAFKA_SSL_CHECK_HOSTNAME": "ssl_check_hostname",
+            "KAFKA_SASL_MECHANISM": "sasl_mechanism",
+            "KAFKA_SASL_USERNAME": "sasl_username",
+            "KAFKA_SASL_PASSWORD": "sasl_password",
+            "KAFKA_SSL_INSECURE_SKIP_VERIFY": "ssl_insecure_skip_verify",
+        }
+
+        for env_var, param_name in env_mappings.items():
+            v = os.getenv(env_var)
+            if v:
+                # Handle boolean values
+                if param_name in ("ssl_check_hostname", "ssl_insecure_skip_verify"):
+                    params[param_name] = v.lower() in ("true", "1", "yes")
+                else:
+                    params[param_name] = v
+
+        # Override with CLI args
+        if cli_args:
+            if cli_args.bootstrap_servers:
+                params["bootstrap_servers"] = cli_args.bootstrap_servers
+            if cli_args.security_protocol:
+                params["security_protocol"] = cli_args.security_protocol
+            if cli_args.ssl_ca_file:
+                params["ssl_ca_file"] = cli_args.ssl_ca_file
+            if cli_args.ssl_cert_file:
+                params["ssl_cert_file"] = cli_args.ssl_cert_file
+            if cli_args.ssl_key_file:
+                params["ssl_key_file"] = cli_args.ssl_key_file
+            if cli_args.ssl_password:
+                params["ssl_password"] = cli_args.ssl_password
+            if hasattr(cli_args, 'ssl_check_hostname') and cli_args.ssl_check_hostname is not None:
+                params["ssl_check_hostname"] = cli_args.ssl_check_hostname
+            if hasattr(cli_args, 'ssl_insecure_skip_verify') and cli_args.ssl_insecure_skip_verify is not None:
+                params["ssl_insecure_skip_verify"] = cli_args.ssl_insecure_skip_verify
+            if cli_args.sasl_mechanism:
+                params["sasl_mechanism"] = cli_args.sasl_mechanism
+            if cli_args.sasl_username:
+                params["sasl_username"] = cli_args.sasl_username
+            if cli_args.sasl_password:
+                params["sasl_password"] = cli_args.sasl_password
+
+        params.setdefault("bootstrap_servers", "localhost:9092")
+        return params, profile_name
+
+    @staticmethod
+    def validate_params(params):
+        errors = []
+        ssl_files = ["ssl_ca_file", "ssl_cert_file", "ssl_key_file"]
+        for param in ssl_files:
+            if param in params and params[param]:
+                if not os.path.exists(params[param]):
+                    errors.append(f"{param}: file not found: {params[param]}")
+
+        valid_protocols = ["PLAINTEXT", "SSL", "SASL_PLAINTEXT", "SASL_SSL"]
+        if "security_protocol" in params and params["security_protocol"] not in valid_protocols:
+            errors.append(f"security_protocol must be one of: {valid_protocols}")
+
+        valid_sasl = ["PLAIN", "SCRAM-SHA-256", "SCRAM-SHA-512"]
+        if "sasl_mechanism" in params and params["sasl_mechanism"] not in valid_sasl:
+            errors.append(f"sasl_mechanism must be one of: {valid_sasl}")
+
+        if params.get("security_protocol") in ("SASL_PLAINTEXT", "SASL_SSL"):
+            if not params.get("sasl_mechanism"):
+                errors.append("sasl_mechanism required when using SASL")
+            if not params.get("sasl_username"):
+                errors.append("sasl_username required when using SASL")
+            if not params.get("sasl_password"):
+                errors.append("sasl_password required when using SASL")
+        return errors
+
+
+# ---------------------- app ----------------------
+
+class KafkaViewerApp:
+    def __init__(self, connection_params, profile_name="default"):
+        self.connection_params = connection_params
+        self.profile_name = profile_name
+        self.bootstrap_servers = connection_params["bootstrap_servers"]
+        self.admin_client = None
+        self.current_topic = None
+
+        # Snapshot settings
+        self.snapshot_mode = "tail"  # "tail" or "from_beginning"
+        self.snapshot_tail_n = 500  # per partition
+        self.snapshot_max_total = 5000  # across partitions
+
+        # Sorting settings
+        self.sort_mode = "unsorted"  # "unsorted", "timestamp", "partition", "size"
+        self.sort_ascending = True
+
+        # Filter settings
+        self.topic_filter = ""  # Filter mask for topics
+        self.msg_filters = {
+            "key": "",
+            "value": "",
+            "partition": "",
+            "offset": ""
+        }
+
+        # Store all loaded messages for filtering
+        self.all_messages = []
+
+        # UI lists
+        self.topic_walker = urwid.SimpleFocusListWalker([])
+        self.topic_listbox = urwid.ListBox(self.topic_walker)
+        self.msg_walker = urwid.SimpleFocusListWalker([])
+        self.msg_listbox = DynamicMsgListBox(self.msg_walker)
+
+        self.columns = None
+        self.main_frame = None
+        self.dialog_overlay = None
+        self.loop = None
+
+        # status
+        self.status_text = urwid.Text("")
+        self._build_ui()
+        self._init_admin_client()
+        self._fetch_topics()
+
+        # hook focus changes in message list to update footer
+        self._msg_focus_prev = None
+
+        # ACL filter settings
+        self.acl_filters = {
+            "principal": "",
+            "host": "",
+            "operation": "ANY",
+            "permission": "ANY",
+            "pattern_type": "ANY"
+        }
+        self.all_acls = []  # Store all ACLs for filtering
+        self.current_acl_topic = None  # Track which topic's ACLs we're viewing
+
+        # Dialog navigation stack
+        self.dialog_stack = []  # Stack of dialog creation functions
+
+    # ----- kafka config -----
+
+    def _get_kafka_config(self):
+        cfg = {"bootstrap_servers": self.connection_params["bootstrap_servers"]}
+        sp = self.connection_params.get("security_protocol", "PLAINTEXT")
+        cfg["security_protocol"] = sp
+
+        if sp in ("SSL", "SASL_SSL"):
+            insecure = bool(self.connection_params.get("ssl_insecure_skip_verify", False))
+
+            ssl_check_hostname = self.connection_params.get("ssl_check_hostname", True)
+
+            # 1) Создаём SSLContext с CA (если задан)
+            ca_file = self.connection_params.get("ssl_ca_file")
+            ctx = ssl.create_default_context(
+                purpose=ssl.Purpose.SERVER_AUTH,
+                cafile=ca_file if ca_file else None,
+            )
+
+            # 2) Режим проверки сервера
+            if insecure:
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+            else:
+                ctx.check_hostname = bool(ssl_check_hostname)
+                ctx.verify_mode = ssl.CERT_REQUIRED
+
+            # 3) mTLS: подгружаем клиентский сертификат+ключ (если заданы)
+            cert_file = self.connection_params.get("ssl_cert_file")
+            key_file = self.connection_params.get("ssl_key_file")
+            key_password = self.connection_params.get("ssl_password")
+
+            if cert_file and key_file:
+                ctx.load_cert_chain(
+                    certfile=cert_file,
+                    keyfile=key_file,
+                    password=key_password,
+                )
+
+            # 4) Основной путь: отдаём контекст (так mTLS точно включится)
+            cfg["ssl_context"] = ctx
+
+            # 5) Оставляем также поля kafka-python для совместимости/прозрачности
+            if ca_file:
+                cfg["ssl_cafile"] = ca_file
+            if cert_file:
+                cfg["ssl_certfile"] = cert_file
+            if key_file:
+                cfg["ssl_keyfile"] = key_file
+            if key_password:
+                cfg["ssl_password"] = key_password
+
+            cfg["ssl_check_hostname"] = False if insecure else bool(ssl_check_hostname)
+
+        if sp in ("SASL_PLAINTEXT", "SASL_SSL"):
+            cfg["sasl_mechanism"] = self.connection_params.get("sasl_mechanism", "PLAIN")
+            cfg["sasl_plain_username"] = self.connection_params.get("sasl_username", "")
+            cfg["sasl_plain_password"] = self.connection_params.get("sasl_password", "")
+
+        return cfg
+
+    def _init_admin_client(self):
+        try:
+            self.admin_client = KafkaAdminClient(**self._get_kafka_config())
+        except Exception as e:
+            self.admin_client = None
+            self._set_status(f"AdminClient init failed: {e}")
+
+    def _show_save_dialog(self, row: MsgRow):
+        """Show dialog to save message to file"""
+
+        # --- 1. Логика сохранения (определяем заранее) ---
+
+        # Эти переменные будут инициализированы ниже, но нужны в замыкании
+        fname_edit = None
+        rb_full_json = None
+        rb_raw_value = None
+
+        def on_save(btn=None):  # btn=None, так как вызываем и по Enter
+            filename = fname_edit.edit_text.strip()
+            if not filename:
+                self._show_message("Filename is required")
+                return
+
+            mode = "full" if rb_full_json.state else "raw"
+            self._save_message_to_file(row, filename, mode)
+
+        def on_cancel(btn):
+            self._open_message_view(row)
+
+        # --- 2. Виджеты ---
+
+        base_name = f"msg_{row.topic}_{row.partition}_{row.offset}"
+
+        # Специальный Edit, который ловит Enter
+        class EnterSubmitEdit(urwid.Edit):
+            def keypress(self, size, key):
+                if key == 'enter':
+                    on_save()
+                    return None
+                return super().keypress(size, key)
+
+        # fname_edit = EnterSubmitEdit("Filename: ", base_name + ".json")
+        fname_edit = EnterSubmitEdit("", base_name + ".json")
+
+        # Оборачиваем Edit в AttrMap для цвета (например, "field" - черный на голубом)
+        # Нужно добавить стиль "field" в палитру, если его нет.
+        # Или используем "row_select" (если он у вас есть: black, light cyan)
+        # Или жестко задаем:
+        fname_edit_styled = urwid.AttrMap(fname_edit, "edit_field", focus_map="edit_focus")
+
+        # Создаем колонки: [ Label (fixed width) | Edit Field ]
+        fname_columns = urwid.Columns([
+            ('fixed', 10, urwid.Text("Filename:")),  # Метка
+            fname_edit_styled  # Поле ввода с цветом
+        ], dividechars=1)
+
+        save_mode_group = []
+        rb_full_json = urwid.RadioButton(save_mode_group, "Full Message Dump (JSON)", state=True)
+        rb_raw_value = urwid.RadioButton(save_mode_group, "Raw Value Only (Binary)")
+
+        # Обработчик смены режима (расширение файла)
+        def on_mode_change(rb, state):
+            if state:
+                current_text = fname_edit.edit_text
+                if rb == rb_raw_value:
+                    if current_text.endswith(".json"):
+                        fname_edit.set_edit_text(current_text[:-5] + ".bin")
+                elif rb == rb_full_json:
+                    if current_text.endswith(".bin"):
+                        fname_edit.set_edit_text(current_text[:-4] + ".json")
+
+        urwid.connect_signal(rb_full_json, 'change', on_mode_change)
+        urwid.connect_signal(rb_raw_value, 'change', on_mode_change)
+
+        # Кнопки
+        btn_save = urwid.Button("Save", on_press=on_save)
+        btn_cancel = urwid.Button("Cancel", on_press=on_cancel)
+
+        pile = urwid.Pile([
+            urwid.Text("Save Message"),
+            urwid.Divider(),
+            # fname_edit,
+            fname_columns,
+            urwid.Divider(),
+            urwid.Text("Format:"),
+            rb_full_json,
+            rb_raw_value,
+            urwid.Divider(),
+            urwid.AttrMap(btn_save, "btn", focus_map="btn_focus"),
+            urwid.AttrMap(btn_cancel, "btn", focus_map="btn_focus"),
+        ])
+
+        # Перехват ESC и Enter (глобально для диалога, если фокус не на кнопках)
+        def custom_keypress(size, key):
+            if key == 'esc':
+                on_cancel(None)
+                return None
+
+            # Если нажали Enter, и фокус НЕ на кнопке Cancel (чтобы она сработала штатно)
+            # И не на кнопке Save (она и так сработает)
+            # То вызываем Save.
+            # Но Edit.keypress уже обработал Enter выше, так что это скорее для RadioButton
+            if key == 'enter':
+                # Проверяем, где фокус. Если на Cancel - не трогаем.
+                # pile.focus - это виджет (или AttrMap).
+                # Проще всего: если фокус на RadioButton, то Enter = Save.
+                focus_w = pile.focus
+                if isinstance(focus_w, urwid.RadioButton):
+                    on_save()
+                    return None
+
+            return urwid.Pile.keypress(pile, size, key)
+
+        pile.keypress = custom_keypress
+
+        self._show_dialog(pile, "Export Message")
+
+    def _save_message_to_file(self, row: MsgRow, filename, mode):
+        import json
+        import base64
+        from datetime import datetime
+
+        try:
+            # Получаем сырые данные.
+            # MsgRow хранит raw_value (bytes) и raw_key (bytes)
+            # row.full_text - это уже декодированная строка (если удалось)
+
+            raw_val = getattr(row, "raw_value", b"")
+            if raw_val is None: raw_val = b""
+            # Если raw_value не сохранен (в старых версиях кода MsgRow может не иметь его),
+            # пытаемся восстановить из full_text, но это потери.
+            # Убедитесь, что MsgRow инициализируется с raw_value.
+
+            if mode == "raw":
+                # Бинарное сохранение
+                with open(filename, "wb") as f:
+                    f.write(raw_val)
+                msg = f"Saved {len(raw_val)} bytes to {filename}"
+
+            else:
+                # Full JSON Dump
+                data = {
+                    "topic": row.topic,
+                    "partition": row.partition,
+                    "offset": row.offset,
+                    "timestamp": row.timestamp,
+                    "timestamp_iso": datetime.fromtimestamp(
+                        row.timestamp / 1000.0).isoformat() if row.timestamp else None,
+                    "key_str": row.key,
+                }
+
+                # Попытка декодировать value
+                try:
+                    # Сначала пробуем честный JSON из raw_bytes
+                    # (row.full_text может быть уже с "", если декодинг не прошел)
+                    val_str = raw_val.decode('utf-8')  # Строгий декодинг
+                    val_json = json.loads(val_str)
+                    data["value_json"] = val_json
+                    data["value_type"] = "json"
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    # Если это не JSON или не UTF-8
+
+                    # Проверяем, похоже ли это на текст вообще?
+                    # Если decode('utf-8') упал, значит это бинарник.
+                    try:
+                        text_val = raw_val.decode('utf-8')
+                        # Если декодировалось, но не JSON - сохраняем как текст
+                        data["value_text"] = text_val
+                        data["value_type"] = "text"
+                    except UnicodeDecodeError:
+                        # ЭТО БИНАРНЫЕ ДАННЫЕ
+                        data["value_type"] = "binary"
+                        # Не пишем value_text, так как это мусор.
+                        # Либо пишем явное сообщение
+                        data["value_text"] = "<binary data>"
+
+                # Всегда добавляем base64 для надежности (для бинарных и сломанных текстов)
+                if data.get("value_type") == "binary" or data.get("value_type") == "text":
+                     data["value_base64"] = base64.b64encode(raw_val).decode('ascii')
+
+                # Headers (если они есть в MsgRow, пока нет, но структуру заложим)
+                # data["headers"] = ...
+
+                with open(filename, "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=2, ensure_ascii=False)
+
+                msg = f"Saved JSON dump to {filename}"
+
+            self._show_message(msg)
+            # Опционально: вернуться в просмотр
+            # self._open_message_view(row)
+            # Но _show_message перекроет его. Лучше пусть пользователь сам закроет message.
+
+        except Exception as e:
+            LOG.exception("Save failed: %s", e)
+            self._show_message(f"Error saving file: {e}")
+
+    # ----- Consumer Group Monitoring -----
+
+    def _show_consumer_groups_monitor(self):
+        """Show summary list of all consumer groups with aggregated Lag metrics"""
+        self._set_status("Loading consumer groups analysis (this may take a moment)...")
+
+        try:
+            if not self.admin_client:
+                self._init_admin_client()
+
+            # 1. Получаем список всех групп
+            groups_listing = self.admin_client.list_consumer_groups()
+            all_group_ids = [g[0] if isinstance(g, tuple) else g.group_id for g in groups_listing]
+            all_group_ids = sorted(all_group_ids)
+
+            if not all_group_ids:
+                self._show_message("No consumer groups found.")
+                return
+
+            # 2. Получаем состояние (State)
+            try:
+                groups_desc = self.admin_client.describe_consumer_groups(all_group_ids)
+                group_states = {g.group_id: g.state for g in groups_desc}
+            except Exception:
+                group_states = {}
+
+            # 3. АГРЕГАЦИЯ LAG (Самая тяжелая часть)
+            # Чтобы показать Total Lag, нужно запросить committed + end offsets для каждой группы.
+            # Для оптимизации (чтобы не ждать минуту) можно сделать это только для видимых,
+            # но в TUI мы грузим всё.
+
+            # Подготовим Consumer для запроса End Offsets
+            cfg = self._get_kafka_config()
+            cfg["enable_auto_commit"] = False
+            try:
+                consumer = KafkaConsumer(**cfg)
+            except Exception as e:
+                self._show_message(f"Error creating consumer for metrics: {e}")
+                return
+
+            group_metrics = {}  # {group_id: {'total_lag': int, 'max_lag': int, 'max_lag_topic': str, 'topics_count': int}}
+
+            for gid in all_group_ids:
+                try:
+                    # Get Committed
+                    committed = self.admin_client.list_consumer_group_offsets(gid)
+                    if not committed:
+                        group_metrics[gid] = {'total_lag': 0, 'max_lag': 0, 'max_lag_topic': "-", 'topics_count': 0}
+                        continue
+
+                    tps = list(committed.keys())
+                    topics_set = set(tp.topic for tp in tps)
+
+                    # Защита: запрашиваем end_offsets только для существующих партиций?
+                    # consumer.end_offsets может упасть, если топика нет.
+                    # Но обычно он просто возвращает пустой результат или игнорирует.
+                    # Давайте обернем сам запрос.
+
+                    end_offsets = {}
+                    try:
+                        end_offsets = consumer.end_offsets(tps)
+                    except Exception as e_batch:
+                        LOG.warning(f"Batch end_offsets failed for {gid}: {e_batch}. Trying individually.")
+                        # Fallback: пробуем по одной партиции
+                        for tp in tps:
+                            try:
+                                # Запрашиваем end_offset для одной партиции
+                                # end_offsets([tp]) возвращает dict {tp: offset}
+                                res = consumer.end_offsets([tp])
+                                end_offsets.update(res)
+                            except Exception as e_single:
+                                LOG.debug(f"Failed to get end_offset for {tp}: {e_single}")
+                                # Игнорируем эту партицию, она просто не попадет в end_offsets
+
+
+                    total_lag = 0
+                    max_lag = -1
+                    max_lag_topic = ""
+
+                    for tp in tps:
+                        current = committed[tp].offset
+                        if current < 0: current = 0  # Unknown offset
+
+                        # Безопасное получение end offset
+                        log_end = end_offsets.get(tp)
+
+                        # Если log_end None (не удалось получить), считаем лаг неизвестным (0)
+                        if log_end is None:
+                            lag = 0
+                        else:
+                            lag = max(0, log_end - current)
+
+                        total_lag += lag
+                        if lag > max_lag:
+                            max_lag = lag
+                            max_lag_topic = tp.topic
+
+                    group_metrics[gid] = {
+                        'total_lag': total_lag,
+                        'max_lag': max_lag,
+                        'max_lag_topic': max_lag_topic,
+                        'topics_count': len(topics_set)
+                    }
+                except Exception as e:
+                    # Вот тут вы видите вашу ошибку. Давайте выведем тип ошибки.
+                    LOG.error(f"Error metrics for group {gid}: {type(e).__name__} {e}")
+                    group_metrics[gid] = {'total_lag': -1, 'max_lag': -1, 'max_lag_topic': "Error", 'topics_count': 0}
+
+            consumer.close()
+
+            # 4. Построение таблицы
+
+            def on_group_select(btn, group_id):
+                self._show_group_details(group_id)
+
+            body_widgets = []
+
+            # Header
+            # GROUP ID (30) | STATE (15) | TOPICS (6) | TOTAL LAG (12) | MAX LAG (TOPIC)
+            header_txt = f"{'GROUP ID':<30} {'STATE':<15} {'TOPICS':<6} {'TOTAL LAG':<12} {'MAX LAG (Topic)'}"
+            body_widgets.append(urwid.AttrMap(urwid.Text(header_txt), "header"))
+
+            for gid in all_group_ids:
+                state = group_states.get(gid, "Unknown")
+                metrics = group_metrics.get(gid, {})
+
+                t_count = metrics.get('topics_count', 0)
+                tot_lag = metrics.get('total_lag', 0)
+                mx_lag = metrics.get('max_lag', 0)
+                mx_topic = metrics.get('max_lag_topic', '')
+
+                if tot_lag == -1:  # Error case
+                    lag_str = "Error"
+                    max_str = "-"
+                else:
+                    lag_str = str(tot_lag)
+                    max_str = f"{mx_lag} ({mx_topic})" if mx_lag > 0 else "0"
+
+                # Строка данных
+                line = f"{gid:<30} {state:<15} {t_count:<6} {lag_str:<12} {max_str}"
+
+                # Colors
+                attr = "body"
+                if tot_lag > 0:
+                    attr = "warning"
+                if tot_lag > 10000:  # Threshold for RED
+                    attr = "error"
+                if state in ("Empty", "Dead"):
+                    attr = "comment"
+
+                btn = urwid.Button(line, on_press=on_group_select, user_data=gid)
+                body_widgets.append(urwid.AttrMap(btn, attr, focus_map="reversed"))
+
+            body_widgets.append(urwid.Divider())
+            body_widgets.append(urwid.AttrMap(urwid.Button("Close", on_press=lambda b: self._close_dialog()), "btn",
+                                              focus_map="btn_focus"))
+
+            walker = urwid.SimpleFocusListWalker(body_widgets)
+            listbox = urwid.ListBox(walker)
+
+            box = urwid.LineBox(urwid.AttrMap(listbox, "dialog_bg"),
+                                title=f"Consumer Groups Monitor ({len(all_group_ids)})")
+
+            self.dialog_overlay = urwid.Overlay(
+                top_w=urwid.Padding(box, left=2, right=2),
+                bottom_w=self.main_frame,
+                align="center",
+                width=("relative", 95),
+                valign="middle",
+                height=("relative", 90),
+                min_width=80,
+                min_height=20
+            )
+            self.loop.widget = self.dialog_overlay
+            self._set_status("Groups Loaded. Select to view details.")
+
+        except Exception as e:
+            LOG.exception("Error listing groups: %s", e)
+            self._show_message(f"Error listing groups: {e}")
+
+    def _show_group_details(self, group_id):
+        """Show detailed Lag for a specific group"""
+        self._set_status(f"Details for {group_id}. F9: Reset ALL | F10: Reset Current Topic")
+
+        try:
+            # 1. Get Committed Offsets
+            committed = self.admin_client.list_consumer_group_offsets(group_id)
+            if not committed:
+                self._show_message(f"Group {group_id} has no committed offsets.")
+                self._show_consumer_groups_monitor()
+                return
+
+            # 2. Get End Offsets
+            cfg = self._get_kafka_config()
+            cfg["enable_auto_commit"] = False
+            try:
+                consumer = KafkaConsumer(**cfg)
+                tps = list(committed.keys())
+                end_offsets = consumer.end_offsets(tps)
+                consumer.close()
+            except Exception as e:
+                self._show_message(f"Error fetching end offsets: {e}")
+                return
+
+            # 3. Get State
+            try:
+                desc = self.admin_client.describe_consumer_groups([group_id])
+                state = desc[0].state
+            except:
+                state = "Unknown"
+
+            # 4. Build Rows
+            rows = []
+            total_lag = 0
+            sorted_tps = sorted(tps, key=lambda x: (x.topic, x.partition))
+
+            for tp in sorted_tps:
+                current = committed[tp].offset
+                if current < 0: current = 0
+                log_end = end_offsets.get(tp, 0)
+                lag = max(0, log_end - current)
+                total_lag += lag
+
+                rows.append({
+                    "topic": tp.topic,
+                    "part": tp.partition,
+                    "lag": lag,
+                    "current": current,
+                    "end": log_end
+                })
+
+            # 5. UI
+            content_widgets = []
+
+            summary_txt = f"Group: {group_id} | State: {state} | Total Lag: {total_lag}\n" \
+                          f"Actions: [F9] Reset ALL topics | [F10] Reset Selected Topic"
+            content_widgets.append(urwid.Text(summary_txt))
+            content_widgets.append(urwid.Divider())
+
+            header_str = f"{'TOPIC':<30} {'PART':<6} {'LAG':<10} {'CURRENT':<12} {'LOG-END':<12}"
+            content_widgets.append(urwid.AttrMap(urwid.Text(header_str), "header"))
+
+            # Helper class to store data in the row widget
+            class RowWidget(SelectableText):
+                def __init__(self, text, topic):
+                    self.topic_name = topic
+                    super().__init__(text)
+
+            for r in rows:
+                line = f"{r['topic']:<30} {r['part']:<6} {r['lag']:<10} {r['current']:<12} {r['end']:<12}"
+                attr = "body"
+                if r['lag'] > 0: attr = "warning"
+                if r['lag'] > 1000: attr = "error"
+
+                # Создаем строку и прикрепляем имя топика
+                row_w = RowWidget(line, r['topic'])
+                content_widgets.append(urwid.AttrMap(row_w, attr, focus_map="reversed"))
+
+            content_widgets.append(urwid.Divider())
+
+            back_btn = urwid.Button("Back to Groups", on_press=lambda b: self._show_consumer_groups_monitor())
+            content_widgets.append(urwid.AttrMap(back_btn, "btn", focus_map="btn_focus"))
+
+            walker = urwid.SimpleFocusListWalker(content_widgets)
+
+            # --- Custom ListBox with F9/F10 logic ---
+            class DetailsListBox(urwid.ListBox):
+                def __init__(self, walker, app_ref, group_id):
+                    super().__init__(walker)
+                    self.app = app_ref
+                    self.group_id = group_id
+
+                def keypress(self, size, key):
+                    if key == 'esc':
+                        self.app._show_consumer_groups_monitor()
+                        return None
+
+                    elif key == 'f9':
+                        # Reset ALL
+                        self.app._show_reset_offsets_dialog(self.group_id, target_topic=None)
+                        return None
+
+                    elif key == 'f10':
+                        # Reset Selected Topic
+                        # Нужно найти, какой виджет сейчас в фокусе
+                        focus_widget, _ = self.get_focus()
+
+                        # focus_widget может быть AttrMap, внутри которого RowWidget
+                        topic_to_reset = None
+
+                        if isinstance(focus_widget, urwid.AttrMap):
+                            w = focus_widget.original_widget
+                            if hasattr(w, 'topic_name'):
+                                topic_to_reset = w.topic_name
+
+                        if topic_to_reset:
+                            self.app._show_reset_offsets_dialog(self.group_id, target_topic=topic_to_reset)
+                        else:
+                            # Если фокус на кнопке Back или заголовке
+                            self.app._show_message("Select a topic row to reset specific topic.")
+                        return None
+
+                    return super().keypress(size, key)
+
+            wrapped_listbox = DetailsListBox(walker, self, group_id)
+
+            box = urwid.LineBox(urwid.AttrMap(wrapped_listbox, "dialog_bg"), title=f"Details: {group_id}")
+
+            self.dialog_overlay = urwid.Overlay(
+                top_w=urwid.Padding(box, left=2, right=2),
+                bottom_w=self.main_frame,
+                align="center",
+                width=("relative", 90),
+                valign="middle",
+                height=("relative", 90),
+                min_width=70,
+                min_height=20
+            )
+            self.loop.widget = self.dialog_overlay
+
+        except Exception as e:
+            LOG.exception("Error details: %s", e)
+            self._show_message(f"Error loading details: {e}")
+
+    # ----- Reset Offsets Logic -----
+
+    def _show_reset_offsets_dialog(self, group_id, target_topic=None):
+        """Step 1: Select Reset Strategy. target_topic=None means ALL topics."""
+
+        # Debug print (remove in prod)
+        # LOG.info(f"Opening Reset Dialog for {group_id}, target={target_topic}")
+
+        scope_str = f"ONLY topic '{target_topic}'" if target_topic else "ALL topics"
+
+        strategies = [
+            ("To Latest (Skip all)", "latest"),
+            ("To Earliest (Replay all)", "earliest"),
+            ("By Duration (e.g. 1h ago)", "duration"),
+            ("Specific DateTime", "datetime")
+        ]
+
+        radio_group = []
+        strategy_radios = []
+        for label, val in strategies:
+            rb = urwid.RadioButton(radio_group, label)
+            rb.user_data = val
+            strategy_radios.append(rb)
+
+        duration_edit = urwid.Edit("Duration (e.g. 30m, 2h): ", "1h")
+        datetime_edit = urwid.Edit("DateTime (ISO 8601): ", "2023-01-01T12:00:00")
+
+        strategy_radios[0].set_state(True)
+
+        def on_preview(btn):
+            selected_strategy = "latest"
+            for rb in strategy_radios:
+                if rb.state:
+                    selected_strategy = rb.user_data
+                    break
+
+            params = {}
+            if selected_strategy == "duration":
+                params["duration"] = duration_edit.edit_text
+            elif selected_strategy == "datetime":
+                params["datetime"] = datetime_edit.edit_text
+
+            # ВАЖНО: Передаем target_topic
+            self._show_reset_preview(group_id, selected_strategy, params, target_topic)
+
+        def on_cancel(btn):
+            # Возвращаемся в детали группы
+            self._show_group_details(group_id)
+
+        pile = urwid.Pile([
+            urwid.Text(f"Reset Offsets for Group: {group_id}"),
+            urwid.Text(f"Scope: {scope_str}", align='center'),
+            urwid.Divider(),
+            urwid.Text("Select Strategy:"),
+            *strategy_radios,
+            urwid.Divider(),
+            urwid.Text("Parameters (if applicable):"),
+            duration_edit,
+            datetime_edit,
+            urwid.Divider(),
+            urwid.AttrMap(urwid.Button("Preview (Dry Run)", on_press=on_preview), "btn", focus_map="btn_focus"),
+            urwid.AttrMap(urwid.Button("Cancel", on_press=on_cancel), "btn", focus_map="btn_focus"),
+        ])
+
+        # # Обертка для обработки ESC внутри этого диалога
+        # class ResetPile(urwid.Pile):
+        #     def keypress(self, size, key):
+        #         if key == 'esc':
+        #             on_cancel(None)
+        #             return None
+        #         return super().keypress(size, key)
+        #
+        # wrapped_pile = ResetPile(pile.contents)
+
+        original_keypress = pile.keypress
+
+        def custom_keypress(size, key):
+            if key == 'esc':
+                on_cancel(None)
+                return None
+            # return original_keypress(size, key)
+            return urwid.Pile.keypress(pile, size, key)
+
+        pile.keypress = custom_keypress
+
+        self._show_dialog(pile, "Reset Offsets Configuration")
+
+    def _show_reset_preview(self, group_id, strategy, params, target_topic=None):
+        """Step 2: Calculate and Show Dry Run"""
+        self._set_status("Calculating new offsets...")
+
+        try:
+            # 1. Get current subscription
+            committed = self.admin_client.list_consumer_group_offsets(group_id)
+            if not committed:
+                self._show_message("Group has no offsets to reset.")
+                return
+
+            tps = list(committed.keys())
+
+            # ФИЛЬТРАЦИЯ
+            if target_topic:
+                original_count = len(tps)
+                tps = [tp for tp in tps if tp.topic == target_topic]
+                # LOG.info(f"Filtered TPs: {original_count} -> {len(tps)} for topic {target_topic}")
+
+                if not tps:
+                    self._show_message(f"Group is not subscribed to topic '{target_topic}'.")
+                    # Возврат в конфиг
+                    self._show_reset_offsets_dialog(group_id, target_topic)
+                    return
+
+            # 2. Calculate New Offsets
+            cfg = self._get_kafka_config()
+            cfg["enable_auto_commit"] = False
+            consumer = KafkaConsumer(**cfg)
+
+            new_offsets_map = {}
+
+            if strategy == "latest":
+                new_offsets_map = consumer.end_offsets(tps)
+            elif strategy == "earliest":
+                new_offsets_map = consumer.beginning_offsets(tps)
+            elif strategy in ("duration", "datetime"):
+                from datetime import datetime, timedelta, timezone
+                target_ts_ms = 0
+                now = datetime.now(timezone.utc)
+                if strategy == "duration":
+                    dur_str = params.get("duration", "1h").lower()
+                    delta = timedelta(hours=1)
+                    if dur_str.endswith("m"):
+                        delta = timedelta(minutes=int(dur_str[:-1]))
+                    elif dur_str.endswith("h"):
+                        delta = timedelta(hours=int(dur_str[:-1]))
+                    elif dur_str.endswith("d"):
+                        delta = timedelta(days=int(dur_str[:-1]))
+                    target_ts_ms = int((now - delta).timestamp() * 1000)
+                else:
+                    try:
+                        dt = datetime.fromisoformat(params.get("datetime"))
+                        if dt.tzinfo is None:
+                            target_ts_ms = int(dt.timestamp() * 1000)
+                        else:
+                            target_ts_ms = int(dt.timestamp() * 1000)
+                    except ValueError:
+                        self._show_message("Invalid date format")
+                        consumer.close()
+                        return
+
+                ts_map = {tp: target_ts_ms for tp in tps}
+                res = consumer.offsets_for_times(ts_map)
+                for tp, off_and_ts in res.items():
+                    if off_and_ts:
+                        new_offsets_map[tp] = off_and_ts.offset
+                    else:
+                        new_offsets_map[tp] = consumer.end_offsets([tp])[tp]
+
+            consumer.close()
+
+            # 3. Build Preview Table
+            body = []
+            header = f"{'TOPIC':<30} {'PART':<5} {'OLD':<12} {'NEW':<12} {'CHANGE'}"
+            body.append(urwid.AttrMap(urwid.Text(header), "header"))
+
+            changes_list = []
+
+            for tp in sorted(tps, key=lambda x: (x.topic, x.partition)):
+                old_off = committed[tp].offset
+                new_off = new_offsets_map.get(tp, old_off)
+                diff = new_off - old_off
+                diff_str = f"{diff:+d}" if diff != 0 else "0"
+
+                changes_list.append((tp, new_off))
+                line = f"{tp.topic:<30} {tp.partition:<5} {old_off:<12} {new_off:<12} {diff_str}"
+                attr = "body"
+                if diff != 0: attr = "warning"
+                body.append(urwid.AttrMap(urwid.Text(line), attr))
+
+            # 4. Buttons
+            def on_confirm(btn):
+                self._execute_reset(group_id, changes_list)
+
+            def on_back(btn):
+                # Возврат в конфиг с ТЕМ ЖЕ target_topic
+                self._show_reset_offsets_dialog(group_id, target_topic)
+
+            body.append(urwid.Divider())
+            body.append(urwid.Text(f"Scope: {'ONLY ' + target_topic if target_topic else 'ALL'}"))
+            body.append(urwid.Divider())
+
+            btns = urwid.Columns([
+                urwid.AttrMap(urwid.Button("CONFIRM RESET", on_confirm), "btn", focus_map="btn_focus"),
+                urwid.AttrMap(urwid.Button("Back", on_back), "btn", focus_map="btn_focus")
+            ])
+            body.append(btns)
+
+            walker = urwid.SimpleFocusListWalker(body)
+            listbox = urwid.ListBox(walker)
+
+            # Добавляем обработку ESC и в Preview
+            class PreviewListBox(urwid.ListBox):
+                def keypress(self, size, key):
+                    if key == 'esc':
+                        on_back(None)
+                        return None
+                    return super().keypress(size, key)
+
+            wrapped_listbox = PreviewListBox(walker)
+
+            box = urwid.LineBox(urwid.AttrMap(wrapped_listbox, "dialog_bg"), title=f"Dry Run: {group_id}")
+
+            self.dialog_overlay = urwid.Overlay(
+                top_w=urwid.Padding(box, left=2, right=2),
+                bottom_w=self.main_frame,
+                align="center",
+                width=("relative", 80),
+                valign="middle",
+                height=("relative", 80),
+                min_width=60,
+                min_height=20
+            )
+            self.loop.widget = self.dialog_overlay
+
+        except Exception as e:
+            LOG.exception("Error calculating offsets: %s", e)
+            self._show_message(f"Calculation failed: {e}")
+
+    def _execute_reset(self, group_id, changes_list):
+        """Step 3: Execute (Try AdminClient, fallback to Consumer commit)"""
+        try:
+            # Попытка 1: Admin Client (современный способ)
+            if hasattr(self.admin_client, 'alter_consumer_group_offsets'):
+                from kafka.structs import OffsetAndMetadata
+                offsets = {}
+                for tp, offset in changes_list:
+                    # Пробуем разные сигнатуры конструктора
+                    try:
+                        offsets[tp] = OffsetAndMetadata(offset=offset, metadata="", leader_epoch=-1)
+                    #except TypeError:
+                    except Exception as e:
+                        LOG.exception("Error calculating offsets: %s", e)
+                        self._show_message(f"Offset failed: {e}")
+
+                self.admin_client.alter_consumer_group_offsets(
+                    group_id=group_id,
+                    offsets=offsets
+                )
+
+            else:
+                # Попытка 2: Legacy способ через Consumer commit
+                # Это работает всегда, но требует создания консьюмера
+
+                # self._show_message("AdminClient method missing, using Consumer commit fallback...")
+
+                cfg = self._get_kafka_config()
+                cfg["group_id"] = group_id
+                cfg["enable_auto_commit"] = False
+                # Важно отключить auto.offset.reset, чтобы не сбросило само
+                cfg["auto_offset_reset"] = "none"
+
+                consumer = KafkaConsumer(**cfg)
+
+                # Формируем словарь для коммита
+                from kafka import OffsetAndMetadata, TopicPartition
+                offsets_to_commit = {}
+
+                topics = set()
+                for tp, offset in changes_list:
+                    topics.add(tp.topic)
+                    try:
+                        offsets_to_commit[tp] = OffsetAndMetadata(offset=offset, metadata="", leader_epoch=-1)
+                    except Exception as e:
+                        LOG.exception("Error creating OffsetAndMetadata: %s", e)
+                        self._show_message(f"Failed to prepare offset for {tp}: {e}")
+                        consumer.close()
+                        return # Прерываем операцию, чтобы не коммитить частично
+
+                # Для коммита не обязательно быть подписанным в новых версиях Kafka,
+                # но надежнее просто отправить commitSync.
+                # Consumer.commit() отправляет OffsetCommitRequest
+
+                consumer.commit(offsets_to_commit)
+                consumer.close()
+
+            self._show_message(f"Successfully reset offsets for group {group_id}")
+            # Возвращаемся в детали
+            self._show_group_details(group_id)
+
+        except Exception as e:
+            LOG.exception("Reset failed: %s", e)
+            self._show_message(f"Reset failed: {e}")
+
+    def _show_delete_topic_confirm(self, topic):
+        if not topic:
+            return
+
+        if topic.startswith("__"):
+            self._show_message(f"Deleting internal topics is forbidden: {topic}")
+            return
+
+        def on_delete(btn=None):
+            try:
+                if not self.admin_client:
+                    self._init_admin_client()
+                if not self.admin_client:
+                    self._show_message("Admin client is not initialized")
+                    return
+
+                self.admin_client.delete_topics([topic])
+                self._close_dialog()
+                self._fetch_topics()
+                self._set_status(f"Deleted topic: {topic}")
+            except Exception as e:
+                self._show_message(f"Error deleting topic: {e}")
+
+        def on_cancel(btn=None):
+            self._close_dialog()
+
+        # Enter = delete, Esc/Q = cancel
+        class ConfirmPile(urwid.Pile):
+            def keypress(pile_self, size, key):
+                if key == 'enter':
+                    on_delete()
+                    return None
+                if key in ('esc', 'q', 'Q'):
+                    on_cancel()
+                    return None
+                return super().keypress(size, key)
+
+        pile = ConfirmPile([
+            urwid.Text("Delete topic?"),
+            urwid.Divider(),
+            urwid.Text(f"Topic: {topic}"),
+            urwid.Text("This operation is destructive."),
+            urwid.Divider(),
+            urwid.AttrMap(urwid.Button("DELETE", on_press=on_delete), "btn", focus_map="btn_focus"),
+            urwid.AttrMap(urwid.Button("Cancel", on_press=on_cancel), "btn", focus_map="btn_focus"),
+        ])
+
+        self._show_dialog(pile, "Confirm delete")
+
+    def _show_create_topic_dialog(self):
+        # --- Presets Definition ---
+        PRESETS = {
+            "Manual (Custom)": {},
+            "Temporary Debug (24h, delete)": {
+                "cleanup.policy": "delete",
+                "retention.ms": "86400000",
+                "replication_factor": "1"
+            },
+            "Short Lived (7 days, delete)": {
+                "cleanup.policy": "delete",
+                "retention.ms": "604800000",  # 7 * 24 * 3600 * 1000
+                "replication_factor": "1"
+            },
+            "Compacted KV (Keys+Values)": {
+                "cleanup.policy": "compact",
+                "segment.bytes": "67108864",  # 64MB for more frequent compaction
+                "min.insync.replicas": "1"
+            },
+            "High Durability (3 replicas)": {
+                "replication_factor": "3",
+                "min.insync.replicas": "2",
+                "retention.ms": "604800000"  # Default 7 days
+            }
+        }
+
+        preset_names = list(PRESETS.keys())
+
+        # --- Helper Functions ---
+        def parse_int(name, s, min_value=1):
+            try:
+                v = int(str(s).strip())
+                if v < min_value:
+                    raise ValueError()
+                return v, None
+            except Exception:
+                return None, f"{name} must be an integer >= {min_value}"
+
+        def add_cfg(cfg, key, edit):
+            v = edit.edit_text.strip()
+            if v != "":
+                cfg[key] = v
+
+        # --- UI Elements Declarations ---
+        dialog_status = urwid.Text("", align="center")
+
+        class EditWithEnter(urwid.Edit):
+            def keypress(self, size, key):
+                if key == 'enter':
+                    on_create()
+                    return None
+                return super().keypress(size, key)
+
+        topic_edit = EditWithEnter("Topic name: ", "")
+        partitions_edit = EditWithEnter("Partitions: ", "1")
+        rf_edit = EditWithEnter("Replication factor: ", "1")
+
+        cleanup_policy_edit = EditWithEnter("cleanup.policy (delete|compact): ", "")
+        retention_ms_edit = EditWithEnter("retention.ms: ", "")
+        retention_bytes_edit = EditWithEnter("retention.bytes: ", "")
+        segment_bytes_edit = EditWithEnter("segment.bytes: ", "")
+        min_isr_edit = EditWithEnter("min.insync.replicas: ", "")
+        compression_type_edit = EditWithEnter("compression.type: ", "")
+        max_msg_bytes_edit = EditWithEnter("max.message.bytes: ", "")
+
+        # --- Event Handlers ---
+
+        def on_preset_change(rb, state, user_data):
+            if not state: return  # Only handle 'select' event
+
+            preset_name = user_data
+            data = PRESETS.get(preset_name, {})
+
+            # Reset/Set fields based on preset
+            if "cleanup.policy" in data: cleanup_policy_edit.set_edit_text(data["cleanup.policy"])
+            if "retention.ms" in data: retention_ms_edit.set_edit_text(data["retention.ms"])
+            if "replication_factor" in data: rf_edit.set_edit_text(data["replication_factor"])
+            if "segment.bytes" in data: segment_bytes_edit.set_edit_text(data["segment.bytes"])
+            if "min.insync.replicas" in data: min_isr_edit.set_edit_text(data["min.insync.replicas"])
+
+        def on_create(btn=None):
+            # Clear previous errors
+            dialog_status.set_text("")
+
+            name = topic_edit.edit_text.strip()
+            if not name:
+                dialog_status.set_text(("error", "Error: Topic name is required"))
+                return
+            if name.startswith("__"):
+                dialog_status.set_text(("error", "Error: Creating internal topics (__*) is forbidden"))
+                return
+
+            partitions, err = parse_int("Partitions", partitions_edit.edit_text, 1)
+            if err:
+                dialog_status.set_text(("error", f"Error: {err}"))
+                return
+
+            rf, err = parse_int("Replication factor", rf_edit.edit_text, 1)
+            if err:
+                dialog_status.set_text(("error", f"Error: {err}"))
+                return
+
+            topic_configs = {}
+            add_cfg(topic_configs, "cleanup.policy", cleanup_policy_edit)
+            add_cfg(topic_configs, "retention.ms", retention_ms_edit)
+            add_cfg(topic_configs, "retention.bytes", retention_bytes_edit)
+            add_cfg(topic_configs, "segment.bytes", segment_bytes_edit)
+            add_cfg(topic_configs, "min.insync.replicas", min_isr_edit)
+            add_cfg(topic_configs, "compression.type", compression_type_edit)
+            add_cfg(topic_configs, "max.message.bytes", max_msg_bytes_edit)
+
+            # --- Safety Check: Infinite Retention ---
+            ret_ms = topic_configs.get("retention.ms", "").strip()
+            ret_bytes = topic_configs.get("retention.bytes", "").strip()
+
+            if ret_ms == "-1":
+                # Если время хранения отключено, мы ОБЯЗАНЫ иметь лимит по размеру
+                if not ret_bytes or ret_bytes == "-1":
+                    dialog_status.set_text(("error", "Error: retention.ms=-1 requires explicit retention.bytes > 0"))
+                    return
+
+            try:
+                if not self.admin_client:
+                    self._init_admin_client()
+                if not self.admin_client:
+                    dialog_status.set_text(("error", "Error: Admin client is not initialized"))
+                    return
+
+                new_topic = NewTopic(
+                    name=name,
+                    num_partitions=partitions,
+                    replication_factor=rf,
+                    topic_configs=topic_configs or None
+                )
+                self.admin_client.create_topics([new_topic], validate_only=False)
+                self._close_dialog()
+                self._fetch_topics()
+                self._set_status(f"Topic created: {name}")
+            except TopicAlreadyExistsError:
+                dialog_status.set_text(("error", f"Error: Topic '{name}' already exists"))
+            except Exception as e:
+                dialog_status.set_text(("error", f"Error creating topic: {e}"))
+
+        def on_cancel(btn=None):
+            self._close_dialog()
+
+        # --- UI Assembly ---
+
+        # Preset Radio Buttons
+        preset_group = []
+        preset_pile_items = [urwid.Text("Select Preset:")]
+        for pname in preset_names:
+            rb = urwid.RadioButton(preset_group, pname, on_state_change=on_preset_change, user_data=pname)
+            preset_pile_items.append(rb)
+
+        preset_box = urwid.LineBox(urwid.Pile(preset_pile_items))
+
+        class CreatePile(urwid.Pile):
+            def keypress(self, size, key):
+                # Для форм ввода текста убираем 'q' и 'Q' из клавиш закрытия,
+                # так как они нужны для ввода. Оставляем только 'esc'.
+                if key == 'esc':
+                    on_cancel()
+                    return None
+                return super().keypress(size, key)
+
+
+        pile = CreatePile([
+            urwid.Text("Create Topic Configurator"),
+            urwid.Divider(),
+            preset_box,
+            urwid.Divider(),
+            topic_edit,
+            partitions_edit,
+            rf_edit,
+            urwid.Divider(),
+            urwid.Text("Advanced Configs (Auto-filled by preset):"),
+            cleanup_policy_edit,
+            retention_ms_edit,
+            retention_bytes_edit,
+            segment_bytes_edit,
+            min_isr_edit,
+            compression_type_edit,
+            max_msg_bytes_edit,
+            urwid.Divider(),
+            dialog_status,  # Error messages will appear here
+            urwid.Divider(),
+            urwid.AttrMap(urwid.Button("Create", on_press=on_create), "btn", focus_map="btn_focus"),
+            urwid.AttrMap(urwid.Button("Cancel", on_press=on_cancel), "btn", focus_map="btn_focus"),
+        ])
+
+        self._show_dialog(pile, "Create Topic")
+
+    # ----- UI -----
+
+    def _set_status(self, extra=""):
+        sp = self.connection_params.get("security_protocol", "PLAINTEXT")
+        topic_part = f"Topic: {self.current_topic} | " if self.current_topic else ""
+        focus_side = "Topics" if self.columns and self.columns.focus_position == 0 else "Messages"
+        msg_info = self._message_position_string()
+        status = (
+            f"{focus_side} | Profile: {self.profile_name} | {topic_part}{sp} | {msg_info} | "
+            "N:NewTopic G:Groups Enter:View F2:Info F3:ACL F4:ACLMenu F7:Filter S:Sort O:Offsets P:Produce R:Refresh Q:Quit"
+        )
+        if extra:
+            status += f" | {extra}"
+        self.status_text.set_text(status)
+
+    def _update_topics_title(self):
+        """Update topics panel title with current filter"""
+        if self.topic_filter:
+            self.topics_box.set_title(f"Topics: *{self.topic_filter}*")
+        else:
+            self.topics_box.set_title("Topics")
+
+    def _apply_message_filters(self):
+        """Apply filters to messages and update display"""
+        if not self.all_messages:
+            return
+
+        # Filter messages
+        filtered_messages = []
+        for msg_item, msg_row in self.all_messages:
+            # Check each filter
+            match = True
+
+            # Key filter
+            if self.msg_filters["key"]:
+                key_str = (msg_row.key or "").lower()
+                if self.msg_filters["key"].lower() not in key_str:
+                    match = False
+
+            # Value filter
+            if match and self.msg_filters["value"]:
+                value_str = (msg_row.full_text or "").lower()
+                if self.msg_filters["value"].lower() not in value_str:
+                    match = False
+
+            # Partition filter
+            if match and self.msg_filters["partition"]:
+                partition_str = str(msg_row.partition)
+                if self.msg_filters["partition"] not in partition_str:
+                    match = False
+
+            # Offset filter
+            if match and self.msg_filters["offset"]:
+                offset_str = str(msg_row.offset)
+                if self.msg_filters["offset"] not in offset_str:
+                    match = False
+
+            if match:
+                filtered_messages.append((msg_item, msg_row))
+
+        # Rebuild walker with filtered messages
+        self.msg_walker.clear()
+
+        # Add header
+        header_line = f"{'Timestamp':<28} {'Topic':<13} {'Offset':<10} {'Size':<8} {'Key':<12} Value"
+        header_widget = urwid.Text(header_line)
+        self.msg_walker.append(urwid.AttrMap(header_widget, "header"))
+
+        # Add filtered messages
+        for msg_item, msg_row in filtered_messages:
+            self.msg_walker.append(msg_item)
+
+        # Format and sort
+        self.msg_listbox.format_all_messages()
+
+        if self.sort_mode != "unsorted":
+            self._sort_messages()
+
+        # Update title
+        self._update_messages_title()
+
+        # Set focus
+        if len(self.msg_walker) > 1:
+            self.msg_listbox.set_focus(1)
+
+    def _build_ui(self):
+        footer = urwid.AttrMap(self.status_text, "footer")
+        # Create topics box with dynamic title
+        self.topics_box_widget = urwid.AttrMap(self.topic_listbox, "body")
+        self.topics_box = urwid.LineBox(
+            self.topics_box_widget,
+            title="Topics",
+        )
+        # Create messages box with dynamic title
+        self.msgs_box_widget = urwid.AttrMap(self.msg_listbox, "body")
+        self.msgs_box = urwid.LineBox(
+            self.msgs_box_widget,
+            title="Messages",
+        )
+        self.columns = urwid.Columns(
+            [
+                (20, self.topics_box),  # Fixed width 20 for topics
+                ("weight", 1, self.msgs_box)  # Messages take remaining space
+            ],
+            dividechars=1,
+            focus_column=0,
+        )
+        self.main_frame = urwid.AttrMap(urwid.Frame(self.columns, footer=footer), "body")
+        self._set_status()
+
+    def _update_messages_title(self):
+        """Update messages panel title with current sort mode and filters"""
+        title_parts = ["Messages"]
+
+        # Add sort info
+        if self.sort_mode != "unsorted":
+            direction = "↑" if self.sort_ascending else "↓"
+            sort_names = {
+                "timestamp": "Time",
+                "partition": "Part",
+                "size": "Size"
+            }
+            title_parts.append(f"[{sort_names.get(self.sort_mode, self.sort_mode)}{direction}]")
+
+        # Add filter info
+        active_filters = []
+        for field, mask in self.msg_filters.items():
+            if mask:
+                active_filters.append(f"{field}:*{mask}*")
+
+        if active_filters:
+            title_parts.append(f"Filter: {', '.join(active_filters)}")
+
+        self.msgs_box.set_title(" ".join(title_parts))
+
+    def _sort_messages(self):
+        """Sort messages based on current sort mode and direction"""
+        if not self.msg_walker or len(self.msg_walker) <= 1:
+            return
+
+        # Separate header from messages
+        header = None
+        messages = []
+
+        for i, item in enumerate(self.msg_walker):
+            if isinstance(item, urwid.AttrMap):
+                widget = item.original_widget
+                if isinstance(widget, MsgRow):
+                    messages.append((i, item, widget))
+                elif i == 0:
+                    header = item
+
+        if not messages:
+            return
+
+        # Sort messages based on mode
+        if self.sort_mode == "timestamp":
+            messages.sort(key=lambda x: x[2].timestamp if x[2].timestamp else 0, reverse=not self.sort_ascending)
+        elif self.sort_mode == "partition":
+            messages.sort(key=lambda x: (x[2].partition, x[2].offset), reverse=not self.sort_ascending)
+        elif self.sort_mode == "size":
+            messages.sort(key=lambda x: len((x[2].full_text or "").encode('utf-8')), reverse=not self.sort_ascending)
+        # "unsorted" keeps original order (partition, offset)
+        elif self.sort_mode == "unsorted":
+            messages.sort(key=lambda x: (x[2].partition, x[2].offset), reverse=False)
+
+        # Rebuild walker
+        self.msg_walker.clear()
+        if header:
+            self.msg_walker.append(header)
+
+        for _, item, _ in messages:
+            self.msg_walker.append(item)
+
+        # Set focus to first message (skip header)
+        if len(self.msg_walker) > 1:
+            self.msg_listbox.set_focus(1)
+
+    def _show_topic_acls(self, topic):
+        """Display ACLs for a specific topic, including wildcard matches"""
+        if not topic:
+            return
+
+        try:
+            from kafka.admin.acl_resource import (
+                ACLFilter, ResourcePattern, ResourceType,
+                ACLOperation, ACLPermissionType, ACLResourcePatternType
+            )
+
+            self.current_acl_topic = topic
+
+            all_matching_acls = []
+
+            # 1. Get ACLs with LITERAL pattern for exact topic name
+            literal_filter = ACLFilter(
+                principal=None,
+                host=None,
+                operation=ACLOperation.ANY,
+                permission_type=ACLPermissionType.ANY,
+                resource_pattern=ResourcePattern(
+                    ResourceType.TOPIC,
+                    topic,
+                    ACLResourcePatternType.LITERAL
+                )
+            )
+
+            result = self.admin_client.describe_acls(literal_filter)
+            literal_acls = result[0] if isinstance(result, tuple) else result
+            literal_acls = literal_acls if isinstance(literal_acls, list) else []
+
+            all_matching_acls.extend(literal_acls)
+
+            # 2. Get ALL topic ACLs to find wildcard matches
+            from kafka.admin.acl_resource import ResourcePatternFilter
+
+            all_topics_filter = ACLFilter(
+                principal=None,
+                host=None,
+                operation=ACLOperation.ANY,
+                permission_type=ACLPermissionType.ANY,
+                resource_pattern=ResourcePatternFilter(
+                    ResourceType.TOPIC,
+                    None,
+                    ACLResourcePatternType.ANY
+                )
+            )
+
+            result = self.admin_client.describe_acls(all_topics_filter)
+            all_topic_acls = result[0] if isinstance(result, tuple) else result
+            all_topic_acls = all_topic_acls if isinstance(all_topic_acls, list) else []
+
+            # 3. Filter ACLs that match this topic by wildcard
+            seen_acls = set()  # To avoid duplicates
+            for acl in literal_acls:
+                acl_id = f"{getattr(acl, 'principal', '')}_{getattr(acl, 'operation', '')}_{getattr(acl, 'permission_type', '')}_{getattr(acl.resource_pattern, 'resource_name', '')}"
+                seen_acls.add(acl_id)
+
+            for acl in all_topic_acls:
+                if not hasattr(acl, 'resource_pattern'):
+                    continue
+
+                resource_name = acl.resource_pattern.resource_name if hasattr(acl.resource_pattern,
+                                                                              'resource_name') else ""
+                pattern_type_obj = getattr(acl.resource_pattern, 'pattern_type', None)
+
+                # Get pattern type as string
+                if pattern_type_obj is not None:
+                    if hasattr(pattern_type_obj, 'name'):
+                        pattern_type = pattern_type_obj.name
+                    elif hasattr(pattern_type_obj, 'value'):
+                        # Try numeric value
+                        pattern_type_map = {0: "UNKNOWN", 1: "ANY", 2: "MATCH", 3: "LITERAL", 4: "PREFIXED"}
+                        pattern_type = pattern_type_map.get(pattern_type_obj.value, str(pattern_type_obj))
+                    else:
+                        pattern_type = str(pattern_type_obj)
+                else:
+                    pattern_type = "UNKNOWN"
+
+                # Check if this ACL applies to our topic
+                applies = False
+
+                if pattern_type == "LITERAL":
+                    if resource_name == topic:
+                        # Already included from literal_filter, skip to avoid duplicates
+                        applies = False
+                    elif resource_name == "*":
+                        # Wildcard LITERAL matches all
+                        applies = True
+                    elif resource_name.endswith("*") and len(resource_name) > 1:
+                        # Handle LITERAL with * suffix as prefix pattern
+                        # e.g., "TOP*" should match "TOPIC1"
+                        prefix = resource_name[:-1]  # Remove trailing *
+                        if topic.startswith(prefix):
+                            applies = True
+                elif pattern_type == "PREFIXED":
+                    # Check if topic name starts with the prefix
+                    if resource_name and topic.startswith(resource_name):
+                        applies = True
+
+                if applies:
+                    # Check for duplicates
+                    acl_id = f"{getattr(acl, 'principal', '')}_{getattr(acl, 'operation', '')}_{getattr(acl, 'permission_type', '')}_{resource_name}"
+                    if acl_id not in seen_acls:
+                        all_matching_acls.append(acl)
+                        seen_acls.add(acl_id)
+
+            # Store all ACLs for filtering
+            self.all_acls = all_matching_acls
+
+            # Apply filters
+            filtered_acls = self._apply_acl_filters(all_matching_acls)
+
+            # Display filtered ACLs
+            self._display_acl_dialog(topic, filtered_acls)
+
+        except ImportError as e:
+            # traceback.print_exc()
+            logger.exception("ACL support requires kafka-python ACL modules...: %s", e)
+            self._show_message(f"ACL support requires kafka-python ACL modules: {e}")
+        except AttributeError as e:
+            # traceback.print_exc()
+            logger.exception("ACLs not available %s  ACLs may not be enabled on this Kafka cluster", e)
+            self._show_message(f"ACLs not available: {e}\n\nACLs may not be enabled on this Kafka cluster.")
+        except Exception as e:
+            # traceback.print_exc()
+            logger.exception("Error loading ACLs: %s", e)
+            self._show_message(f"Error loading ACLs: {e}")
+
+    def _apply_acl_filters(self, acls):
+        """Apply filters to ACL list"""
+        if not acls:
+            return []
+
+        filtered = []
+        for acl in acls:
+            match = True
+
+            # Principal filter
+            if self.acl_filters["principal"]:
+                principal = getattr(acl, 'principal', '') or ""
+                if self.acl_filters["principal"].lower() not in principal.lower():
+                    match = False
+
+            # Host filter
+            if match and self.acl_filters["host"]:
+                host = getattr(acl, 'host', '') or ""
+                if self.acl_filters["host"].lower() not in host.lower():
+                    match = False
+
+            # Operation filter
+            if match and self.acl_filters["operation"] != "ANY":
+                operation = acl.operation.name if hasattr(acl, 'operation') and hasattr(acl.operation, 'name') else ""
+                if operation != self.acl_filters["operation"]:
+                    match = False
+
+            # Permission filter
+            if match and self.acl_filters["permission"] != "ANY":
+                permission = acl.permission_type.name if hasattr(acl, 'permission_type') and hasattr(
+                    acl.permission_type, 'name') else ""
+                if permission != self.acl_filters["permission"]:
+                    match = False
+
+            # Pattern type filter
+            if match and self.acl_filters["pattern_type"] != "ANY":
+                pattern_type = ""
+                if hasattr(acl, 'resource_pattern') and hasattr(acl.resource_pattern, 'pattern_type'):
+                    pattern_type = acl.resource_pattern.pattern_type.name if hasattr(acl.resource_pattern.pattern_type,
+                                                                                     'name') else ""
+                if pattern_type != self.acl_filters["pattern_type"]:
+                    match = False
+
+            if match:
+                filtered.append(acl)
+
+        return filtered
+
+    def _display_acl_dialog(self, topic, acls):
+        """Display ACL dialog with filtered results"""
+        content_lines = []
+
+        # Add info about pattern matching
+        content_lines.append(f"Showing ACLs that apply to topic: {topic}")
+        content_lines.append("(includes LITERAL match, PREFIXED patterns, and wildcard '*')")
+        content_lines.append("")
+
+        # Show active filters
+        active_filters = []
+        if self.acl_filters["principal"]:
+            active_filters.append(f"Principal:*{self.acl_filters['principal']}*")
+        if self.acl_filters["host"]:
+            active_filters.append(f"Host:*{self.acl_filters['host']}*")
+        if self.acl_filters["operation"] != "ANY":
+            active_filters.append(f"Operation:{self.acl_filters['operation']}")
+        if self.acl_filters["permission"] != "ANY":
+            active_filters.append(f"Permission:{self.acl_filters['permission']}")
+        if self.acl_filters["pattern_type"] != "ANY":
+            active_filters.append(f"Pattern:{self.acl_filters['pattern_type']}")
+
+        if active_filters:
+            content_lines.append(f"Active filters: {', '.join(active_filters)}")
+            content_lines.append("")
+
+        # Display ACLs
+        if not acls or len(acls) == 0:
+            if active_filters:
+                content_lines.append("No ACLs match current filters")
+            else:
+                content_lines.append("No ACLs configured for this topic")
+                content_lines.append("")
+                content_lines.append("(ACLs may be disabled on this cluster or no permissions set)")
+        else:
+            header = f"{'Resource':<20} {'Principal':<20} {'Host':<12} {'Operation':<15} {'Perm':<8} {'Pattern':<10}"
+            content_lines.append(header)
+            content_lines.append("-" * 95)
+
+            for acl in acls:
+                # Show resource name (topic name or pattern)
+                resource_name = acl.resource_pattern.resource_name if hasattr(acl.resource_pattern,
+                                                                              'resource_name') else "N/A"
+
+                principal = getattr(acl, 'principal', 'N/A') or "N/A"
+                host = getattr(acl, 'host', '*') or "*"
+                operation = acl.operation.name if hasattr(acl, 'operation') and hasattr(acl.operation, 'name') else str(
+                    getattr(acl, 'operation', 'N/A'))
+                permission = acl.permission_type.name if hasattr(acl, 'permission_type') and hasattr(
+                    acl.permission_type, 'name') else str(getattr(acl, 'permission_type', 'N/A'))
+                pattern_type = "Literal"
+                if hasattr(acl, 'resource_pattern') and hasattr(acl.resource_pattern, 'pattern_type'):
+                    pattern_type = acl.resource_pattern.pattern_type.name if hasattr(acl.resource_pattern.pattern_type,
+                                                                                     'name') else str(
+                        acl.resource_pattern.pattern_type)
+
+                line = f"{resource_name:<20} {principal:<20} {host:<12} {operation:<15} {permission:<8} {pattern_type:<10}"
+                content_lines.append(line)
+
+        # Create scrollable view
+        view_walker = urwid.SimpleFocusListWalker([SelectableText(ln) for ln in content_lines])
+        view_list = urwid.ListBox(view_walker)
+
+        # Footer with help
+        footer_text = urwid.Text("/ – filter | ↑↓ PgUp/PgDn/Home/End – scroll | Esc – close", align="center")
+        footer = urwid.AttrMap(footer_text, "footer")
+
+        # Create custom frame that handles "/" key
+        class ACLFrame(urwid.Frame):
+            def __init__(frame_self, body, footer, parent_app):
+                super().__init__(body, footer=footer)
+                frame_self.parent_app = parent_app
+
+            def keypress(frame_self, size, key):
+                if key == '/':
+                    frame_self.parent_app._show_acl_filter_dialog()
+                    return None
+                return super().keypress(size, key)
+
+        frame = ACLFrame(urwid.AttrMap(view_list, "dialog_bg"), footer, self)
+
+        title = f"ACLs for topic: {topic}"
+        box = urwid.LineBox(frame, title=title)
+
+        self.dialog_overlay = urwid.Overlay(
+            top_w=urwid.Padding(box, left=2, right=2),
+            bottom_w=self.main_frame,
+            align="center",
+            width=("relative", 90),
+            valign="middle",
+            height=("relative", 80),
+            min_width=80,
+            min_height=15,
+        )
+        self.loop.widget = self.dialog_overlay
+
+    def _show_acl_filter_dialog(self):
+        """Show dialog to filter ACLs"""
+
+        def on_apply(btn=None):
+            self.acl_filters["principal"] = principal_edit.edit_text.strip()
+            self.acl_filters["host"] = host_edit.edit_text.strip()
+
+            # Get selected operation
+            for rb in operation_group:
+                if rb.state:
+                    self.acl_filters["operation"] = rb.label
+                    break
+
+            # Get selected permission
+            for rb in permission_group:
+                if rb.state:
+                    self.acl_filters["permission"] = rb.label
+                    break
+
+            # Get selected pattern type
+            for rb in pattern_group:
+                if rb.state:
+                    self.acl_filters["pattern_type"] = rb.label
+                    break
+
+            self._close_dialog()
+            # Refresh ACL display with filters
+            if self.current_acl_topic:
+                self._show_topic_acls(self.current_acl_topic)
+
+        def on_clear(btn):
+            self.acl_filters = {
+                "principal": "",
+                "host": "",
+                "operation": "ANY",
+                "permission": "ANY",
+                "pattern_type": "ANY"
+            }
+            self._close_dialog()
+            # Refresh ACL display without filters
+            if self.current_acl_topic:
+                self._show_topic_acls(self.current_acl_topic)
+
+        def on_cancel(btn=None):
+            self._close_dialog()
+            # Return to ACL view
+            if self.current_acl_topic:
+                self._show_topic_acls(self.current_acl_topic)
+
+        # Custom Edit that applies on Enter
+        class EditWithEnter(urwid.Edit):
+            def keypress(self, size, key):
+                if key == 'enter':
+                    on_apply()
+                    return None
+                return super().keypress(size, key)
+
+        # Custom RadioButton that applies on Enter
+        class RadioButtonWithEnter(urwid.RadioButton):
+            def keypress(self, size, key):
+                if key == 'enter':
+                    on_apply()
+                    return None
+                return super().keypress(size, key)
+
+        principal_edit = EditWithEnter("Principal (substring): ", self.acl_filters["principal"])
+        host_edit = EditWithEnter("Host (substring): ", self.acl_filters["host"])
+
+        # Radio buttons for Operation
+        operation_group = []
+        operations = ["ANY", "READ", "WRITE", "CREATE", "DELETE", "ALTER", "DESCRIBE", "CLUSTER_ACTION",
+                      "DESCRIBE_CONFIGS", "ALTER_CONFIGS", "IDEMPOTENT_WRITE", "ALL"]
+        operation_buttons = []
+        for op in operations:
+            rb = RadioButtonWithEnter(operation_group, op, state=(self.acl_filters["operation"] == op))
+            operation_buttons.append(rb)
+
+        # Radio buttons for Permission
+        permission_group = []
+        permissions = ["ANY", "ALLOW", "DENY"]
+        permission_buttons = []
+        for perm in permissions:
+            rb = RadioButtonWithEnter(permission_group, perm, state=(self.acl_filters["permission"] == perm))
+            permission_buttons.append(rb)
+
+        # Radio buttons for Pattern Type
+        pattern_group = []
+        patterns = ["ANY", "LITERAL", "PREFIXED"]
+        pattern_buttons = []
+        for pat in patterns:
+            rb = RadioButtonWithEnter(pattern_group, pat, state=(self.acl_filters["pattern_type"] == pat))
+            pattern_buttons.append(rb)
+
+        # Custom Button for Clear and Cancel (don't apply on enter)
+        class SpecialButton(urwid.Button):
+            def __init__(self, label, on_press):
+                super().__init__(label, on_press)
+                self.is_special = True
+
+        # Build pile with columns for radio buttons
+        pile_content = [
+            urwid.Text("Filter ACLs:"),
+            urwid.Divider(),
+            principal_edit,
+            host_edit,
+            urwid.Divider(),
+            urwid.Text("Operation:"),
+            urwid.Columns([
+                urwid.Pile(operation_buttons[:6]),
+                urwid.Pile(operation_buttons[6:])
+            ]),
+            urwid.Divider(),
+            urwid.Text("Permission:"),
+            urwid.Pile(permission_buttons),
+            urwid.Divider(),
+            urwid.Text("Pattern Type:"),
+            urwid.Pile(pattern_buttons),
+            urwid.Divider(),
+            urwid.AttrMap(urwid.Button("Apply", on_press=on_apply), "btn", focus_map="btn_focus"),
+            urwid.AttrMap(SpecialButton("Clear All", on_press=on_clear), "btn", focus_map="btn_focus"),
+            urwid.AttrMap(SpecialButton("Cancel", on_press=on_cancel), "btn", focus_map="btn_focus"),
+        ]
+
+        # Custom Pile that handles Esc and Q
+        class FilterPile(urwid.Pile):
+            def keypress(self, size, key):
+                if key in ('esc', 'q', 'Q'):
+                    on_cancel()
+                    return None
+                return super().keypress(size, key)
+
+        pile = FilterPile(pile_content)
+
+        # Custom dialog wrapper that handles Esc/Q at dialog level
+        header = urwid.AttrMap(urwid.Text(" Filter ACLs ", align="center"), "dialog_header")
+        content_box = urwid.Filler(pile, valign="top")
+        dialog = urwid.AttrMap(
+            urwid.LineBox(urwid.Frame(urwid.Padding(content_box, left=1, right=1), header=header)),
+            "dialog_bg",
+        )
+
+        class DialogWrapper(urwid.WidgetWrap):
+            def __init__(self, widget):
+                super().__init__(widget)
+
+            def keypress(self, size, key):
+                if key in ('esc', 'q', 'Q'):
+                    on_cancel()
+                    return None
+                return super().keypress(size, key)
+
+        wrapped_dialog = DialogWrapper(dialog)
+
+        self.dialog_overlay = urwid.Overlay(
+            top_w=urwid.Padding(wrapped_dialog, left=2, right=2),
+            bottom_w=self.main_frame,
+            align="center",
+            width=("relative", 70),
+            valign="middle",
+            height=("relative", 80),
+            min_width=50,
+            min_height=20,
+        )
+        self.loop.widget = self.dialog_overlay
+
+    def _show_acl_resource_menu(self):
+        """Show menu to select ACL resource type"""
+
+        # Clear stack when opening main menu
+        self.dialog_stack = []
+
+        def on_topic(btn):
+            self._close_dialog()
+            t = self._focused_topic()
+            if t and not t.startswith("Connection error") and not t.startswith("No topics"):
+                self._show_topic_acls(t)
+
+        def on_all_topics(btn):
+            self._close_dialog()
+            self._show_all_topics_acls()
+
+        def on_groups(btn):
+            # Add current menu to stack before moving to next dialog
+            self.dialog_stack.append(self._show_acl_resource_menu)
+            self._close_dialog()
+            self._show_groups_selection()
+
+        def on_cluster(btn):
+            self._close_dialog()
+            self._show_cluster_acls()
+
+        def on_transactional(btn):
+            # Add current menu to stack
+            self.dialog_stack.append(self._show_acl_resource_menu)
+            self._close_dialog()
+            self._show_transactional_selection()
+
+        def on_principal(btn):
+            # Add current menu to stack before moving to next dialog
+            self.dialog_stack.append(self._show_acl_resource_menu)
+            self._close_dialog()
+            self._show_principal_selection()
+
+        def on_cancel(btn):
+            self.dialog_stack = []  # Clear stack
+            self._close_dialog()
+
+        current_topic = self._focused_topic()
+        topic_label = f"Current Topic ({current_topic})" if current_topic else "Current Topic (none selected)"
+
+        pile = urwid.Pile([
+            urwid.Text("Select resource type to view ACLs:", align="center"),
+            urwid.Divider(),
+            urwid.AttrMap(urwid.Button(f"[1] {topic_label}", on_press=on_topic), "btn", focus_map="btn_focus"),
+            urwid.AttrMap(urwid.Button("[2] All Topics", on_press=on_all_topics), "btn", focus_map="btn_focus"),
+            urwid.AttrMap(urwid.Button("[3] Consumer Groups", on_press=on_groups), "btn", focus_map="btn_focus"),
+            urwid.AttrMap(urwid.Button("[4] Cluster", on_press=on_cluster), "btn", focus_map="btn_focus"),
+            urwid.AttrMap(urwid.Button("[5] Transactional IDs", on_press=on_transactional), "btn",
+                          focus_map="btn_focus"),
+            urwid.AttrMap(urwid.Button("[6] By Principal", on_press=on_principal), "btn", focus_map="btn_focus"),
+            urwid.Divider(),
+            urwid.AttrMap(urwid.Button("Cancel", on_press=on_cancel), "btn", focus_map="btn_focus"),
+        ])
+
+        self._show_dialog(pile, "View ACLs")
+
+    def _show_all_topics_acls(self):
+        """Show ACLs for all topics"""
+        try:
+            from kafka.admin.acl_resource import (
+                ACLFilter, ResourcePattern, ResourceType, ResourcePatternFilter,
+                ACLOperation, ACLPermissionType, ACLResourcePatternType
+            )
+
+            # Get ALL ACLs without resource pattern filter
+            acl_filter = ACLFilter(
+                principal=None,
+                host=None,
+                operation=ACLOperation.ANY,
+                permission_type=ACLPermissionType.ANY,
+                resource_pattern=ResourcePatternFilter(
+                    ResourceType.TOPIC,
+                    None,  # Match any name
+                    ACLResourcePatternType.ANY  # Match any pattern type
+                )
+            )
+
+            result = self.admin_client.describe_acls(acl_filter)
+            acls = result[0] if isinstance(result, tuple) else result
+            acls = acls if isinstance(acls, list) else []
+
+            content_lines = []
+
+            if not acls or len(acls) == 0:
+                content_lines.append("No ACLs configured for topics")
+            else:
+                header = f"{'Topic':<20} {'Principal':<20} {'Host':<12} {'Operation':<15} {'Perm':<8} {'Pattern':<10}"
+                content_lines.append(header)
+                content_lines.append("-" * 95)
+
+                for acl in acls:
+                    topic_name = acl.resource_pattern.resource_name if hasattr(acl.resource_pattern,
+                                                                               'resource_name') else "N/A"
+                    principal = getattr(acl, 'principal', 'N/A') or "N/A"
+                    host = getattr(acl, 'host', '*') or "*"
+                    operation = acl.operation.name if hasattr(acl, 'operation') and hasattr(acl.operation,
+                                                                                            'name') else "N/A"
+                    permission = acl.permission_type.name if hasattr(acl, 'permission_type') and hasattr(
+                        acl.permission_type, 'name') else "N/A"
+                    pattern_type = acl.resource_pattern.pattern_type.name if hasattr(acl.resource_pattern,
+                                                                                     'pattern_type') and hasattr(
+                        acl.resource_pattern.pattern_type, 'name') else "Literal"
+
+                    line = f"{topic_name:<20} {principal:<20} {host:<12} {operation:<15} {permission:<8} {pattern_type:<10}"
+                    content_lines.append(line)
+
+            self._show_generic_acl_dialog("ACLs for all Topics", content_lines)
+
+        except Exception as e:
+            # traceback.print_exc()
+            logger.exception("Error loading topic ACLs: %s", e)
+            self._show_message(f"Error loading topic ACLs: {e}")
+
+    def _show_groups_selection(self):
+        """Show dialog to select a consumer group"""
+        try:
+            from kafka.admin.acl_resource import (
+                ACLFilter, ResourcePattern, ResourceType, ResourcePatternFilter,
+                ACLOperation, ACLPermissionType, ACLResourcePatternType
+            )
+
+            # Get all ACLs for groups
+            acl_filter = ACLFilter(
+                principal=None,
+                host=None,
+                operation=ACLOperation.ANY,
+                permission_type=ACLPermissionType.ANY,
+                resource_pattern=ResourcePatternFilter(
+                    ResourceType.GROUP,
+                    None,
+                    ACLResourcePatternType.ANY
+                )
+            )
+
+            result = self.admin_client.describe_acls(acl_filter)
+            acls = result[0] if isinstance(result, tuple) else result
+            acls = acls if isinstance(acls, list) else []
+
+            group_names = set()
+            for acl in acls:
+                if hasattr(acl, 'resource_pattern') and hasattr(acl.resource_pattern, 'resource_name'):
+                    group_names.add(acl.resource_pattern.resource_name)
+
+            group_names = sorted(list(group_names))
+
+            if not group_names:
+                self._show_message("No consumer groups with ACLs found")
+                return
+
+            def on_select(button, group_name):
+                # Add current selection dialog to stack
+                self.dialog_stack.append(self._show_groups_selection)
+                self._close_dialog()
+                self._show_group_acls(group_name)
+
+            def on_cancel(btn):
+                self._close_dialog_and_return()  # Return to previous dialog
+
+            buttons = []
+            for group in group_names:
+                btn = urwid.Button(group, on_press=on_select, user_data=group)
+                buttons.append(urwid.AttrMap(btn, "body", focus_map="reversed"))
+
+            buttons.append(urwid.Divider())
+            buttons.append(urwid.AttrMap(urwid.Button("Cancel", on_press=on_cancel), "btn", focus_map="btn_focus"))
+
+            walker = urwid.SimpleFocusListWalker(buttons)
+            listbox = urwid.ListBox(walker)
+
+            # Custom ListBox that handles Esc
+            class ListBoxWithEsc(urwid.ListBox):
+                def __init__(lb_self, walker, parent_app):
+                    super().__init__(walker)
+                    lb_self.parent_app = parent_app
+
+                def keypress(lb_self, size, key):
+                    if key in ('esc', 'q', 'Q'):
+                        lb_self.parent_app._close_dialog_and_return()
+                        return None
+                    return super().keypress(size, key)
+
+            listbox_with_esc = ListBoxWithEsc(walker, self)
+
+            box = urwid.LineBox(urwid.AttrMap(listbox_with_esc, "dialog_bg"), title="Select Consumer Group")
+
+            self.dialog_overlay = urwid.Overlay(
+                top_w=urwid.Padding(box, left=2, right=2),
+                bottom_w=self.main_frame,
+                align="center",
+                width=("relative", 60),
+                valign="middle",
+                height=("relative", 70),
+                min_width=40,
+                min_height=10,
+            )
+            self.loop.widget = self.dialog_overlay
+
+        except Exception as e:
+            logger.exception("Error loading consumer groups: %s", e)
+            self._show_message(f"Error loading consumer groups: {e}")
+
+    def _show_group_acls(self, group_name):
+        """Show ACLs for a specific consumer group"""
+        try:
+            from kafka.admin.acl_resource import (
+                ACLFilter, ResourcePattern, ResourceType,
+                ACLOperation, ACLPermissionType, ACLResourcePatternType
+            )
+
+            acl_filter = ACLFilter(
+                principal=None,
+                host=None,
+                operation=ACLOperation.ANY,
+                permission_type=ACLPermissionType.ANY,
+                resource_pattern=ResourcePattern(
+                    ResourceType.GROUP,
+                    group_name,
+                    ACLResourcePatternType.LITERAL
+                )
+            )
+
+            result = self.admin_client.describe_acls(acl_filter)
+            acls = result[0] if isinstance(result, tuple) else result
+            acls = acls if isinstance(acls, list) else []
+
+            content_lines = []
+
+            if not acls or len(acls) == 0:
+                content_lines.append("No ACLs configured for this consumer group")
+            else:
+                header = f"{'Principal':<25} {'Host':<15} {'Operation':<15} {'Permission':<12} {'PatternType':<12}"
+                content_lines.append(header)
+                content_lines.append("-" * 79)
+
+                for acl in acls:
+                    principal = getattr(acl, 'principal', 'N/A') or "N/A"
+                    host = getattr(acl, 'host', '*') or "*"
+                    operation = acl.operation.name if hasattr(acl, 'operation') and hasattr(acl.operation,
+                                                                                            'name') else "N/A"
+                    permission = acl.permission_type.name if hasattr(acl, 'permission_type') and hasattr(
+                        acl.permission_type, 'name') else "N/A"
+                    pattern_type = acl.resource_pattern.pattern_type.name if hasattr(acl.resource_pattern,
+                                                                                     'pattern_type') and hasattr(
+                        acl.resource_pattern.pattern_type, 'name') else "Literal"
+
+                    line = f"{principal:<25} {host:<15} {operation:<15} {permission:<12} {pattern_type:<12}"
+                    content_lines.append(line)
+
+            self._show_generic_acl_dialog_with_back(f"ACLs for GROUP: {group_name}", content_lines)
+
+        except Exception as e:
+            # traceback.print_exc()
+            logger.exception("Error loading group ACLs: %s", e)
+            self._show_message(f"Error loading group ACLs: {e}")
+
+    def _show_generic_acl_dialog_with_back(self, title, content_lines):
+        """Generic dialog to show ACL content with back navigation"""
+        view_walker = urwid.SimpleFocusListWalker([SelectableText(ln) for ln in content_lines])
+        view_list = urwid.ListBox(view_walker)
+
+        footer_text = urwid.Text("↑↓ PgUp/PgDn/Home/End – scroll | Esc – back", align="center")
+        footer = urwid.AttrMap(footer_text, "footer")
+
+        # Custom Frame that handles Esc for back navigation
+        class FrameWithBack(urwid.Frame):
+            def __init__(frame_self, body, footer, parent_app):
+                super().__init__(body, footer=footer)
+                frame_self.parent_app = parent_app
+
+            def keypress(frame_self, size, key):
+                if key in ('esc', 'q', 'Q'):
+                    frame_self.parent_app._close_dialog_and_return()
+                    return None
+                return super().keypress(size, key)
+
+        frame = FrameWithBack(urwid.AttrMap(view_list, "dialog_bg"), footer, self)
+
+        box = urwid.LineBox(frame, title=title)
+
+        self.dialog_overlay = urwid.Overlay(
+            top_w=urwid.Padding(box, left=2, right=2),
+            bottom_w=self.main_frame,
+            align="center",
+            width=("relative", 95),
+            valign="middle",
+            height=("relative", 80),
+            min_width=80,
+            min_height=15,
+        )
+        self.loop.widget = self.dialog_overlay
+
+    def _show_cluster_acls(self):
+        """Show ACLs for cluster"""
+        try:
+            from kafka.admin.acl_resource import (
+                ACLFilter, ResourcePattern, ResourceType,
+                ACLOperation, ACLPermissionType, ACLResourcePatternType
+            )
+
+            acl_filter = ACLFilter(
+                principal=None,
+                host=None,
+                operation=ACLOperation.ANY,
+                permission_type=ACLPermissionType.ANY,
+                resource_pattern=ResourcePattern(
+                    ResourceType.CLUSTER,
+                    "kafka-cluster",  # Standard cluster name
+                    ACLResourcePatternType.LITERAL
+                )
+            )
+
+            result = self.admin_client.describe_acls(acl_filter)
+            acls = result[0] if isinstance(result, tuple) else result
+            acls = acls if isinstance(acls, list) else []
+
+            content_lines = []
+
+            if not acls or len(acls) == 0:
+                content_lines.append("No ACLs configured for cluster")
+            else:
+                header = f"{'Principal':<25} {'Host':<15} {'Operation':<20} {'Permission':<12}"
+                content_lines.append(header)
+                content_lines.append("-" * 72)
+
+                for acl in acls:
+                    principal = getattr(acl, 'principal', 'N/A') or "N/A"
+                    host = getattr(acl, 'host', '*') or "*"
+                    operation = acl.operation.name if hasattr(acl, 'operation') and hasattr(acl.operation,
+                                                                                            'name') else "N/A"
+                    permission = acl.permission_type.name if hasattr(acl, 'permission_type') and hasattr(
+                        acl.permission_type, 'name') else "N/A"
+
+                    line = f"{principal:<25} {host:<15} {operation:<20} {permission:<12}"
+                    content_lines.append(line)
+
+            self._show_generic_acl_dialog("ACLs for CLUSTER", content_lines)
+
+        except Exception as e:
+            # traceback.print_exc()
+            logger.exception("Error loading cluster ACLs: %s", e)
+            self._show_message(f"Error loading cluster ACLs: {e}")
+
+    def _show_transactional_selection(self):
+        """Show dialog to enter transactional ID"""
+
+        def on_view(btn):
+            txn_id = txn_edit.edit_text.strip()
+            if txn_id:
+                self._close_dialog()
+                self._show_transactional_acls(txn_id)
+            else:
+                self._show_message("Please enter a transactional ID")
+
+        def on_cancel(btn):
+            self._close_dialog()
+
+        class EditWithEnter(urwid.Edit):
+            def keypress(self, size, key):
+                if key == 'enter':
+                    on_view(None)
+                    return None
+                return super().keypress(size, key)
+
+        txn_edit = EditWithEnter("Transactional ID: ")
+
+        pile = urwid.Pile([
+            urwid.Text("Enter Transactional ID:"),
+            urwid.Divider(),
+            txn_edit,
+            urwid.Divider(),
+            urwid.AttrMap(urwid.Button("View ACLs", on_press=on_view), "btn", focus_map="btn_focus"),
+            urwid.AttrMap(urwid.Button("Cancel", on_press=on_cancel), "btn", focus_map="btn_focus"),
+        ])
+
+        self._show_dialog(pile, "Transactional ID")
+
+    def _show_transactional_acls(self, txn_id):
+        """Show ACLs for a specific transactional ID"""
+        try:
+            from kafka.admin.acl_resource import (
+                ACLFilter, ResourcePattern, ResourceType,
+                ACLOperation, ACLPermissionType, ACLResourcePatternType
+            )
+
+            acl_filter = ACLFilter(
+                principal=None,
+                host=None,
+                operation=ACLOperation.ANY,
+                permission_type=ACLPermissionType.ANY,
+                resource_pattern=ResourcePattern(
+                    ResourceType.TRANSACTIONAL_ID,
+                    txn_id,
+                    ACLResourcePatternType.LITERAL
+                )
+            )
+
+            result = self.admin_client.describe_acls(acl_filter)
+            acls = result[0] if isinstance(result, tuple) else result
+            acls = acls if isinstance(acls, list) else []
+
+            content_lines = []
+
+            if not acls or len(acls) == 0:
+                content_lines.append("No ACLs configured for this transactional ID")
+            else:
+                header = f"{'Principal':<25} {'Host':<15} {'Operation':<15} {'Permission':<12} {'PatternType':<12}"
+                content_lines.append(header)
+                content_lines.append("-" * 79)
+
+                for acl in acls:
+                    principal = getattr(acl, 'principal', 'N/A') or "N/A"
+                    host = getattr(acl, 'host', '*') or "*"
+                    operation = acl.operation.name if hasattr(acl, 'operation') and hasattr(acl.operation,
+                                                                                            'name') else "N/A"
+                    permission = acl.permission_type.name if hasattr(acl, 'permission_type') and hasattr(
+                        acl.permission_type, 'name') else "N/A"
+                    pattern_type = acl.resource_pattern.pattern_type.name if hasattr(acl.resource_pattern,
+                                                                                     'pattern_type') and hasattr(
+                        acl.resource_pattern.pattern_type, 'name') else "Literal"
+
+                    line = f"{principal:<25} {host:<15} {operation:<15} {permission:<12} {pattern_type:<12}"
+                    content_lines.append(line)
+
+            self._show_generic_acl_dialog(f"ACLs for TRANSACTIONAL_ID: {txn_id}", content_lines)
+
+        except Exception as e:
+            # traceback.print_exc()
+            logger.exception("Error loading transactional ACLs: %s", e)
+            self._show_message(f"Error loading transactional ACLs: {e}")
+
+    def _show_principal_selection(self):
+        """Show dialog to select a principal from all ACLs"""
+        try:
+            from kafka.admin.acl_resource import (
+                ACLFilter, ResourcePattern, ResourceType, ResourcePatternFilter,
+                ACLOperation, ACLPermissionType, ACLResourcePatternType
+            )
+
+            acl_filter = ACLFilter(
+                principal=None,
+                host=None,
+                operation=ACLOperation.ANY,
+                permission_type=ACLPermissionType.ANY,
+                resource_pattern=ResourcePatternFilter(
+                    ResourceType.ANY,
+                    None,
+                    ACLResourcePatternType.ANY
+                )
+            )
+
+            result = self.admin_client.describe_acls(acl_filter)
+            acls = result[0] if isinstance(result, tuple) else result
+            acls = acls if isinstance(acls, list) else []
+
+            principals = set()
+            for acl in acls:
+                if hasattr(acl, 'principal'):
+                    principals.add(acl.principal)
+
+            principals = sorted(list(principals))
+
+            if not principals:
+                self._show_message("No principals found")
+                return
+
+            def on_select(button, principal):
+                self.dialog_stack.append(self._show_principal_selection)
+                self._close_dialog()
+                self._show_principal_acls(principal)
+
+            def on_cancel(btn):
+                self._close_dialog_and_return()
+
+            buttons = []
+            for principal in principals:
+                btn = urwid.Button(principal, on_press=on_select, user_data=principal)
+                buttons.append(urwid.AttrMap(btn, "body", focus_map="reversed"))
+
+            buttons.append(urwid.Divider())
+            buttons.append(urwid.AttrMap(urwid.Button("Cancel", on_press=on_cancel), "btn", focus_map="btn_focus"))
+
+            walker = urwid.SimpleFocusListWalker(buttons)
+
+            class ListBoxWithEsc(urwid.ListBox):
+                def __init__(lb_self, walker, parent_app):
+                    super().__init__(walker)
+                    lb_self.parent_app = parent_app
+
+                def keypress(lb_self, size, key):
+                    if key in ('esc', 'q', 'Q'):
+                        lb_self.parent_app._close_dialog_and_return()
+                        return None
+                    return super().keypress(size, key)
+
+            listbox = ListBoxWithEsc(walker, self)
+
+            box = urwid.LineBox(urwid.AttrMap(listbox, "dialog_bg"), title="Select Principal")
+
+            self.dialog_overlay = urwid.Overlay(
+                top_w=urwid.Padding(box, left=2, right=2),
+                bottom_w=self.main_frame,
+                align="center",
+                width=("relative", 60),
+                valign="middle",
+                height=("relative", 70),
+                min_width=40,
+                min_height=10,
+            )
+            self.loop.widget = self.dialog_overlay
+
+        except Exception as e:
+            # traceback.print_exc()
+            logger.exception("Error loading principals: %s", e)
+            self._show_message(f"Error loading principals: {e}")
+
+    def _show_principal_acls(self, principal):
+        """Show all ACLs for a specific principal across all resource types"""
+        try:
+            from kafka.admin.acl_resource import (
+                ACLFilter, ResourcePattern, ResourceType, ResourcePatternFilter,
+                ACLOperation, ACLPermissionType, ACLResourcePatternType
+            )
+
+            acl_filter = ACLFilter(
+                principal=principal,
+                host=None,
+                operation=ACLOperation.ANY,
+                permission_type=ACLPermissionType.ANY,
+                resource_pattern=ResourcePatternFilter(
+                    ResourceType.ANY,
+                    None,
+                    ACLResourcePatternType.ANY
+                )
+            )
+
+            result = self.admin_client.describe_acls(acl_filter)
+            all_acls = result[0] if isinstance(result, tuple) else result
+            all_acls = all_acls if isinstance(all_acls, list) else []
+
+            content_lines = []
+
+            if not all_acls or len(all_acls) == 0:
+                content_lines.append(f"No ACLs configured for principal: {principal}")
+            else:
+                header = f"{'Type':<15} {'Resource':<25} {'Host':<12} {'Operation':<15} {'Perm':<8} {'Pattern':<10}"
+                content_lines.append(header)
+                content_lines.append("-" * 95)
+
+                for acl in all_acls:
+                    resource_type = acl.resource_pattern.resource_type.name if hasattr(acl.resource_pattern,
+                                                                                       'resource_type') and hasattr(
+                        acl.resource_pattern.resource_type, 'name') else "N/A"
+                    resource_name = acl.resource_pattern.resource_name if hasattr(acl.resource_pattern,
+                                                                                  'resource_name') else "N/A"
+                    host = getattr(acl, 'host', '*') or "*"
+                    operation = acl.operation.name if hasattr(acl, 'operation') and hasattr(acl.operation,
+                                                                                            'name') else "N/A"
+                    permission = acl.permission_type.name if hasattr(acl, 'permission_type') and hasattr(
+                        acl.permission_type, 'name') else "N/A"
+                    pattern_type = acl.resource_pattern.pattern_type.name if hasattr(acl.resource_pattern,
+                                                                                     'pattern_type') and hasattr(
+                        acl.resource_pattern.pattern_type, 'name') else "Literal"
+
+                    line = f"{resource_type:<15} {resource_name:<25} {host:<12} {operation:<15} {permission:<8} {pattern_type:<10}"
+                    content_lines.append(line)
+
+            self._show_generic_acl_dialog_with_back(f"ACLs for Principal: {principal}", content_lines)
+
+        except Exception as e:
+            # traceback.print_exc()
+            logger.exception("Error loading principals ACLs: %s", e)
+            self._show_message(f"Error loading principal ACLs: {e}")
+
+    def _show_generic_acl_dialog(self, title, content_lines):
+        """Generic dialog to show ACL content"""
+        view_walker = urwid.SimpleFocusListWalker([SelectableText(ln) for ln in content_lines])
+        view_list = urwid.ListBox(view_walker)
+
+        footer_text = urwid.Text("↑↓ PgUp/PgDn/Home/End – scroll | Esc – close", align="center")
+        footer = urwid.AttrMap(footer_text, "footer")
+
+        frame = urwid.Frame(
+            urwid.AttrMap(view_list, "dialog_bg"),
+            footer=footer
+        )
+
+        box = urwid.LineBox(frame, title=title)
+
+        self.dialog_overlay = urwid.Overlay(
+            top_w=urwid.Padding(box, left=2, right=2),
+            bottom_w=self.main_frame,
+            align="center",
+            width=("relative", 95),
+            valign="middle",
+            height=("relative", 80),
+            min_width=80,
+            min_height=15,
+        )
+        self.loop.widget = self.dialog_overlay
+
+    def _show_sort_dialog(self):
+        """Show dialog to choose sort mode and direction"""
+        # Radio buttons for sort mode
+        sort_group = []
+        rb_unsorted = urwid.RadioButton(sort_group, "Unsorted", state=(self.sort_mode == "unsorted"))
+        rb_timestamp = urwid.RadioButton(sort_group, "Timestamp", state=(self.sort_mode == "timestamp"))
+        rb_partition = urwid.RadioButton(sort_group, "Partition", state=(self.sort_mode == "partition"))
+        rb_size = urwid.RadioButton(sort_group, "Size", state=(self.sort_mode == "size"))
+
+        # Radio buttons for direction
+        dir_group = []
+        rb_ascending = urwid.RadioButton(dir_group, "Ascending", state=self.sort_ascending)
+        rb_descending = urwid.RadioButton(dir_group, "Descending", state=not self.sort_ascending)
+
+        def on_apply(btn):
+            # Determine selected sort mode
+            if rb_unsorted.state:
+                self.sort_mode = "unsorted"
+            elif rb_timestamp.state:
+                self.sort_mode = "timestamp"
+            elif rb_partition.state:
+                self.sort_mode = "partition"
+            elif rb_size.state:
+                self.sort_mode = "size"
+
+            # Determine direction
+            self.sort_ascending = rb_ascending.state
+
+            self._close_dialog()
+            self._sort_messages()
+            self._update_messages_title()
+            self._set_status()
+
+        def on_cancel(btn):
+            self._close_dialog()
+
+        pile = urwid.Pile(
+            [
+                urwid.Text("Sort by:"),
+                urwid.Divider(),
+                rb_unsorted,
+                rb_timestamp,
+                rb_partition,
+                rb_size,
+                urwid.Divider(),
+                urwid.Text("Direction:"),
+                urwid.Divider(),
+                rb_ascending,
+                rb_descending,
+                urwid.Divider(),
+                urwid.AttrMap(urwid.Button("Apply", on_press=on_apply), "btn", focus_map="btn_focus"),
+                urwid.AttrMap(urwid.Button("Cancel", on_press=on_cancel), "btn", focus_map="btn_focus"),
+            ]
+        )
+        self._show_dialog(pile, "Sort Messages")
+
+    # ----- focus helpers -----
+
+    def _focus_topics(self):
+        self.columns.focus_position = 0
+        self._set_status()
+
+    def _focus_messages(self):
+        self.columns.focus_position = 1
+        self._set_status()
+
+    # ----- topic list helpers -----
+
+    def _focused_topic(self):
+        if not self.topic_walker:
+            return None
+        w = self.topic_walker[self.topic_listbox.focus_position]
+        if isinstance(w, urwid.AttrMap):
+            w = w.original_widget
+        if isinstance(w, urwid.Text):
+            t = w.text
+            if isinstance(t, bytes):
+                t = t.decode("utf-8", errors="replace")
+            t = (t or "").strip()
+            return t or None
+        return None
+
+    # ----- message list helpers -----
+
+    def _focused_message_row(self):
+        if not self.msg_walker:
+            return None
+        try:
+            w = self.msg_walker[self.msg_listbox.focus_position]
+        except Exception:
+            return None
+        if isinstance(w, urwid.AttrMap):
+            w = w.original_widget
+        return w if isinstance(w, MsgRow) else None
+
+    def _message_position_string(self):
+        total = len(self.msg_walker)
+        if total == 0:
+            return "Msg: 0/0"
+        try:
+            pos = self.msg_listbox.focus_position
+        except Exception:
+            return f"Msg: 0/{total}"
+        row = self._focused_message_row()
+        if row is not None:
+            return f"Msg: {pos+1}/{total} (p{row.partition}@{row.offset})"
+        return f"Msg: {pos+1}/{total}"
+
+    def _maybe_update_footer_on_focus(self):
+        if self.columns.focus_position != 1:
+            return
+        try:
+            pos = self.msg_listbox.focus_position
+        except Exception:
+            pos = None
+        if pos != self._msg_focus_prev:
+            self._msg_focus_prev = pos
+            self._set_status()
+
+    # ----- topics load -----
+
+    def _fetch_topics(self):
+        self.topic_walker.clear()
+        try:
+            if not self.admin_client:
+                self._init_admin_client()
+            topic_names = self.admin_client.list_topics()
+            # topics = sorted([t for t in topic_names if not t.startswith("__")])
+            topics = sorted(topic_names)
+
+            # Apply filter if set
+            if self.topic_filter:
+                topics = [t for t in topics if self.topic_filter.lower() in t.lower()]
+
+            if not topics:
+                if self.topic_filter:
+                    self.topic_walker.append(SelectableText(f"No topics match filter: {self.topic_filter}"))
+                else:
+                    self.topic_walker.append(SelectableText("No topics found. Press N to create."))
+                return
+
+            for t in topics:
+                self.topic_walker.append(urwid.AttrMap(SelectableText(t), "body", focus_map="reversed"))
+        except Exception as e:
+            self.topic_walker.append(SelectableText(f"Connection error: {e}"))
+
+        # Update topics title
+        self._update_topics_title()
+
+    def _show_filter_dialog(self):
+        """Show dialog to set topic filter"""
+
+        def on_apply(btn=None):
+            new_filter = filter_edit.edit_text.strip()
+            self.topic_filter = new_filter
+            self._close_dialog()
+            self._fetch_topics()
+            self._set_status(f"Filter applied: '{new_filter}'" if new_filter else "Filter cleared")
+
+        def on_clear(btn):
+            self.topic_filter = ""
+            self._close_dialog()
+            self._fetch_topics()
+            self._set_status("Filter cleared")
+
+        def on_cancel(btn):
+            self._close_dialog()
+
+        # Custom Edit widget that handles Enter key
+        class EditWithEnter(urwid.Edit):
+            def keypress(self, size, key):
+                if key == 'enter':
+                    on_apply()
+                    return None
+                return super().keypress(size, key)
+
+        filter_edit = EditWithEnter("Filter (substring): ", self.topic_filter)
+
+        pile = urwid.Pile(
+            [
+                urwid.Text("Filter topics by substring:"),
+                urwid.Divider(),
+                urwid.Text("(Case-insensitive, searches anywhere in topic name)"),
+                urwid.Divider(),
+                filter_edit,
+                urwid.Divider(),
+                urwid.AttrMap(urwid.Button("Apply", on_press=on_apply), "btn", focus_map="btn_focus"),
+                urwid.AttrMap(urwid.Button("Clear Filter", on_press=on_clear), "btn", focus_map="btn_focus"),
+                urwid.AttrMap(urwid.Button("Cancel", on_press=on_cancel), "btn", focus_map="btn_focus"),
+            ]
+        )
+        self._show_dialog(pile, "Filter Topics")
+
+    # ----- snapshot load (core) -----
+
+    def _load_topic_snapshot(self, topic):
+        """
+        Load a snapshot of messages into msg_walker.
+        Strategy:
+        - create consumer, assign partitions, find begin/end offsets
+        - choose start offsets (tail N per partition or from beginning)
+        - poll until reached end offsets or max_total reached
+        """
+        self.msg_walker.clear()
+        self.all_messages = []  # Clear stored messages
+        self._set_status("Loading...")
+        cfg = self._get_kafka_config()
+        # "assign/seek" mode, no group needed
+        cfg.update(
+            {
+                "enable_auto_commit": False,
+                "auto_offset_reset": "earliest",
+                "consumer_timeout_ms": 1000,
+                # "value_deserializer": lambda m: m.decode("utf-8", errors="replace") if m else None,
+                # "key_deserializer": lambda m: m.decode("utf-8", errors="replace") if m else None,
+            }
+        )
+        consumer = KafkaConsumer(**cfg)
+        parts = consumer.partitions_for_topic(topic)
+        if not parts:
+            consumer.close()
+            self.msg_walker.append(SelectableText("(No partitions / topic not found)"))
+            return
+
+        tps = [TopicPartition(topic, p) for p in sorted(parts)]
+        consumer.assign(tps)
+        begin = consumer.beginning_offsets(tps)  # {tp: offset}
+        end = consumer.end_offsets(tps)  # {tp: offset}
+
+        # pick start offsets
+        for tp in tps:
+            b = begin.get(tp, 0)
+            e = end.get(tp, 0)
+            if self.snapshot_mode == "from_beginning":
+                start = b
+            else:
+                # tail: last N per partition
+                start = max(b, e - self.snapshot_tail_n)
+            consumer.seek(tp, start)
+
+        rows = []
+        # stop condition: all partitions reached end (position >= end)
+        while True:
+            batch = consumer.poll(timeout_ms=500, max_records=500)
+            if not batch:
+                break
+            for tp, msgs in batch.items():
+                for m in msgs:
+                    key = m.key if m.key is not None else None
+                    val = m.value if m.value is not None else None
+
+                    key_text = key.decode("utf-8", errors="replace") if isinstance(key, (bytes, bytearray)) else ""
+                    val_text = val.decode("utf-8", errors="replace") if isinstance(val, (bytes, bytearray)) else ""
+
+                    rows.append(MsgRow("", val_text, topic, m.partition, m.offset, getattr(m, "timestamp", None), key_text,
+                               raw_value=val, raw_key=key))
+
+                    # key = m.key if m.key is not None else ""
+                    # val = m.value if m.value is not None else ""
+                    # rows.append(MsgRow("", val, topic, m.partition, m.offset, getattr(m, "timestamp", None), key))
+                    if len(rows) >= self.snapshot_max_total:
+                        break
+                if len(rows) >= self.snapshot_max_total:
+                    break
+            if len(rows) >= self.snapshot_max_total:
+                break
+
+            # check progress: if every tp is at/after end offset -> done
+            done = True
+            for tp in tps:
+                try:
+                    if consumer.position(tp) < end.get(tp, 0):
+                        done = False
+                        break
+                except Exception:
+                    done = False
+                    break
+            if done:
+                break
+
+        consumer.close()
+
+        # deterministic ordering (not true time order, but stable)
+        rows.sort(key=lambda r: (r.partition, r.offset))
+
+        if not rows:
+            self.msg_walker.append(SelectableText("(No messages in snapshot)"))
+            return
+
+        # Add header (non-selectable)
+        header_line = f"{'Timestamp':<28} {'Topic':<13} {'Offset':<10} {'Size':<8} {'Key':<12} Value"
+        header_widget = urwid.Text(header_line)
+        self.msg_walker.append(urwid.AttrMap(header_widget, "header"))
+
+        # Add messages and store them for filtering
+        for r in rows:
+            r.set_text("")
+            msg_item = urwid.AttrMap(r, "body", focus_map="reversed")
+            self.msg_walker.append(msg_item)
+            self.all_messages.append((msg_item, r))
+
+        # Force initial formatting with default width
+        self.msg_listbox.format_all_messages()
+
+        # Apply filters if any are set
+        any_filter_set = any(mask for mask in self.msg_filters.values())
+        if any_filter_set:
+            self._apply_message_filters()
+        elif self.sort_mode != "unsorted":
+            self._sort_messages()
+
+        # Update messages panel title
+        self._update_messages_title()
+
+        # Set focus to first message (skip header if exists)
+        if len(self.msg_walker) > 1:
+            self.msg_listbox.set_focus(1)
+
+    def _build_message_view_lines(self, row, mode):
+        lines = []
+        from datetime import datetime
+        lines.append(f"Topic: {row.topic}")
+        lines.append(f"Partition: {row.partition}")
+        lines.append(f"Offset: {row.offset}")
+
+        if row.timestamp:
+            dt = datetime.fromtimestamp(row.timestamp / 1000.0)
+            lines.append(f"Timestamp: {dt.isoformat(sep=' ', timespec='milliseconds')}")
+        lines.append("")
+
+        lines.append("Key:")
+        if mode == "hex":
+            lines.extend(self._bytes_to_hex_lines(getattr(row, "raw_key", None)))
+        else:
+            lines.append(row.key or "")
+        lines.append("")
+
+        lines.append(f"Value ({mode}, F4 toggle):")
+        if mode == "hex":
+            lines.extend(self._bytes_to_hex_lines(getattr(row, "raw_value", None)))
+        else:
+            valuetext = row.full_text or ""
+            # как было: пробуем JSON pretty print, иначе plain
+            try:
+                import json
+                obj = json.loads(valuetext)
+                valuetext = json.dumps(obj, ensure_ascii=False, indent=2)
+            except Exception:
+                pass
+            lines.extend(valuetext.splitlines() if valuetext else [""])
+        return lines
+
+    def _show_message_filter_dialog(self):
+        """Show dialog to set message filters"""
+
+        def on_apply(btn=None):
+            self.msg_filters["key"] = key_edit.edit_text.strip()
+            self.msg_filters["value"] = value_edit.edit_text.strip()
+            self.msg_filters["partition"] = partition_edit.edit_text.strip()
+            self.msg_filters["offset"] = offset_edit.edit_text.strip()
+            self._close_dialog()
+            self._apply_message_filters()
+
+            active_count = sum(1 for mask in self.msg_filters.values() if mask)
+            if active_count > 0:
+                self._set_status(f"Filter applied: {active_count} field(s)")
+            else:
+                self._set_status("All filters cleared")
+
+        def on_clear(btn):
+            self.msg_filters = {"key": "", "value": "", "partition": "", "offset": ""}
+            self._close_dialog()
+            self._apply_message_filters()
+            self._set_status("All filters cleared")
+
+        def on_cancel(btn):
+            self._close_dialog()
+
+        # Custom Edit that triggers Apply on Enter
+        class EditWithEnter(urwid.Edit):
+            def keypress(self, size, key):
+                if key == 'enter':
+                    on_apply()
+                    return None
+                return super().keypress(size, key)
+
+        # Helper to create styled row: [ Label (fixed width) | EditField ]
+        def create_field_row(label_text, value):
+            edit_w = EditWithEnter("", value)  # Edit without caption
+
+            # Wrap Edit in AttrMap to colorize the input area
+            edit_styled = urwid.AttrMap(edit_w, "edit_field", focus_map="edit_focus")
+
+            # Return Columns
+            return urwid.Columns([
+                ('fixed', 12, urwid.Text(label_text)),  # Fixed width label
+                edit_styled
+            ], dividechars=1), edit_w
+
+        # Create rows and capture edit widgets to read values later
+        row_key, key_edit = create_field_row("Key:", self.msg_filters["key"])
+        row_val, value_edit = create_field_row("Value:", self.msg_filters["value"])
+        row_part, partition_edit = create_field_row("Partition:", self.msg_filters["partition"])
+        row_off, offset_edit = create_field_row("Offset:", self.msg_filters["offset"])
+
+        pile = urwid.Pile(
+            [
+                urwid.Text("Filter messages by fields:"),
+                urwid.Divider(),
+                urwid.Text("(Case-insensitive substring search)"),
+                urwid.Divider(),
+                row_key,
+                row_val,
+                row_part,
+                row_off,
+                urwid.Divider(),
+                urwid.AttrMap(urwid.Button("Apply", on_press=on_apply), "btn", focus_map="btn_focus"),
+                urwid.AttrMap(urwid.Button("Clear All", on_press=on_clear), "btn", focus_map="btn_focus"),
+                urwid.AttrMap(urwid.Button("Cancel", on_press=on_cancel), "btn", focus_map="btn_focus"),
+            ]
+        )
+        self._show_dialog(pile, "Filter Messages")
+
+    # ----- message full-view -----
+    def _open_message_view(self, row: MsgRow):
+
+        if row is None:
+            return
+
+        # Функция для проверки наличия непечатных символов
+        def has_non_printable(text):
+            if not text:
+                return False
+            for ch in text:
+                # isprintable() возвращает False для \n, \r, \t, поэтому их нужно исключить явно
+                if not ch.isprintable() and ch not in ('\n', '\r', '\t'):
+                    return True
+            return False
+
+        # Определяем режим по умолчанию: если есть бинарные данные -> hex, иначе -> text
+        mode = "text"
+        if has_non_printable(row.key) or has_non_printable(row.full_text):
+            mode = "hex"
+
+        view_walker = urwid.SimpleFocusListWalker([])
+        box = None  # будет установлен ниже
+
+        def build_lines():
+            lines = []
+
+            lines.append(f"        Topic: {row.topic}")
+
+            if row.timestamp:
+                lines.append(f"    Timestamp: {row.timestamp} ms")
+
+                from datetime import datetime
+                dt = datetime.fromtimestamp(row.timestamp / 1000.0)
+                dt_local = dt.astimezone()
+                iso_datetime = dt_local.isoformat()
+                lines.append(f"     DateTime: {iso_datetime}")
+
+                now = datetime.now()
+                delta = now - dt
+                seconds = int(delta.total_seconds())
+
+                if seconds < 60:
+                    time_ago = f"{seconds} second{'s' if seconds != 1 else ''} ago"
+                elif seconds < 3600:
+                    minutes = seconds // 60
+                    time_ago = f"{minutes} minute{'s' if minutes != 1 else ''} ago"
+                elif seconds < 86400:
+                    hours = seconds // 3600
+                    time_ago = f"{hours} hour{'s' if hours != 1 else ''} ago"
+                else:
+                    days = seconds // 86400
+                    time_ago = f"{days} day{'s' if days != 1 else ''} ago"
+
+                lines.append(f"    Published: {time_ago}")
+
+            lines.append(f"       Offset: {row.offset}")
+            lines.append(f"    Partition: {row.partition}")
+
+            if row.full_text is not None:
+                size_bytes = len(row.full_text.encode("utf-8", errors="replace"))
+                if size_bytes < 1024:
+                    size_str = f"{size_bytes} B"
+                elif size_bytes < 1024 * 1024:
+                    size_str = f"{size_bytes / 1024:.1f} KB"
+                else:
+                    size_str = f"{size_bytes / (1024 * 1024):.1f} MB"
+                lines.append(f"         Size: {size_str}")
+
+            key_value = row.key if row.key else ""
+            # lines.append(f"          Key: {key_value}")
+            lines.append(f"          Key: ({mode}, F4 toggle affects Value only)")
+            if mode == "hex":
+                lines.extend(self._bytes_to_hex_lines(getattr(row, "raw_key", None)))
+            else:
+                lines.append(f" {row.key or ''}")
+
+            lines.append("")
+
+            lines.append(f"        Value: ({mode}, F4 toggle)")
+            if mode == "hex":
+                raw_val = getattr(row, "raw_value", None)
+                if raw_val is None:
+                    # fallback: покажем hex от текста (хуже, но лучше чем ничего)
+                    raw_val = row.full_text if row.full_text is not None else ""
+                    lines.append(" <no raw bytes stored; showing hex of decoded text>")
+                lines.extend(self._bytes_to_hex_lines(raw_val))
+            else:
+                lines.extend(self._safe_value_text_lines(row))
+
+            return lines
+
+        def rebuild():
+            nonlocal box
+            lines = build_lines()
+            view_walker[:] = [SelectableText(ln) for ln in lines]
+            if box is not None:
+                box.set_title(f"Message p{row.partition}@{row.offset} | F4:Toggle hex | S:Save | Esc:Close")
+
+        class MsgViewListBox(urwid.ListBox):
+            def keypress(lb_self, size, key):
+                nonlocal mode
+                if key == "f4":
+                    mode = "hex" if mode == "text" else "text"
+                    rebuild()
+                    return None
+                if key in ("s", "S"):
+                    self._show_save_dialog(row)
+                    return None
+                if key in ("esc", "q", "Q"):
+                    self._close_dialog()
+                    return None
+                return super().keypress(size, key)
+
+        view_list = MsgViewListBox(view_walker)
+        box = urwid.LineBox(urwid.AttrMap(view_list, "dialog_bg"), title="")
+        self.dialog_overlay = urwid.Overlay(
+            top_w=urwid.Padding(box, left=2, right=2),
+            bottom_w=self.main_frame,
+            align="center",
+            width=("relative", 90),
+            valign="middle",
+            height=("relative", 90),
+            min_width=40,
+            min_height=10,
+        )
+        self.loop.widget = self.dialog_overlay
+        rebuild()
+
+    def _bytes_to_hex_lines(self, data, width=16):
+        if data is None:
+            return [" <null>"]
+
+        if isinstance(data, str):
+            data = data.encode("utf-8", errors="replace")
+        elif not isinstance(data, (bytes, bytearray)):
+            data = str(data).encode("utf-8", errors="replace")
+
+        out = []
+        for off in range(0, len(data), width):
+            chunk = data[off:off + width]
+            hex_part = " ".join(f"{b:02x}" for b in chunk)
+            ascii_part = "".join(chr(b) if 32 <= b < 127 else "." for b in chunk)
+            out.append(f" {off:08x}  {hex_part:<{width * 3}} |{ascii_part}|")
+        return out
+
+    def _safe_value_text_lines(self, row):
+        value_text = row.full_text if row.full_text else ""
+        try:
+            import json
+            json_obj = json.loads(value_text)
+            pretty_json = json.dumps(json_obj, indent=2, ensure_ascii=False)
+            return [f" {line}" for line in pretty_json.splitlines()]
+        except Exception:
+            return [f" {line}" for line in value_text.splitlines()]
+
+    # ----- topic info view -----
+
+    def _show_topic_info(self, topic):
+        """Display topic information: partitions, replicas, records, consumer groups, config"""
+        if not topic:
+            return
+
+        try:
+            # Get topic metadata
+            metadata = self.admin_client.describe_topics([topic])
+            topic_info = metadata[0] if metadata else None
+
+            num_partitions = len(topic_info['partitions']) if topic_info and 'partitions' in topic_info else 0
+            num_replicas = len(topic_info['partitions'][0]['replicas']) if topic_info and topic_info.get(
+                'partitions') else 0
+
+            # Get record count
+            cfg = self._get_kafka_config()
+            cfg.update({
+                "enable_auto_commit": False,
+                "consumer_timeout_ms": 1000,
+            })
+            consumer = KafkaConsumer(**cfg)
+            parts = consumer.partitions_for_topic(topic)
+            num_records = 0
+            if parts:
+                tps = [TopicPartition(topic, p) for p in parts]
+                begin = consumer.beginning_offsets(tps)
+                end = consumer.end_offsets(tps)
+                num_records = sum(end.get(tp, 0) - begin.get(tp, 0) for tp in tps)
+            consumer.close()
+
+            # Get consumer groups
+            all_groups = self.admin_client.list_consumer_groups()
+            consumer_groups = []
+
+            for group_tuple in all_groups:
+                group_id = group_tuple[0] if isinstance(group_tuple, tuple) else group_tuple
+                try:
+                    offsets = self.admin_client.list_consumer_group_offsets(group_id)
+                    for tp in offsets.keys():
+                        if tp.topic == topic:
+                            consumer_groups.append({
+                                'name': group_id,
+                                'state': 'Empty',
+                                'partitions': 0,
+                                'members': 1,
+                                'lag': 0
+                            })
+                            break
+                except Exception:
+                    pass
+
+            # Get topic configuration
+            topic_config = {}
+            try:
+                config_resource = ConfigResource(ConfigResourceType.TOPIC, topic)
+                configs_response = self.admin_client.describe_configs([config_resource])
+
+                # Response structure: configs_response[0].resources[0] = (error_code, error_message, resource_type, resource_name, config_entries)
+                # config_entries is a list of tuples: (name, value, read_only, config_source, is_sensitive, synonyms)
+                if configs_response and hasattr(configs_response[0], 'resources'):
+                    if len(configs_response[0].resources) > 0:
+                        resource_tuple = configs_response[0].resources[0]
+                        if isinstance(resource_tuple, tuple) and len(resource_tuple) >= 5:
+                            config_entries = resource_tuple[4]  # 5th element is the list of config entries
+
+                            for entry in config_entries:
+                                if isinstance(entry, tuple) and len(entry) >= 2:
+                                    config_name = entry[0]
+                                    config_value = entry[1]
+                                    topic_config[config_name] = config_value
+            except Exception as e_config:
+                traceback.print_exc()
+
+            # Build display content
+            content_lines = []
+            content_lines.append(f" {topic}")
+            content_lines.append(f" {num_partitions} partitions, {num_replicas} replicas")
+            content_lines.append(f" {num_records} records, {len(consumer_groups)} consumer groups")
+            content_lines.append("")
+
+            if consumer_groups:
+                content_lines.append("    list of consumer members")
+                content_lines.append("")
+                content_lines.append(f"      {'Name':<45} {'State':<20} {'Partitions':<12} {'Members':<12} {'Lag':<10}")
+                for cg in consumer_groups:
+                    content_lines.append(
+                        f"      {cg['name']:<45} {cg['state']:<20} {cg['partitions']:<12} {cg['members']:<12} {cg['lag']:<10}")
+                content_lines.append("")
+
+            if topic_config:
+                content_lines.append(f"                        {'Topic configuration':<25} {'Value':<50}")
+                for key in sorted(topic_config.keys()):
+                    value = str(topic_config[key]) if topic_config[key] is not None else ""
+                    content_lines.append(f"                        {key:>25}    {value:<50}")
+            else:
+                content_lines.append("    Topic configuration: unable to retrieve")
+
+            # Create scrollable view
+            view_walker = urwid.SimpleFocusListWalker([SelectableText(ln) for ln in content_lines])
+            view_list = urwid.ListBox(view_walker)
+            title = f"Topic Information: {topic} (Esc to close)"
+            box = urwid.LineBox(urwid.AttrMap(view_list, "dialog_bg"), title=title)
+
+            self.dialog_overlay = urwid.Overlay(
+                top_w=urwid.Padding(box, left=2, right=2),
+                bottom_w=self.main_frame,
+                align="center",
+                width=("relative", 95),
+                valign="middle",
+                height=("relative", 90),
+                min_width=80,
+                min_height=20,
+            )
+            self.loop.widget = self.dialog_overlay
+
+        except Exception as e:
+            # traceback.print_exc()
+            logger.exception("Error loading topic info: %s", e)
+            self._show_message(f"Error loading topic info: {e}")
+
+    # ----- dialogs/actions -----
+
+    def _show_dialog(self, content, title):
+        header = urwid.AttrMap(urwid.Text(f" {title} ", align="center"), "dialog_header")
+        content_box = urwid.Filler(content, valign="top")
+        dialog = urwid.AttrMap(
+            urwid.LineBox(urwid.Frame(urwid.Padding(content_box, left=1, right=1), header=header)),
+            "dialog_bg",
+        )
+        self.dialog_overlay = urwid.Overlay(
+            top_w=urwid.Padding(dialog, left=2, right=2),
+            bottom_w=self.main_frame,
+            align="center",
+            width=("relative", 70),
+            valign="middle",
+            height=("relative", 60),
+            min_width=50,
+            min_height=12,
+        )
+        self.loop.widget = self.dialog_overlay
+
+    def _close_dialog(self):
+        if self.dialog_overlay is not None:
+            self.loop.widget = self.main_frame
+            self.dialog_overlay = None
+            self._set_status()
+
+    def _close_dialog_and_return(self):
+        """Close current dialog and show previous one from stack"""
+        if self.dialog_overlay is not None:
+            self.loop.widget = self.main_frame
+            self.dialog_overlay = None
+
+            # Pop and execute previous dialog from stack
+            if self.dialog_stack:
+                previous_dialog = self.dialog_stack.pop()
+                previous_dialog()  # Call the function to recreate previous dialog
+            else:
+                self._set_status()
+
+    def _show_message(self, message):
+        def on_ok(btn):
+            self._close_dialog()
+
+        pile = urwid.Pile(
+            [
+                urwid.Text(message),
+                urwid.Divider(),
+                urwid.AttrMap(urwid.Button("OK", on_press=on_ok), "btn", focus_map="btn_focus"),
+            ]
+        )
+        self._show_dialog(pile, "Message")
+
+    def _show_offsets_dialog(self):
+        # controls snapshot mode, not live seek
+        mode_edit = urwid.Edit("Mode (tail|begin): ", "tail" if self.snapshot_mode == "tail" else "begin")
+        tail_edit = urwid.Edit("Tail N per partition: ", str(self.snapshot_tail_n))
+        max_edit = urwid.Edit("Max total messages: ", str(self.snapshot_max_total))
+
+        def on_apply(btn):
+            m = mode_edit.edit_text.strip().lower()
+            self.snapshot_mode = "from_beginning" if m in ("begin", "b", "from_beginning") else "tail"
+            try:
+                self.snapshot_tail_n = max(1, int(tail_edit.edit_text.strip()))
+            except Exception:
+                pass
+            try:
+                self.snapshot_max_total = max(100, int(max_edit.edit_text.strip()))
+            except Exception:
+                pass
+            self._close_dialog()
+            if self.current_topic:
+                self._load_topic_snapshot(self.current_topic)
+                self._focus_messages()
+
+        def on_cancel(btn):
+            self._close_dialog()
+
+        pile = urwid.Pile(
+            [
+                urwid.Text("Snapshot / offsets settings"),
+                urwid.Divider(),
+                mode_edit,
+                tail_edit,
+                max_edit,
+                urwid.Divider(),
+                urwid.AttrMap(urwid.Button("Apply", on_press=on_apply), "btn", focus_map="btn_focus"),
+                urwid.AttrMap(urwid.Button("Cancel", on_press=on_cancel), "btn", focus_map="btn_focus"),
+            ]
+        )
+        self._show_dialog(pile, "Offsets")
+
+    def _show_produce_dialog(self):
+        if not self.current_topic:
+            self._show_message("No topic selected")
+            return
+
+        topic = self.current_topic
+
+        # Disallow producing to internal topics
+        if topic.startswith("__"):
+            self._show_message(f"Producing to internal topics is forbidden: {topic}")
+            return
+
+        key_edit = urwid.Edit("Key (optional): ")
+        val_edit = urwid.Edit("Value:\n", multiline=True)
+        val_box = urwid.LineBox(urwid.Filler(val_edit, valign="top"), title="Message body")
+
+        def on_send(btn):
+            try:
+                producer = KafkaProducer(
+                    **self._get_kafka_config(),
+                    key_serializer=lambda s: s.encode("utf-8") if s is not None else None,
+                    value_serializer=lambda s: s.encode("utf-8") if s is not None else None,
+                )
+                key = key_edit.edit_text
+                key = key if key != "" else None
+                value = val_edit.edit_text
+                producer.send(topic, key=key, value=value)
+                producer.flush(5)
+                producer.close()
+                self._close_dialog()
+                # обновляем snapshot и остаёмся в Messages
+                self._load_topic_snapshot(topic)
+                self._focus_messages()
+                self._show_message("Message sent")
+            except Exception as e:
+                self._show_message(f"Error sending: {e}")
+
+        def on_cancel(btn):
+            self._close_dialog()
+
+        pile = urwid.Pile(
+            [
+                urwid.Text(f"Produce to: {topic}"),
+                urwid.Divider(),
+                key_edit,
+                urwid.Divider(),
+                val_box,
+                urwid.Divider(),
+                urwid.AttrMap(urwid.Button("Send", on_press=on_send), "btn", focus_map="btn_focus"),
+                urwid.AttrMap(urwid.Button("Cancel", on_press=on_cancel), "btn", focus_map="btn_focus"),
+            ]
+        )
+        self._show_dialog(pile, "Produce message")
+
+    # ----- input -----
+
+    def _handle_input(self, key):
+        # Let listboxes do their native navigation; we only intercept commands.
+        if key in ("q", "Q"):
+            raise urwid.ExitMainLoop()
+
+        if key in ('n', 'N'):
+            if self.columns.focus_position == 0:  # в списке топиков
+                self._show_create_topic_dialog()
+            return
+
+        if key in ('g', 'G'):
+            if self.columns.focus_position == 0:  # в списке топиков
+                self._show_consumer_groups_monitor()
+            return
+
+        if key == "esc":
+            if self.dialog_overlay is not None:
+                self._close_dialog()
+            else:
+                raise urwid.ExitMainLoop()
+            return
+
+        # F2 - show topic info
+        if key == "f2":
+            if self.columns.focus_position == 0:
+                t = self._focused_topic()
+                if t and not t.startswith("Connection error") and not t.startswith("No topics"):
+                    self._show_topic_info(t)
+            return
+
+        # F3 - show topic ACLs
+        if key == "f3":
+            if self.columns.focus_position == 0:
+                t = self._focused_topic()
+                if t and not t.startswith("Connection error") and not t.startswith("No topics"):
+                    self._show_topic_acls(t)
+            return
+
+        # F4 - show ACL resource menu
+        if key == "f4":
+            if self.columns.focus_position == 0:
+                self._show_acl_resource_menu()
+            return
+
+        # F7 - show filter dialog (context-aware)
+        if key == "f7":
+            if self.columns.focus_position == 0:
+                # Filter topics
+                self._show_filter_dialog()
+            elif self.columns.focus_position == 1 and len(self.msg_walker) > 1:
+                # Filter messages
+                self._show_message_filter_dialog()
+            return
+
+        if key == 'f8':
+            t = self._focused_topic()
+            if t and not t.startswith("Connection error") and not t.startswith("No topics"):
+                if self.columns.focus_position == 0:
+                    self._show_delete_topic_confirm(t)
+            return
+
+        # S - show sort dialog
+        if key in ("s", "S"):
+            if self.columns.focus_position == 1 and len(self.msg_walker) > 1:
+                self._show_sort_dialog()
+            return
+
+        # focus-aware actions
+        if key in ("enter", "right"):
+            if self.columns.focus_position == 0:
+                t = self._focused_topic()
+                if t and not t.startswith("Connection error") and not t.startswith("No topics"):
+                    self.current_topic = t
+                    self._set_status("Loading...")
+                    self._load_topic_snapshot(t)
+                    self._focus_messages()
+                else:
+                    self._focus_messages()
+            else:
+                row = self._focused_message_row()
+                if row:
+                    self._open_message_view(row)
+            return
+
+        if key == "left":
+            self._focus_topics()
+            return
+
+        if key in ("r", "R"):
+            self._fetch_topics()
+            self._set_status("Topics refreshed")
+            return
+
+        if key in ("o", "O"):
+            self._show_offsets_dialog()
+            return
+
+        if key in ("p", "P"):
+            self._show_produce_dialog()
+            return
+
+        # update footer when scrolling messages
+        self._maybe_update_footer_on_focus()
+
+    def run(self):
+        palette = [
+            ("body", "white", "dark blue"),
+            ("footer", "white", "dark blue"),
+            ("reversed", "black", "light cyan"),
+            ("header", "white,bold", "dark blue"),  # Add this line
+            ("dialog_bg", "black", "light gray"),
+            ("dialog_header", "black,bold", "light gray"),
+            ("btn", "black", "light gray"),
+            ("btn_focus", "black", "light cyan"),
+            # ("error", "white", "dark red"),
+            ("error", "light red", "black"),
+            ("error_focus", "black", "light cyan"),
+            ("edit_focus", "black", "light cyan"),
+            ("edit_field", "black", "dark cyan"),
+        ]
+
+        self.loop = urwid.MainLoop(self.main_frame, palette=palette, unhandled_input=self._handle_input)
+
+        # refresh footer when messages change focus by mouse/scroll keys
+        def _idle(_loop, _data):
+            self._maybe_update_footer_on_focus()
+            self.loop.set_alarm_in(0.2, lambda l, d: _idle(l, d))
+
+        try:
+            self.loop.run()
+        finally:
+            if self.admin_client:
+                try:
+                    self.admin_client.close()
+                except Exception:
+                    pass
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Kafka Topic Viewer TUI")
+
+    # --- Config loading options ---
+    parser.add_argument("-c", "--config", default="config.json",
+                        help="Path to plain text config file (default: config.json)")
+    parser.add_argument("-e", "--encrypted-config", help="Path to encrypted config file")
+
+    # HashiCorp Vault options
+    parser.add_argument("--vault-url", help="HashiCorp Vault URL (e.g., http://vault.example.com:8200)")
+    parser.add_argument("--vault-path", help="Path to secret in Vault (e.g., secret/data/kafka-viewer)")
+
+    # --- Standard options ---
+    parser.add_argument("--bootstrap-servers", help="Kafka bootstrap servers")
+    parser.add_argument("--profile", help="Profile name from config")
+    parser.add_argument("--security-protocol", choices=["PLAINTEXT", "SSL", "SASL_PLAINTEXT", "SASL_SSL"],
+                        help="Security protocol")
+
+    # SSL options
+    parser.add_argument("--ssl-ca-file", help="Path to CA certificate file (PEM)")
+    parser.add_argument("--ssl-cert-file", help="Path to client certificate file (PEM)")
+    parser.add_argument("--ssl-key-file", help="Path to client private key file (PEM)")
+    parser.add_argument("--ssl-password", help="Password for encrypted SSL key file")
+    parser.add_argument("--ssl-check-hostname", type=lambda x: x.lower() in ("true", "1", "yes"),
+                        help="Enable SSL hostname verification (true/false)")
+
+    # SASL options
+    parser.add_argument("--sasl-mechanism", choices=["PLAIN", "SCRAM-SHA-256", "SCRAM-SHA-512"],
+                        help="SASL mechanism")
+    parser.add_argument("--sasl-username", help="SASL username")
+    parser.add_argument("--sasl-password", help="SASL password")
+
+    parser.add_argument("--log-level", default=os.getenv("KAFKA_VIEWER_LOG_LEVEL", "INFO"),
+                        help="Log level: DEBUG/INFO/WARNING/ERROR")
+    parser.add_argument("--log-file", default="kafka_viewer.log",
+                        help="Log file path (optional)")
+
+    # SSL options (aliases for mTLS)
+    parser.add_argument("--mtls-ca-file", dest="sslcafile", help="mTLS: CA certificate file (PEM)")
+    parser.add_argument("--mtls-cert-file", dest="sslcertfile", help="mTLS: client certificate (PEM)")
+    parser.add_argument("--mtls-key-file", dest="sslkeyfile", help="mTLS: client private key (PEM)")
+    parser.add_argument("--mtls-key-password", dest="sslpassword", help="mTLS: password for encrypted key file")
+
+    return parser.parse_args()
+
+
+def main():
+    args = parse_args()
+
+    setup_logging(args.log_level, args.log_file)
+    LOG.info("Starting kafka_viewer %s", __version__)
+
+    params, profile_name = ConfigManager.get_connection_params(cli_args=args)
+    errors = ConfigManager.validate_params(params)
+    if errors:
+        # print("Configuration errors:", file=sys.stderr)
+        LOG.error("Configuration errors:\n- %s", "\n- ".join(errors))
+        for err in errors:
+            print(f" - {err}", file=sys.stderr)
+            # LOG.exception("Fatal error: %s", e)
+        sys.exit(1)
+
+    try:
+        app = KafkaViewerApp(params, profile_name)
+        app.run()
+    except KeyboardInterrupt:
+        pass
+    except Exception as e:
+        print(f"Fatal error: {e}", file=sys.stderr)
+        traceback.print_exc()
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
