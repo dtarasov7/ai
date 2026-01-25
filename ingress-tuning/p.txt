@@ -1,0 +1,8 @@
+﻿k8s v 1.24 . Поднять версию сейчас нельзя.
+nginx-ingress-controller  v1.9.1
+Можно ли и нужно ли поднять версию ?
+Какие применить настройки к хосту и к nginx-ingress-controller  для HighLoad ?
+На сервере  8 vCPU. 16GB RAM
+ps ax | grep nginx показывает 8 nginx worker process и один master. 
+Это выделенный ingress  сервер
+Какие значения request/limit рекомендуется поставить ?
