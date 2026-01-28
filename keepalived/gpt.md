@@ -1,4 +1,178 @@
-﻿Да, конечно. IPVS (LVS) поддерживает три основных режима пересылки пакетов. DR (Direct Routing) — самый популярный из-за производительности, но не единственный.
+﻿Ниже приведен полный пример конфигурации для архитектуры **LVS-DR (Direct Routing)**.
+
+В этом сценарии все 4 сервера являются одновременно и балансировщиками (один активный Master), и рабочими узлами (Real Servers), обрабатывающими трафик.
+
+### Вводные данные для примера
+*   **VIP (Виртуальный IP):** `10.0.0.100`
+*   **Server 1:** `10.0.0.1` (Master)
+*   **Server 2:** `10.0.0.2` (Backup)
+*   **Server 3:** `10.0.0.3` (Backup)
+*   **Server 4:** `10.0.0.4` (Backup)
+*   **Интерфейс:** `eth0`
+
+***
+
+### 1. Конфигурация `/etc/keepalived/keepalived.conf`
+
+Этот файл должен быть **на всех 4 серверах**. Отличия только в блоке `vrrp_instance` (параметры `state`, `priority` и `router_id`).
+
+#### Пример для SERVER 1 (MASTER)
+
+```nginx
+global_defs {
+    router_id LVS_NODE_1        # Уникальное имя для каждого сервера (NODE_2, NODE_3...)
+}
+
+vrrp_instance VI_1 {
+    state MASTER                # На серверах 2,3,4 ставить BACKUP
+    interface eth0              # Ваш сетевой интерфейс
+    virtual_router_id 51        # Должен совпадать на всех 4 серверах
+    priority 100                # На других ставить меньше: 99, 98, 97
+    advert_int 1
+    
+    authentication {
+        auth_type PASS
+        auth_pass my_secret_pw
+    }
+    
+    virtual_ipaddress {
+        10.0.0.100/32 dev eth0 label eth0:vip
+    }
+}
+
+# Блок балансировки IPVS
+virtual_server 10.0.0.100 80 {
+    delay_loop 6                # Интервал проверки здоровья (сек)
+    lb_algo rr                  # Алгоритм: Round Robin (равномерно)
+    lb_kind DR                  # Режим: Direct Routing (самый быстрый)
+    protocol TCP
+
+    # --- REAL SERVER 1 (Локальный Nginx этого узла) ---
+    real_server 10.0.0.1 80 {
+        weight 1
+        HTTP_GET {              # Проверка здоровья через HTTP
+            url {
+                path /
+                status_code 200
+            }
+            connect_timeout 3
+            nb_get_retry 3
+            delay_before_retry 3
+        }
+    }
+
+    # --- REAL SERVER 2 ---
+    real_server 10.0.0.2 80 {
+        weight 1
+        HTTP_GET {
+            url { path /; status_code 200; }
+            connect_timeout 3
+            nb_get_retry 3
+            delay_before_retry 3
+        }
+    }
+
+    # --- REAL SERVER 3 ---
+    real_server 10.0.0.3 80 {
+        weight 1
+        HTTP_GET {
+            url { path /; status_code 200; }
+            connect_timeout 3
+            nb_get_retry 3
+            delay_before_retry 3
+        }
+    }
+
+    # --- REAL SERVER 4 ---
+    real_server 10.0.0.4 80 {
+        weight 1
+        HTTP_GET {
+            url { path /; status_code 200; }
+            connect_timeout 3
+            nb_get_retry 3
+            delay_before_retry 3
+        }
+    }
+}
+```
+
+***
+
+### 2. Обязательная настройка системы (на ВСЕХ 4 серверах)
+
+Для работы режима DR (Direct Routing) каждый сервер должен принимать трафик на VIP, но **не отвечать** на ARP-запросы по этому IP (отвечать должен только текущий MASTER Keepalived).
+
+#### А. Скрипт подготовки (создайте файл, например `/usr/local/bin/lvs-dr.sh`)
+
+```bash
+#!/bin/bash
+VIP=10.0.0.100
+
+case "$1" in
+start)
+    echo "Starting LVS-DR setup..."
+    # 1. Подавляем ARP ответы для VIP
+    echo 1 > /proc/sys/net/ipv4/conf/all/arp_ignore
+    echo 2 > /proc/sys/net/ipv4/conf/all/arp_announce
+    echo 1 > /proc/sys/net/ipv4/conf/default/arp_ignore
+    echo 2 > /proc/sys/net/ipv4/conf/default/arp_announce
+    # Замените eth0 на ваш интерфейс
+    echo 1 > /proc/sys/net/ipv4/conf/eth0/arp_ignore
+    echo 2 > /proc/sys/net/ipv4/conf/eth0/arp_announce
+
+    # 2. Поднимаем VIP на loopback (скрытно от сети)
+    ip addr add $VIP/32 dev lo label lo:vip
+    ;;
+stop)
+    echo "Stopping LVS-DR setup..."
+    ip addr del $VIP/32 dev lo label lo:vip
+    echo 0 > /proc/sys/net/ipv4/conf/all/arp_ignore
+    echo 0 > /proc/sys/net/ipv4/conf/all/arp_announce
+    echo 0 > /proc/sys/net/ipv4/conf/default/arp_ignore
+    echo 0 > /proc/sys/net/ipv4/conf/default/arp_announce
+    ;;
+*)
+    echo "Usage: $0 {start|stop}"
+    exit 1
+esac
+```
+
+1.  Сделайте скрипт исполняемым: `chmod +x /usr/local/bin/lvs-dr.sh`
+2.  Запустите его: `/usr/local/bin/lvs-dr.sh start`
+3.  Добавьте его в автозагрузку (например, через systemd unit или `/etc/rc.local`), чтобы он срабатывал **до** старта keepalived/nginx.
+
+***
+
+### 3. Таблица различий для конфигов
+
+| Сервер | `router_id` | `state` | `priority` | `real_server` |
+| :--- | :--- | :--- | :--- | :--- |
+| **Server 1** | LVS_NODE_1 | MASTER | 100 | Прописать все 4 IP |
+| **Server 2** | LVS_NODE_2 | BACKUP | 99 | Прописать все 4 IP |
+| **Server 3** | LVS_NODE_3 | BACKUP | 98 | Прописать все 4 IP |
+| **Server 4** | LVS_NODE_4 | BACKUP | 97 | Прописать все 4 IP |
+
+### 4. Проверка
+
+После запуска проверьте на текущем Мастере таблицу IPVS:
+```bash
+ipvsadm -Ln
+```
+Вы должны увидеть что-то подобное:
+```text
+IP Virtual Server version 1.2.1 (size=4096)
+Prot LocalAddress:Port Scheduler Flags
+  -> RemoteAddress:Port           Forward Weight ActiveConn InActConn
+TCP  10.0.0.100:80 rr
+  -> 10.0.0.1:80                  Route   1      0          0
+  -> 10.0.0.2:80                  Route   1      0          0
+  -> 10.0.0.3:80                  Route   1      0          0
+  -> 10.0.0.4:80                  Route   1      0          0
+```
+Если `Route` стоит напротив всех IP — значит IPVS видит сервера и режим DR включен.
+
+
+Да, конечно. IPVS (LVS) поддерживает три основных режима пересылки пакетов. DR (Direct Routing) — самый популярный из-за производительности, но не единственный.
 
 Основные альтернативы:
 
