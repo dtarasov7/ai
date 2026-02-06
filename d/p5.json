@@ -1,0 +1,759 @@
+﻿{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "pgpro-otel-collector (Prometheus) – extended dashboard (9628-like) with fixed rate window, buffercache and topN panels; legend table sorted by Max",
+  "editable": true,
+  "graphTooltip": 0,
+  "id": null,
+  "iteration": 6,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+      "id": 1,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "value"
+      },
+      "targets": [{ "expr": "max(postgresql_up{instance=~\"$instance\"})", "legendFormat": "up", "refId": "A" }],
+      "title": "Up",
+      "type": "stat"
+    },
+
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 10, "x": 4, "y": 0 },
+      "id": 2,
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["max"], "sortBy": "Max", "sortDesc": true } },
+      "targets": [
+        {
+          "expr": "sum by (state) (postgresql_activity_connections{instance=~\"$instance\", database=~\"$database\"})",
+          "legendFormat": "{{state}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Connections by state",
+      "type": "timeseries"
+    },
+
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 10, "x": 14, "y": 0 },
+      "id": 3,
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["max"], "sortBy": "Max", "sortDesc": true } },
+      "targets": [
+        {
+          "expr": "topk(10, sum by (wait_event_type, wait_event) (postgresql_activity_wait_events{instance=~\"$instance\", database=~\"$database\"}))",
+          "legendFormat": "{{wait_event_type}} / {{wait_event}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Top wait events (count)",
+      "type": "timeseries"
+    },
+
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 4 },
+      "id": 4,
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["max"], "sortBy": "Max", "sortDesc": true } },
+      "targets": [
+        {
+          "expr": "sum by (database) (rate(postgresql_databases_commits_total{instance=~\"$instance\", database=~\"$database\"}[$rate_window]))",
+          "legendFormat": "commits {{database}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (database) (rate(postgresql_databases_rollbacks_total{instance=~\"$instance\", database=~\"$database\"}[$rate_window]))",
+          "legendFormat": "rollbacks {{database}}",
+          "refId": "B"
+        }
+      ],
+      "title": "Transactions (per second)",
+      "type": "timeseries"
+    },
+
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
+      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 4 },
+      "id": 5,
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["max"], "sortBy": "Max", "sortDesc": true } },
+      "targets": [
+        {
+          "expr": "sum by (database) (rate(postgresql_databases_temp_bytes_total{instance=~\"$instance\", database=~\"$database\"}[$rate_window]))",
+          "legendFormat": "temp bytes/sec {{database}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (database) (rate(postgresql_databases_temp_files_total{instance=~\"$instance\", database=~\"$database\"}[$rate_window]))",
+          "legendFormat": "temp files/sec {{database}}",
+          "refId": "B"
+        }
+      ],
+      "title": "Temp files / bytes (per second)",
+      "type": "timeseries"
+    },
+
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] },
+      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 4 },
+      "id": 6,
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["max"], "sortBy": "Max", "sortDesc": true } },
+      "targets": [
+        {
+          "expr": "avg by (database) (postgresql_cache_hit_ratio{instance=~\"$instance\", database=~\"$database\"})",
+          "legendFormat": "{{database}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Cache hit ratio",
+      "type": "timeseries"
+    },
+
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 10 },
+      "id": 7,
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["max"], "sortBy": "Max", "sortDesc": true } },
+      "targets": [
+        {
+          "expr": "sum by (database) (rate(postgresql_databases_block_read_time_milliseconds_total{instance=~\"$instance\", database=~\"$database\"}[$rate_window]) / 1000)",
+          "legendFormat": "read time {{database}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (database) (rate(postgresql_databases_block_write_time_milliseconds_total{instance=~\"$instance\", database=~\"$database\"}[$rate_window]) / 1000)",
+          "legendFormat": "write time {{database}}",
+          "refId": "B"
+        }
+      ],
+      "title": "DB block I/O time (seconds/sec)",
+      "type": "timeseries"
+    },
+
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 10 },
+      "id": 8,
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["max"], "sortBy": "Max", "sortDesc": true } },
+      "targets": [
+        {
+          "expr": "sum by (database) (rate(postgresql_databases_tuples_returned_total{instance=~\"$instance\", database=~\"$database\"}[$rate_window]))",
+          "legendFormat": "returned {{database}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (database) (rate(postgresql_databases_tuples_fetched_total{instance=~\"$instance\", database=~\"$database\"}[$rate_window]))",
+          "legendFormat": "fetched {{database}}",
+          "refId": "B"
+        }
+      ],
+      "title": "Tuples returned / fetched (per second)",
+      "type": "timeseries"
+    },
+
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 16 },
+      "id": 9,
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["max"], "sortBy": "Max", "sortDesc": true } },
+      "targets": [
+        {
+          "expr": "sum by (database) (rate(postgresql_databases_tuples_inserted_total{instance=~\"$instance\", database=~\"$database\"}[$rate_window]))",
+          "legendFormat": "inserted {{database}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (database) (rate(postgresql_databases_tuples_updated_total{instance=~\"$instance\", database=~\"$database\"}[$rate_window]))",
+          "legendFormat": "updated {{database}}",
+          "refId": "B"
+        },
+        {
+          "expr": "sum by (database) (rate(postgresql_databases_tuples_deleted_total{instance=~\"$instance\", database=~\"$database\"}[$rate_window]))",
+          "legendFormat": "deleted {{database}}",
+          "refId": "C"
+        }
+      ],
+      "title": "Tuples inserted / updated / deleted (per second)",
+      "type": "timeseries"
+    },
+
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 16 },
+      "id": 10,
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["max"], "sortBy": "Max", "sortDesc": true } },
+      "targets": [
+        { "expr": "rate(postgresql_wal_bytes_total{instance=~\"$instance\"}[$rate_window])", "legendFormat": "WAL bytes/sec", "refId": "A" },
+        { "expr": "rate(postgresql_wal_records_total{instance=~\"$instance\"}[$rate_window])", "legendFormat": "WAL records/sec", "refId": "B" },
+        { "expr": "rate(postgresql_wal_fpi_total{instance=~\"$instance\"}[$rate_window])", "legendFormat": "WAL FPI/sec", "refId": "C" }
+      ],
+      "title": "WAL: bytes / records / FPI (per second)",
+      "type": "timeseries"
+    },
+
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 22 },
+      "id": 11,
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["max"], "sortBy": "Max", "sortDesc": true } },
+      "targets": [
+        { "expr": "rate(postgresql_wal_write_time_milliseconds_total{instance=~\"$instance\"}[$rate_window]) / 1000", "legendFormat": "wal write time (s/sec)", "refId": "A" },
+        { "expr": "rate(postgresql_wal_sync_time_milliseconds_total{instance=~\"$instance\"}[$rate_window]) / 1000", "legendFormat": "wal sync time (s/sec)", "refId": "B" }
+      ],
+      "title": "WAL write/sync time (seconds/sec)",
+      "type": "timeseries"
+    },
+
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 22 },
+      "id": 12,
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["max"], "sortBy": "Max", "sortDesc": true } },
+      "targets": [
+        { "expr": "rate(postgresql_bgwriter_checkpoints_timed_total{instance=~\"$instance\"}[$rate_window])", "legendFormat": "timed checkpoints/sec", "refId": "A" },
+        { "expr": "rate(postgresql_bgwriter_checkpoints_requested_total{instance=~\"$instance\"}[$rate_window])", "legendFormat": "requested checkpoints/sec", "refId": "B" }
+      ],
+      "title": "Checkpoints (per second)",
+      "type": "timeseries"
+    },
+
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 28 },
+      "id": 13,
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["max"], "sortBy": "Max", "sortDesc": true } },
+      "targets": [
+        { "expr": "rate(postgresql_bgwriter_checkpoint_write_time_milliseconds_total{instance=~\"$instance\"}[$rate_window]) / 1000", "legendFormat": "checkpoint write time (s/sec)", "refId": "A" },
+        { "expr": "rate(postgresql_bgwriter_checkpoint_sync_time_milliseconds_total{instance=~\"$instance\"}[$rate_window]) / 1000", "legendFormat": "checkpoint sync time (s/sec)", "refId": "B" }
+      ],
+      "title": "Checkpoint write/sync time (seconds/sec)",
+      "type": "timeseries"
+    },
+
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 28 },
+      "id": 14,
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["max"], "sortBy": "Max", "sortDesc": true } },
+      "targets": [
+        { "expr": "rate(postgresql_bgwriter_buffers_checkpoint_total{instance=~\"$instance\"}[$rate_window])", "legendFormat": "buffers checkpoint/sec", "refId": "A" },
+        { "expr": "rate(postgresql_bgwriter_buffers_clean_total{instance=~\"$instance\"}[$rate_window])", "legendFormat": "buffers clean/sec", "refId": "B" },
+        { "expr": "rate(postgresql_bgwriter_buffers_backend_total{instance=~\"$instance\"}[$rate_window])", "legendFormat": "buffers backend/sec", "refId": "C" },
+        { "expr": "rate(postgresql_bgwriter_buffers_alloc_total{instance=~\"$instance\"}[$rate_window])", "legendFormat": "buffers alloc/sec", "refId": "D" }
+      ],
+      "title": "Bgwriter buffers (per second)",
+      "type": "timeseries"
+    },
+
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 34 },
+      "id": 15,
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["max"], "sortBy": "Max", "sortDesc": true } },
+      "targets": [
+        { "expr": "postgresql_locks_all{instance=~\"$instance\", database=~\"$database\"}", "legendFormat": "all", "refId": "A" },
+        { "expr": "postgresql_locks_waiting{instance=~\"$instance\", database=~\"$database\"}", "legendFormat": "waiting", "refId": "B" }
+      ],
+      "title": "Locks",
+      "type": "timeseries"
+    },
+
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "ms" }, "overrides": [] },
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 34 },
+      "id": 16,
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["max"], "sortBy": "Max", "sortDesc": true } },
+      "targets": [{ "expr": "postgresql_locks_waiting_max_duration_milliseconds{instance=~\"$instance\", database=~\"$database\"}", "legendFormat": "max waiting duration", "refId": "A" }],
+      "title": "Lock waiting max duration",
+      "type": "timeseries"
+    },
+
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 40 },
+      "id": 17,
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["max"], "sortBy": "Max", "sortDesc": true } },
+      "targets": [{ "expr": "topk(10, postgresql_tables_size_bytes{instance=~\"$instance\", database=~\"$database\", table=~\"$table\"})", "legendFormat": "{{database}} / {{table}}", "refId": "A" }],
+      "title": "Top tables by size",
+      "type": "timeseries"
+    },
+
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 40 },
+      "id": 18,
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["max"], "sortBy": "Max", "sortDesc": true } },
+      "targets": [
+        { "expr": "topk(10, sum by (database, table) (rate(postgresql_tables_seq_scan_total{instance=~\"$instance\", database=~\"$database\", table=~\"$table\"}[$rate_window])))", "legendFormat": "seq {{database}}/{{table}}", "refId": "A" },
+        { "expr": "topk(10, sum by (database, table) (rate(postgresql_tables_index_scan_total{instance=~\"$instance\", database=~\"$database\", table=~\"$table\"}[$rate_window])))", "legendFormat": "idx {{database}}/{{table}}", "refId": "B" }
+      ],
+      "title": "Top scans (seq vs index)",
+      "type": "timeseries"
+    },
+
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 47 },
+      "id": 19,
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["max"], "sortBy": "Max", "sortDesc": true } },
+      "targets": [
+        { "expr": "sum by (database, table) (rate(postgresql_tables_tuples_inserted_total{instance=~\"$instance\", database=~\"$database\", table=~\"$table\"}[$rate_window]))", "legendFormat": "ins {{database}}/{{table}}", "refId": "A" },
+        { "expr": "sum by (database, table) (rate(postgresql_tables_tuples_updated_total{instance=~\"$instance\", database=~\"$database\", table=~\"$table\"}[$rate_window]))", "legendFormat": "upd {{database}}/{{table}}", "refId": "B" },
+        { "expr": "sum by (database, table) (rate(postgresql_tables_tuples_deleted_total{instance=~\"$instance\", database=~\"$database\", table=~\"$table\"}[$rate_window]))", "legendFormat": "del {{database}}/{{table}}", "refId": "C" }
+      ],
+      "title": "Table tuples in/out (per second)",
+      "type": "timeseries"
+    },
+
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 47 },
+      "id": 20,
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["max"], "sortBy": "Max", "sortDesc": true } },
+      "targets": [
+        { "expr": "sum(increase(postgresql_tables_vacuum_count_total{instance=~\"$instance\", database=~\"$database\", table=~\"$table\"}[$rate_window]))", "legendFormat": "vacuum", "refId": "A" },
+        { "expr": "sum(increase(postgresql_tables_autovacuum_count_total{instance=~\"$instance\", database=~\"$database\", table=~\"$table\"}[$rate_window]))", "legendFormat": "autovacuum", "refId": "B" },
+        { "expr": "sum(increase(postgresql_tables_analyze_count_total{instance=~\"$instance\", database=~\"$database\", table=~\"$table\"}[$rate_window]))", "legendFormat": "analyze", "refId": "C" },
+        { "expr": "sum(increase(postgresql_tables_autoanalyze_count_total{instance=~\"$instance\", database=~\"$database\", table=~\"$table\"}[$rate_window]))", "legendFormat": "autoanalyze", "refId": "D" }
+      ],
+      "title": "Vacuum / Analyze (counts per window)",
+      "type": "timeseries"
+    },
+
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 54 },
+      "id": 23,
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["max"], "sortBy": "Max", "sortDesc": true } },
+      "targets": [
+        { "expr": "postgresql_replication_walsender_all_lag_bytes{instance=~\"$instance\"}", "legendFormat": "walsender all lag bytes", "refId": "A" },
+        { "expr": "postgresql_replication_walsender_all_lag_milliseconds{instance=~\"$instance\"}", "legendFormat": "walsender all lag ms", "refId": "B" }
+      ],
+      "title": "Replication lag (primary – walsender)",
+      "type": "timeseries"
+    },
+
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 54 },
+      "id": 24,
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["max"], "sortBy": "Max", "sortDesc": true } },
+      "targets": [
+        { "expr": "postgresql_replication_walreceiver_receive_lag_bytes{instance=~\"$instance\"}", "legendFormat": "walreceiver receive lag bytes", "refId": "A" },
+        { "expr": "postgresql_replication_walreceiver_receive_lag_milliseconds{instance=~\"$instance\"}", "legendFormat": "walreceiver receive lag ms", "refId": "B" }
+      ],
+      "title": "Replication lag (standby – walreceiver) – may be optional",
+      "type": "timeseries"
+    },
+
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 7, "w": 24, "x": 0, "y": 60 },
+      "id": 25,
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["max"], "sortBy": "Max", "sortDesc": true } },
+      "targets": [
+        { "expr": "postgresql_buffercache_used{instance=~\"$instance\"}", "legendFormat": "used", "refId": "A" },
+        { "expr": "postgresql_buffercache_dirty{instance=~\"$instance\"}", "legendFormat": "dirty", "refId": "B" },
+        { "expr": "postgresql_buffercache_pinned{instance=~\"$instance\"}", "legendFormat": "pinned", "refId": "C" },
+        { "expr": "postgresql_buffercache_unused{instance=~\"$instance\"}", "legendFormat": "unused", "refId": "D" }
+      ],
+      "title": "Buffer cache (pg_buffercache): used / dirty / pinned / unused",
+      "type": "timeseries"
+    },
+
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 67 },
+      "id": 26,
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["max"], "sortBy": "Max", "sortDesc": true } },
+      "targets": [
+        {
+          "expr": "topk(10, sum by (database, table) (increase(postgresql_tables_vacuum_count_total{instance=~\"$instance\", database=~\"$database\", table=~\"$table\"}[$rate_window]) + increase(postgresql_tables_autovacuum_count_total{instance=~\"$instance\", database=~\"$database\", table=~\"$table\"}[$rate_window])))",
+          "legendFormat": "{{database}}/{{table}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Top 10 tables by vacuum+autovacuum (increase over window)",
+      "type": "timeseries"
+    },
+
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 67 },
+      "id": 27,
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["max"], "sortBy": "Max", "sortDesc": true } },
+      "targets": [
+        {
+          "expr": "topk(10, sum by (database, table) (increase(postgresql_tables_analyze_count_total{instance=~\"$instance\", database=~\"$database\", table=~\"$table\"}[$rate_window]) + increase(postgresql_tables_autoanalyze_count_total{instance=~\"$instance\", database=~\"$database\", table=~\"$table\"}[$rate_window])))",
+          "legendFormat": "{{database}}/{{table}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Top 10 tables by analyze+autoanalyze (increase over window)",
+      "type": "timeseries"
+    },
+
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 75 },
+      "id": 28,
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["max"], "sortBy": "Max", "sortDesc": true } },
+      "targets": [
+        {
+          "expr": "topk(10, sum by (database, table) (rate(postgresql_tables_seq_scan_total{instance=~\"$instance\", database=~\"$database\", table=~\"$table\"}[$rate_window])))",
+          "legendFormat": "{{database}}/{{table}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Top 10 tables by seq scans (per second)",
+      "type": "timeseries"
+    },
+
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 75 },
+      "id": 29,
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["max"], "sortBy": "Max", "sortDesc": true } },
+      "targets": [
+        {
+          "expr": "topk(10, sum by (database, table) (rate(postgresql_tables_index_scan_total{instance=~\"$instance\", database=~\"$database\", table=~\"$table\"}[$rate_window])))",
+          "legendFormat": "{{database}}/{{table}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Top 10 tables by index scans (per second)",
+      "type": "timeseries"
+    },
+
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 83 },
+      "id": 30,
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["max"], "sortBy": "Max", "sortDesc": true } },
+      "targets": [
+        {
+          "expr": "topk(10, sum by (database, table) (rate(postgresql_tables_seq_tuples_fetched_total{instance=~\"$instance\", database=~\"$database\", table=~\"$table\"}[$rate_window])))",
+          "legendFormat": "{{database}}/{{table}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Top 10 tables by seq tuples fetched (per second) – may be optional",
+      "type": "timeseries"
+    },
+
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 83 },
+      "id": 31,
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["max"], "sortBy": "Max", "sortDesc": true } },
+      "targets": [
+        {
+          "expr": "topk(10, sum by (database, table) (rate(postgresql_tables_index_tuples_fetched_total{instance=~\"$instance\", database=~\"$database\", table=~\"$table\"}[$rate_window])))",
+          "legendFormat": "{{database}}/{{table}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Top 10 tables by index tuples fetched (per second) – may be optional",
+      "type": "timeseries"
+    },
+
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 91 },
+      "id": 32,
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["max"], "sortBy": "Max", "sortDesc": true } },
+      "targets": [
+        {
+          "expr": "topk(10, sum by (database, table) (rate(postgresql_tables_heap_blocks_read_total{instance=~\"$instance\", database=~\"$database\", table=~\"$table\"}[$rate_window]) + rate(postgresql_tables_heap_blocks_hit_total{instance=~\"$instance\", database=~\"$database\", table=~\"$table\"}[$rate_window])))",
+          "legendFormat": "{{database}}/{{table}}",
+          "refId": "A"
+        },
+        {
+          "expr": "topk(10, sum by (database, table) (rate(postgresql_tables_heap_blocks_read_total{instance=~\"$instance\", database=~\"$database\", table=~\"$table\"}[$rate_window])))",
+          "legendFormat": "read {{database}}/{{table}}",
+          "refId": "B"
+        },
+        {
+          "expr": "topk(10, sum by (database, table) (rate(postgresql_tables_heap_blocks_hit_total{instance=~\"$instance\", database=~\"$database\", table=~\"$table\"}[$rate_window])))",
+          "legendFormat": "hit {{database}}/{{table}}",
+          "refId": "C"
+        }
+      ],
+      "title": "Heap blocks read vs hit (Top 10) – may be optional",
+      "type": "timeseries"
+    },
+
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 91 },
+      "id": 33,
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["max"], "sortBy": "Max", "sortDesc": true } },
+      "targets": [
+        {
+          "expr": "topk(10, sum by (database, table) (rate(postgresql_tables_index_blocks_read_total{instance=~\"$instance\", database=~\"$database\", table=~\"$table\"}[$rate_window]) + rate(postgresql_tables_index_blocks_hit_total{instance=~\"$instance\", database=~\"$database\", table=~\"$table\"}[$rate_window])))",
+          "legendFormat": "{{database}}/{{table}}",
+          "refId": "A"
+        },
+        {
+          "expr": "topk(10, sum by (database, table) (rate(postgresql_tables_index_blocks_read_total{instance=~\"$instance\", database=~\"$database\", table=~\"$table\"}[$rate_window])))",
+          "legendFormat": "read {{database}}/{{table}}",
+          "refId": "B"
+        },
+        {
+          "expr": "topk(10, sum by (database, table) (rate(postgresql_tables_index_blocks_hit_total{instance=~\"$instance\", database=~\"$database\", table=~\"$table\"}[$rate_window])))",
+          "legendFormat": "hit {{database}}/{{table}}",
+          "refId": "C"
+        }
+      ],
+      "title": "Index blocks read vs hit (Top 10) – may be optional",
+      "type": "timeseries"
+    },
+
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 99 },
+      "id": 34,
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["max"], "sortBy": "Max", "sortDesc": true } },
+      "targets": [
+        {
+          "expr": "topk(10, sum by (database, table) (rate(postgresql_tables_toast_blocks_read_total{instance=~\"$instance\", database=~\"$database\", table=~\"$table\"}[$rate_window]) + rate(postgresql_tables_toast_blocks_hit_total{instance=~\"$instance\", database=~\"$database\", table=~\"$table\"}[$rate_window])))",
+          "legendFormat": "{{database}}/{{table}}",
+          "refId": "A"
+        },
+        {
+          "expr": "topk(10, sum by (database, table) (rate(postgresql_tables_toast_blocks_read_total{instance=~\"$instance\", database=~\"$database\", table=~\"$table\"}[$rate_window])))",
+          "legendFormat": "read {{database}}/{{table}}",
+          "refId": "B"
+        },
+        {
+          "expr": "topk(10, sum by (database, table) (rate(postgresql_tables_toast_blocks_hit_total{instance=~\"$instance\", database=~\"$database\", table=~\"$table\"}[$rate_window])))",
+          "legendFormat": "hit {{database}}/{{table}}",
+          "refId": "C"
+        }
+      ],
+      "title": "Toast blocks read vs hit (Top 10) – may be optional",
+      "type": "timeseries"
+    },
+
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 99 },
+      "id": 35,
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["max"], "sortBy": "Max", "sortDesc": true } },
+      "targets": [
+        {
+          "expr": "topk(10, sum by (database, table) (rate(postgresql_tables_toast_index_blocks_read_total{instance=~\"$instance\", database=~\"$database\", table=~\"$table\"}[$rate_window]) + rate(postgresql_tables_toast_index_blocks_hit_total{instance=~\"$instance\", database=~\"$database\", table=~\"$table\"}[$rate_window])))",
+          "legendFormat": "{{database}}/{{table}}",
+          "refId": "A"
+        },
+        {
+          "expr": "topk(10, sum by (database, table) (rate(postgresql_tables_toast_index_blocks_read_total{instance=~\"$instance\", database=~\"$database\", table=~\"$table\"}[$rate_window])))",
+          "legendFormat": "read {{database}}/{{table}}",
+          "refId": "B"
+        },
+        {
+          "expr": "topk(10, sum by (database, table) (rate(postgresql_tables_toast_index_blocks_hit_total{instance=~\"$instance\", database=~\"$database\", table=~\"$table\"}[$rate_window])))",
+          "legendFormat": "hit {{database}}/{{table}}",
+          "refId": "C"
+        }
+      ],
+      "title": "Toast index blocks read vs hit (Top 10) – may be optional",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["postgres", "pgpro-otel-collector", "prometheus", "9628-like", "rate_window"],
+  "templating": {
+    "list": [
+      {
+        "current": { "selected": false, "text": "Prometheus", "value": "Prometheus" },
+        "hide": 2,
+        "includeAll": false,
+        "label": "Datasource",
+        "multi": false,
+        "name": "DS_PROMETHEUS",
+        "options": [],
+        "query": "prometheus",
+        "refresh": 1,
+        "type": "datasource"
+      },
+      {
+        "name": "rate_window",
+        "type": "custom",
+        "label": "Rate window",
+        "hide": 0,
+        "multi": false,
+        "includeAll": false,
+        "options": [
+          { "selected": false, "text": "1m", "value": "1m" },
+          { "selected": true, "text": "2m", "value": "2m" },
+          { "selected": false, "text": "5m", "value": "5m" },
+          { "selected": false, "text": "10m", "value": "10m" },
+          { "selected": false, "text": "30m", "value": "30m" }
+        ],
+        "query": "1m,2m,5m,10m,30m",
+        "current": { "selected": true, "text": "2m", "value": "2m" }
+      },
+      {
+        "current": { "selected": false, "text": ".*", "value": ".*" },
+        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "definition": "label_values(postgresql_up, instance)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Instance",
+        "multi": true,
+        "name": "instance",
+        "options": [],
+        "query": { "query": "label_values(postgresql_up, instance)", "refId": "Q1" },
+        "refresh": 2,
+        "regex": "",
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "current": { "selected": false, "text": ".*", "value": ".*" },
+        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "definition": "label_values(postgresql_databases_size_bytes{instance=~\"$instance\"}, database)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Database",
+        "multi": true,
+        "name": "database",
+        "options": [],
+        "query": { "query": "label_values(postgresql_databases_size_bytes{instance=~\"$instance\"}, database)", "refId": "Q2" },
+        "refresh": 2,
+        "regex": "",
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "current": { "selected": false, "text": ".*", "value": ".*" },
+        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "definition": "label_values(postgresql_tables_size_bytes{instance=~\"$instance\", database=~\"$database\"}, table)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Table",
+        "multi": true,
+        "name": "table",
+        "options": [],
+        "query": { "query": "label_values(postgresql_tables_size_bytes{instance=~\"$instance\", database=~\"$database\"}, table)", "refId": "Q3" },
+        "refresh": 2,
+        "regex": "",
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "current": { "selected": false, "text": ".*", "value": ".*" },
+        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "definition": "label_values(postgresql_tables_size_bytes{instance=~\"$instance\", database=~\"$database\"}, index)",
+        "hide": 2,
+        "includeAll": true,
+        "label": "Index",
+        "multi": true,
+        "name": "index",
+        "options": [],
+        "query": { "query": "label_values(postgresql_tables_size_bytes{instance=~\"$instance\", database=~\"$database\"}, index)", "refId": "Q4" },
+        "refresh": 2,
+        "regex": "",
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "current": { "selected": false, "text": ".*", "value": ".*" },
+        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "definition": "label_values(postgresql_tables_size_bytes{instance=~\"$instance\", database=~\"$database\"}, tablespace)",
+        "hide": 2,
+        "includeAll": true,
+        "label": "Tablespace",
+        "multi": true,
+        "name": "tablespace",
+        "options": [],
+        "query": { "query": "label_values(postgresql_tables_size_bytes{instance=~\"$instance\", database=~\"$database\"}, tablespace)", "refId": "Q5" },
+        "refresh": 2,
+        "regex": "",
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "current": { "selected": false, "text": ".*", "value": ".*" },
+        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "definition": "label_values(postgresql_functions_calls_total{instance=~\"$instance\", database=~\"$database\"}, function)",
+        "hide": 2,
+        "includeAll": true,
+        "label": "Function",
+        "multi": true,
+        "name": "function",
+        "options": [],
+        "query": { "query": "label_values(postgresql_functions_calls_total{instance=~\"$instance\", database=~\"$database\"}, function)", "refId": "Q6" },
+        "refresh": 2,
+        "regex": "",
+        "sort": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "time": { "from": "now-6h", "to": "now" },
+  "timezone": "browser",
+  "title": "PostgreSQL (pgpro-otel-collector) – Extended (rate_window + buffercache + topN + blocks)",
+  "uid": "pgpro-otel-extended-rate-window-buffercache-topn-blocks",
+  "version": 1
+}
