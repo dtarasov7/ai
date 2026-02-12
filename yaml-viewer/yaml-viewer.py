@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-yaml_tui_viewer_secure.py
+yaml-viewer.py
 
 Консольная TUI-утилита для просмотра больших YAML файлов в виде интерактивного дерева.
 Поддерживает ленивую загрузку, поиск, фильтрацию и защиту от различных DoS-атак.
 
 Использование:
-    python yaml_tui_viewer_secure.py file1.yaml [file2.yaml ...]
+    python yaml-viewer.py file1.yaml [file2.yaml ...]
 """
 
 import curses
@@ -21,6 +21,9 @@ from collections import OrderedDict
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
+
+__version__ = "1.0.0"
+__author__ = "Tarasov Dmitry"
 
 
 # =============================================================================
@@ -43,7 +46,7 @@ LOAD_BATCH_SIZE = 5
 # Логирование
 # =============================================================================
 # Лог-файл в текущей директории (кросс-платформенность)
-LOG_FILE = Path("yaml_tui_viewer.log").resolve()
+LOG_FILE = Path("yaml-viewer.log").resolve()
 
 def log_error(context: str, exception: Exception):
     """Логирует ошибку в файл с timestamp и traceback."""
@@ -71,9 +74,6 @@ def log_warning(context: str, message: str):
         pass
 
 
-# =============================================================================
-# Исключения
-# =============================================================================
 class SecurityError(Exception):
     """Ошибка безопасности при обработке данных."""
     pass
@@ -89,9 +89,6 @@ class YamlParseError(Exception):
     pass
 
 
-# =============================================================================
-# Безопасность: валидация путей
-# =============================================================================
 def validate_file_path(filepath: str) -> Path:
     """
     Проверяет и нормализует путь к файлу.
@@ -127,9 +124,6 @@ def validate_file_path(filepath: str) -> Path:
     return path
 
 
-# =============================================================================
-# Безопасность: валидация YAML объектов
-# =============================================================================
 def validate_yaml_object(obj: Any, depth: int = 0, path: str = "root") -> None:
     """
     Рекурсивно проверяет YAML объект на опасные конструкции.
@@ -160,9 +154,6 @@ def validate_yaml_object(obj: Any, depth: int = 0, path: str = "root") -> None:
             validate_yaml_object(value, depth + 1, f"{path}.{key}")
 
 
-# =============================================================================
-# Безопасность: защита от ReDoS
-# =============================================================================
 def alarm_handler(signum, frame):
     """Обработчик сигнала таймаута."""
     raise TimeoutError("Операция превысила лимит времени")
@@ -224,13 +215,11 @@ def safe_regex_search(pattern: Optional[re.Pattern], text: str,
             signal.alarm(0)
 
 
-# =============================================================================
-# YAML парсер (код парсера без изменений)
-# =============================================================================
 def simple_yaml_load(text: str) -> Any:
     lines = text.strip().split('\n')
     result, _ = _parse_yaml_lines(lines, 0)
     return result
+
 
 def _parse_block_scalar(lines: List[str], line_idx: int, base_indent: int, block_style: str) -> str:
     block_lines = []
@@ -293,6 +282,7 @@ def _parse_block_scalar(lines: List[str], line_idx: int, base_indent: int, block
 
     return result
 
+
 def _is_block_scalar_indicator(text: str) -> bool:
     text = text.strip()
     if not text:
@@ -309,6 +299,7 @@ def _is_block_scalar_indicator(text: str) -> bool:
             return False
 
     return True
+
 
 def _parse_yaml_lines(lines: List[str], start_idx: int, parent_indent: int = -1) -> Tuple[Any, int]:
     result = {}
@@ -504,6 +495,7 @@ def _parse_yaml_lines(lines: List[str], start_idx: int, parent_indent: int = -1)
 
     return result, i
 
+
 def _parse_yaml_value(text: str) -> Any:
     text = text.strip()
 
@@ -527,6 +519,7 @@ def _parse_yaml_value(text: str) -> Any:
 
     return text
 
+
 def split_yaml_documents(filepath: Path) -> List[Tuple[int, int]]:
     documents = []
     start_line = 0
@@ -546,9 +539,6 @@ def split_yaml_documents(filepath: Path) -> List[Tuple[int, int]]:
     return documents if documents else [(0, len(lines) - 1)]
 
 
-# =============================================================================
-# Вспомогательные функции
-# =============================================================================
 def wrap_text(text: str, width: int, indent: int = 0) -> List[str]:
     if width <= indent:
         return [text[:width]]
@@ -729,9 +719,6 @@ class YamlNode:
             return str(self.value)
 
 
-# =============================================================================
-# Класс для работы с YAML файлом
-# =============================================================================
 class YamlFile:
     def __init__(self, filepath: Path):
         self.filepath = filepath
@@ -829,9 +816,6 @@ class YamlFile:
         return obj
 
 
-# =============================================================================
-# Главный класс TUI приложения
-# =============================================================================
 class YamlTuiViewer:
     def __init__(self, stdscr, yaml_files: List[YamlFile]):
         self.stdscr = stdscr
@@ -960,7 +944,7 @@ class YamlTuiViewer:
         return result
 
     def _ensure_cursor_visible(self):
-        """ИСПРАВЛЕНИЕ: Обеспечивает видимость курсора на экране."""
+        """Обеспечивает видимость курсора на экране."""
         height = self.stdscr.getmaxyx()[0] - 4
 
         if self.cursor_pos < self.scroll_offset:
@@ -1074,7 +1058,7 @@ class YamlTuiViewer:
         elif key in (curses.KEY_DOWN, ord('j')):
             self._move_cursor(1)
 
-        # НОВОЕ: Постраничная навигация
+        # Постраничная навигация
         elif key == ord('n'):  # Page Down
             self._page_down()
         elif key == ord('p'):  # Page Up
@@ -1123,7 +1107,7 @@ class YamlTuiViewer:
         return True
 
     def _page_down(self):
-        """НОВОЕ: Перемещение на страницу вниз."""
+        """ Перемещение на страницу вниз."""
         if not self.flat_list:
             return
 
@@ -1140,7 +1124,7 @@ class YamlTuiViewer:
                     self._rebuild_flat_list()
 
     def _page_up(self):
-        """НОВОЕ: Перемещение на страницу вверх."""
+        """Перемещение на страницу вверх."""
         if not self.flat_list:
             return
 
@@ -1196,7 +1180,7 @@ class YamlTuiViewer:
             self._ensure_cursor_visible()
 
     def _collapse_current(self):
-        """ИСПРАВЛЕНИЕ: Улучшенное сворачивание с автоматическим переходом к родителю."""
+        """Улучшенное сворачивание с автоматическим переходом к родителю."""
         if not self.flat_list:
             return
 
@@ -1401,7 +1385,7 @@ class YamlTuiViewer:
             self._ensure_cursor_visible()
 
     def _goto_last_object(self):
-        """ИСПРАВЛЕНИЕ: Загружаем все объекты и переходим к последнему."""
+        """Загружаем все объекты и переходим к последнему."""
         global_idx = 0
         for file_idx, yaml_file in enumerate(self.yaml_files):
             for obj_idx in range(len(yaml_file)):
@@ -1789,8 +1773,10 @@ def main(stdscr, filepaths: List[Path]):
 
 
 if __name__ == "__main__":
+    print(f"Консольная TUI-утилита для просмотра больших YAML файлов. Version {__version__}")
+
     if len(sys.argv) < 2:
-        print("Использование: python yaml_tui_viewer_secure.py file1.yaml [file2.yaml ...]")
+        print("Использование: python yaml-viewer.py file1.yaml [file2.yaml ...]")
         sys.exit(1)
 
     try:

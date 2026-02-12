@@ -22,8 +22,8 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.backends import default_backend
 from cryptography.fernet import Fernet
 
-__version__ = "v1.8.0"
-__AUTHOR__ = "Taraasov Dmitry"
+__version__ = "v1.8.1"
+__AUTHOR__ = "Tarasov Dmitry"
 
 class SelectableText(urwid.Text):
     _selectable = True
@@ -77,18 +77,6 @@ class MsgRow(SelectableText):
         self.key = key
         self.raw_value = raw_value
         self.raw_key = raw_key
-
-
-# Message row widget: keeps metadata for footer & full view
-# class MsgRow(SelectableText):
-#     def __init__(self, summary_line, full_text, topic, partition, offset, timestamp=None, key=None):
-#         super().__init__(summary_line)
-#         self.full_text = full_text
-#         self.topic = topic
-#         self.partition = partition
-#         self.offset = offset
-#         self.timestamp = timestamp
-#         self.key = key
 
 
 class DynamicMsgListBox(urwid.ListBox):
@@ -1102,16 +1090,6 @@ class KafkaViewerApp:
             urwid.AttrMap(urwid.Button("Preview (Dry Run)", on_press=on_preview), "btn", focus_map="btn_focus"),
             urwid.AttrMap(urwid.Button("Cancel", on_press=on_cancel), "btn", focus_map="btn_focus"),
         ])
-
-        # # Обертка для обработки ESC внутри этого диалога
-        # class ResetPile(urwid.Pile):
-        #     def keypress(self, size, key):
-        #         if key == 'esc':
-        #             on_cancel(None)
-        #             return None
-        #         return super().keypress(size, key)
-        #
-        # wrapped_pile = ResetPile(pile.contents)
 
         original_keypress = pile.keypress
 
