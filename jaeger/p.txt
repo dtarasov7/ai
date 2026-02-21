@@ -1,0 +1,1 @@
+﻿jaeger-spark-dependencies.jar
