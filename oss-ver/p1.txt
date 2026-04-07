@@ -1,0 +1,118 @@
+﻿
+текст
+
+import argparse
+import csv
+import sys
+import time
+from pathlib import Path
+from typing import List
+
+
+# Имена меток задаются заранее в коде.
+# Первое поле CSV -> первая метка из списка, второе поле -> вторая и т.д.
+LABEL_NAMES = [
+    "label1",
+    "label2",
+    "label3",
+]
+
+
+def escape_label_value(value: str) -> str:
+    """Экранирует значение метки для формата Prometheus."""
+    return (
+        value.replace("\\", "\\\\")
+        .replace("\n", "\\n")
+        .replace('"', '\\"')
+    )
+
+
+def build_metric_line(metric_name: str, label_names: List[str], row: List[str], timestamp: int) -> str:
+    """Собирает одну строку метрики Prometheus."""
+    if len(row) < len(label_names):
+        raise ValueError(
+            f"В строке CSV недостаточно полей: ожидалось минимум {len(label_names)}, получено {len(row)}"
+        )
+
+    labels = []
+    for label_name, field_value in zip(label_names, row):
+        labels.append(f'{label_name}="{escape_label_value(field_value.strip())}"')
+
+    return f'{metric_name}{{{",".join(labels)}}} {timestamp}'
+
+
+def process_csv_file(csv_file: Path, metric_name: str, label_names: List[str], timestamp: int) -> List[str]:
+    """Читает CSV-файл и преобразует его строки в метрики."""
+    metrics = []
+
+    with csv_file.open("r", encoding="utf-8", newline="") as f:
+        reader = csv.reader(f)
+        for line_number, row in enumerate(reader, start=1):
+            if not row:
+                continue
+            if all(not field.strip() for field in row):
+                continue
+
+            try:
+                metric_line = build_metric_line(metric_name, label_names, row, timestamp)
+                metrics.append(metric_line)
+            except ValueError as e:
+                raise ValueError(f"{csv_file}:{line_number}: {e}") from e
+
+    return metrics
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Читает все CSV-файлы из директории и записывает метрики Prometheus в .prom файл"
+    )
+    parser.add_argument(
+        "input_dir",
+        help="Путь к директории с CSV-файлами",
+    )
+    parser.add_argument(
+        "output_file",
+        help="Путь к выходному .prom файлу",
+    )
+    args = parser.parse_args()
+
+    input_dir = Path(args.input_dir)
+    output_file = Path(args.output_file)
+
+    if not input_dir.exists():
+        print(f"Ошибка: директория не существует: {input_dir}", file=sys.stderr)
+        return 1
+
+    if not input_dir.is_dir():
+        print(f"Ошибка: путь не является директорией: {input_dir}", file=sys.stderr)
+        return 1
+
+    metric_name = "oss_version"
+    timestamp = int(time.time())
+
+    all_metrics = [
+        f"# HELP {metric_name} CSV data exported as Prometheus metric",
+        f"# TYPE {metric_name} gauge",
+    ]
+
+    csv_files = sorted(input_dir.glob("*.csv"))
+    if not csv_files:
+        print(f"Предупреждение: в директории {input_dir} нет CSV-файлов", file=sys.stderr)
+
+    try:
+        for csv_file in csv_files:
+            all_metrics.extend(
+                process_csv_file(csv_file, metric_name, LABEL_NAMES, timestamp)
+            )
+
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        output_file.write_text("\n".join(all_metrics) + "\n", encoding="utf-8")
+    except Exception as e:
+        print(f"Ошибка: {e}", file=sys.stderr)
+        return 1
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
