@@ -1,0 +1,21 @@
+services:
+  plantuml:
+   container_name: plantuml
+   restart: always
+   image: plantuml/plantuml-server:jetty
+
+  nginx:
+   container_name: nt
+   restart: always
+ #  image: nginx:1.29.3
+   image: openresty/openresty:alpine
+   depends_on:
+   - plantuml
+   volumes:
+   - ./conf.d:/etc/nginx/conf.d:ro
+   - ./data:/usr/share/nginx/html:ro
+   - ./data2:/usr/share/nginx/html2:ro
+   - ./ssl/self.cert:/etc/nginx/ssl/self.cert:ro
+   - ./ssl/self-ssl.key:/etc/nginx/ssl/self-ssl.key:ro
+   ports:
+   - 19443:443

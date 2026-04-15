@@ -1,4 +1,3 @@
-# Глава 13: Multimodal RAG
 
 - Глава 13: Multimodal RAG
   - Краткое содержание главы

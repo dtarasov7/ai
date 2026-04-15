@@ -1,4 +1,3 @@
-# Глава 4. Очистка и контроль качества (Deduplication, PII Маскирование, Benchmark Decontamination)
 
 - Глава 4. Очистка и контроль качества (Deduplication, PII Маскирование, Benchmark Decontamination)
   - Краткое содержание главы

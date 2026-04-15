@@ -1,4 +1,3 @@
-# Глава 5: Tokenization, Serialization и эффективная загрузка (оптимизация DataLoader)
 
 - Глава 5: Tokenization, Serialization и эффективная загрузка (оптимизация DataLoader)
   - Краткое содержание главы

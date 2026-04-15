@@ -247,7 +247,7 @@
         <div class="toolbar-buttons">
             <div class="toolbar-meta">
                 <span class="shortcut-hint" id="fold-status">All levels are expanded. Keys: 2-5 set visible depth, 0 expands all</span>
-                <span class="shortcut-hint" id="presentation-status">Presentation mode off. Press N/P after enabling it</span>
+                <span class="shortcut-hint" id="presentation-status">Presentation mode off. Press M to enable it, then use 2-5 and N/P</span>
             </div>
             <button id="zoom-in">Zoom In</button>
             <button id="zoom-out">Zoom Out</button>
@@ -270,21 +270,21 @@
             <div class="setting-group">
                 <div class="setting-label">
                     <span>Animation Duration</span>
-                    <span class="setting-value" id="duration-value">500</span>
+                    <span class="setting-value" id="duration-value">0</span>
                 </div>
                 <input type="range" class="setting-slider" id="duration-slider" 
-                       min="0" max="2000" value="500" step="50">
+                       min="0" max="2000" value="0" step="100">
                 <div class="settings-description">Animation speed in milliseconds</div>
             </div>
             
             <div class="setting-group">
                 <div class="setting-label">
-                    <span>Max Width</span>
-                    <span class="setting-value" id="maxWidth-value">500</span>
+                    <span>Wrap Width</span>
+                    <span class="setting-value" id="wrapWidth-value">28</span>
                 </div>
-                <input type="range" class="setting-slider" id="maxWidth-slider" 
-                       min="100" max="800" value="500" step="10">
-                <div class="settings-description">Maximum width of node content</div>
+                <input type="range" class="setting-slider" id="wrapWidth-slider" 
+                       min="4" max="150" value="28" step="1">
+                <div class="settings-description">Browser-side wrap width for non-root nodes in characters</div>
             </div>
             
             <div class="setting-group">
@@ -327,15 +327,20 @@
 
     <script>
         let markmapInstance = null;
+        let sourceTreeData = null;
         let sourceRoot = null;
         let currentRoot = null;
         let currentFoldLevel = null;
         let presentationMode = false;
         let presentationBranchIndex = 0;
+        let presentationFocusLevel = 2;
+        let presentationChildIndices = {};
         let renderVersion = 0;
+        let baseRootTextWidth = 36;
+        let browserWrapWidth = 28;
         let currentOptions = {
-            duration: 500,
-            maxWidth: 500,
+            duration: 0,
+            maxWidth: 0,
             paddingX: 8,
             nodeMinHeight: 20,
             spacingVertical: 10,
@@ -345,6 +350,7 @@
         };
         
         const defaultOptions = { ...currentOptions };
+        const defaultBrowserWrapWidth = 28;
 
         // Функция для проверки безопасности URL
         function isSecureUrl(url) {
@@ -465,8 +471,137 @@
         function normalizeMarkmapMarkdown(text) {
             return text
                 .split('\n')
+                .filter((line) => !line.trim().match(/^#{1,6}\s+/))
                 .map((line) => line.replace(/^(\s*[-+*]\s+)(\d+)\.\s+(.*)$/, '$1$2\\. $3'))
                 .join('\n');
+        }
+
+        function normalizeNodeText(text) {
+            return String(text || '')
+                .replace(/<br\s*\/?>/gi, '\n')
+                .replace(/\r\n/g, '\n')
+                .replace(/\r/g, '\n');
+        }
+
+        function wrapParagraph(paragraph, width) {
+            if (!paragraph) return [''];
+
+            const words = paragraph.trim().split(/\s+/).filter(Boolean);
+            if (!words.length) return [''];
+
+            const lines = [];
+            let current = '';
+
+            for (const word of words) {
+                if (!current) {
+                    if (word.length <= width) {
+                        current = word;
+                    } else {
+                        for (let index = 0; index < word.length; index += width) {
+                            lines.push(word.slice(index, index + width));
+                        }
+                    }
+                    continue;
+                }
+
+                const candidate = `${current} ${word}`;
+                if (candidate.length <= width) {
+                    current = candidate;
+                    continue;
+                }
+
+                lines.push(current);
+                if (word.length <= width) {
+                    current = word;
+                } else {
+                    current = '';
+                    for (let index = 0; index < word.length; index += width) {
+                        lines.push(word.slice(index, index + width));
+                    }
+                }
+            }
+
+            if (current) lines.push(current);
+            return lines.length ? lines : [''];
+        }
+
+        function wrapTextWithBreaks(text, width) {
+            const paragraphs = normalizeNodeText(text).split('\n');
+            const lines = [];
+
+            for (const paragraph of paragraphs) {
+                if (!paragraph) {
+                    lines.push('');
+                    continue;
+                }
+                lines.push(...wrapParagraph(paragraph, Math.max(4, width)));
+            }
+
+            return lines.join('<br>');
+        }
+
+        function escapeOrderedListPrefix(text) {
+            return text.replace(/^(\d+)\.\s+/g, '$1\\. ');
+        }
+
+        function formatNodeContent(text, depth, rootTextWidth, maxTextWidth) {
+            const width = depth === 0 ? rootTextWidth : maxTextWidth;
+            return wrapTextWithBreaks(normalizeNodeText(text), width);
+        }
+
+        function markmapRootToPlainTree(node) {
+            if (!node) return null;
+            return {
+                content: normalizeNodeText(node.content || ''),
+                children: (node.children || []).map(markmapRootToPlainTree).filter(Boolean)
+            };
+        }
+
+        function treeToMarkmapMarkdown(node, depth = 0, rootTextWidth = 36, maxTextWidth = 28) {
+            if (!node) return '';
+
+            if (depth === 0 && !normalizeNodeText(node.content).trim() && node.children?.length) {
+                return node.children
+                    .map((child) => treeToMarkmapMarkdown(child, 0, rootTextWidth, maxTextWidth))
+                    .filter(Boolean)
+                    .join('\n');
+            }
+
+            const indent = '  '.repeat(depth);
+            const content = escapeOrderedListPrefix(formatNodeContent(node.content, depth, rootTextWidth, maxTextWidth));
+            const lines = [`${indent}- ${content}`];
+
+            for (const child of node.children || []) {
+                lines.push(treeToMarkmapMarkdown(child, depth + 1, rootTextWidth, maxTextWidth));
+            }
+
+            return lines.join('\n');
+        }
+
+        function getEffectiveTextWidths() {
+            return {
+                maxTextWidth: Math.max(4, browserWrapWidth),
+                rootTextWidth: baseRootTextWidth
+            };
+        }
+
+        function rebuildSourceRoot() {
+            if (!sourceTreeData) {
+                sourceRoot = null;
+                return;
+            }
+
+            const { rootTextWidth, maxTextWidth } = getEffectiveTextWidths();
+            const markmapContent = treeToMarkmapMarkdown(sourceTreeData, 0, rootTextWidth, maxTextWidth);
+            if (!markmapContent) {
+                sourceRoot = null;
+                return;
+            }
+
+            const { Transformer } = window.markmap;
+            const transformer = new Transformer();
+            const { root } = transformer.transform(markmapContent);
+            sourceRoot = assignColors(root);
         }
 
         function assignColors(node, depth = 0) {
@@ -530,6 +665,193 @@
             return node;
         }
 
+        function getPresentationCandidatePaths(root, targetLevel = presentationFocusLevel) {
+            const paths = [];
+
+            function walk(node, depth, indexPath) {
+                if (depth === targetLevel) {
+                    paths.push(indexPath);
+                    return;
+                }
+
+                (node.children || []).forEach((child, childIndex) => {
+                    walk(child, depth + 1, [...indexPath, childIndex]);
+                });
+            }
+
+            walk(root, 1, []);
+            return paths;
+        }
+
+        function pathKey(indexPath) {
+            return indexPath.join('/');
+        }
+
+        function getCurrentPresentationIndexPath(root, targetLevel = presentationFocusLevel) {
+            if (!root) return [];
+
+            const branches = root.children || [];
+            if (!branches.length || targetLevel < 2) return [];
+
+            presentationBranchIndex = ((presentationBranchIndex % branches.length) + branches.length) % branches.length;
+            const indexPath = [presentationBranchIndex];
+            let current = branches[presentationBranchIndex];
+
+            for (let level = 3; level <= targetLevel; level += 1) {
+                const children = current.children || [];
+                if (!children.length) break;
+
+                const currentIndex = ((presentationChildIndices[level] || 0) % children.length + children.length) % children.length;
+                presentationChildIndices[level] = currentIndex;
+                indexPath.push(currentIndex);
+                current = children[currentIndex];
+            }
+
+            return indexPath;
+        }
+
+        function applyPresentationIndexPath(indexPath) {
+            if (!indexPath.length) return;
+
+            presentationBranchIndex = indexPath[0];
+            presentationChildIndices = {};
+            indexPath.slice(1).forEach((childIndex, index) => {
+                presentationChildIndices[index + 3] = childIndex;
+            });
+        }
+
+        function getPresentationNodeByPath(root, indexPath) {
+            if (!root) return null;
+
+            let current = root;
+            for (const childIndex of indexPath) {
+                const children = current.children || [];
+                if (!children[childIndex]) return null;
+                current = children[childIndex];
+            }
+
+            return current;
+        }
+
+        function getPresentationPathNodes(root) {
+            if (!root) return [];
+
+            const indexPath = getCurrentPresentationIndexPath(root);
+            const pathNodes = [root];
+            let current = root;
+
+            for (const childIndex of indexPath) {
+                const children = current.children || [];
+                if (!children[childIndex]) break;
+                current = children[childIndex];
+                pathNodes.push(current);
+            }
+
+            return pathNodes;
+        }
+
+        function getActivePresentationNode(root, level = presentationFocusLevel) {
+            return getPresentationNodeByPath(root, getCurrentPresentationIndexPath(root, level));
+        }
+
+        function collectPresentationSubtree(node, bucket) {
+            if (!node) return;
+
+            bucket.add(node);
+            (node.children || []).forEach((child) => collectPresentationSubtree(child, bucket));
+        }
+
+        function applyPresentationMode(root) {
+            const pathNodes = getPresentationPathNodes(root);
+            const activeNode = getActivePresentationNode(root);
+            if (!pathNodes.length || !activeNode) return root;
+
+            const allowedNodes = new Set(pathNodes);
+            collectPresentationSubtree(activeNode, allowedNodes);
+
+            function walk(node) {
+                if (!node || !(node.children || []).length) return;
+
+                if (!node.payload) {
+                    node.payload = {};
+                }
+
+                if (!allowedNodes.has(node)) {
+                    node.payload.fold = 1;
+                    return;
+                }
+
+                delete node.payload.fold;
+                (node.children || []).forEach(walk);
+            }
+
+            walk(root);
+            return root;
+        }
+
+        function applyPresentationStyling() {
+            if (!markmapInstance || !currentRoot) return;
+
+            const svg = document.getElementById('markmap-svg');
+            if (!svg) return;
+
+            const activeNode = presentationMode ? getActivePresentationNode(currentRoot) : null;
+            const activeNodes = new Set();
+            const activePaths = new Set();
+
+            if (presentationMode && activeNode) {
+                getPresentationPathNodes(currentRoot).forEach((node) => activeNodes.add(node));
+                collectPresentationSubtree(activeNode, activeNodes);
+                activeNodes.forEach((node) => {
+                    if (node?.state?.path) {
+                        activePaths.add(node.state.path);
+                    }
+                });
+            }
+
+            svg.querySelectorAll('path.markmap-link').forEach((element) => {
+                const nodePath = element.getAttribute('data-path');
+                const shouldDimLine = Boolean(
+                    presentationMode
+                    && activeNode
+                    && nodePath
+                    && !activePaths.has(nodePath)
+                );
+                const lineOpacity = shouldDimLine ? '0.22' : '1';
+                element.style.opacity = lineOpacity;
+                element.style.strokeOpacity = lineOpacity;
+            });
+
+            svg.querySelectorAll('g.markmap-node').forEach((group) => {
+                const nodePath = group.getAttribute('data-path');
+                const shouldDimNode = Boolean(
+                    presentationMode
+                    && activeNode
+                    && nodePath
+                    && !activePaths.has(nodePath)
+                );
+
+                const textOpacity = shouldDimNode ? '0.42' : '1';
+                const lineOpacity = shouldDimNode ? '0.22' : '1';
+                const foreignObject = group.querySelector('foreignObject');
+                const foreignContent = foreignObject?.querySelector('div');
+                const line = group.querySelector('line');
+                const circle = group.querySelector('circle');
+
+                if (foreignObject) foreignObject.style.opacity = textOpacity;
+                if (foreignContent) foreignContent.style.opacity = textOpacity;
+                if (line) {
+                    line.style.opacity = lineOpacity;
+                    line.style.strokeOpacity = lineOpacity;
+                }
+                if (circle) {
+                    circle.style.opacity = lineOpacity;
+                    circle.style.strokeOpacity = lineOpacity;
+                    circle.style.fillOpacity = lineOpacity;
+                }
+            });
+        }
+
         function buildRenderedRoot() {
             const clonedRoot = cloneNode(sourceRoot);
 
@@ -546,7 +868,7 @@
             if (!status) return;
 
             if (presentationMode) {
-                status.textContent = 'Presentation mode: the active level-2 branch is fully expanded, the others are folded to level 2';
+                status.textContent = `Presentation mode at level ${presentationFocusLevel}. Keys 2-5 change focus depth, N/P move across that level`;
             } else if (currentFoldLevel === null) {
                 status.textContent = 'All levels are expanded. Keys: 2-5 set visible depth, 0 expands all';
             } else if (currentFoldLevel <= 1) {
@@ -562,41 +884,24 @@
             if (!status || !button) return;
 
             if (!presentationMode) {
-                status.textContent = 'Presentation mode off. Press N/P after enabling it';
+                status.textContent = 'Presentation mode off. Press M to enable it, then use 2-5 and N/P';
                 button.textContent = 'Presentation';
                 return;
             }
 
-            const branches = sourceRoot?.children || [];
-            if (!branches.length) {
-                status.textContent = 'Presentation mode on, but there are no level-2 branches';
+            const candidatePaths = getPresentationCandidatePaths(sourceRoot);
+            const currentPath = pathKey(getCurrentPresentationIndexPath(sourceRoot));
+            const currentIndex = Math.max(0, candidatePaths.findIndex((item) => pathKey(item) === currentPath));
+            const activeNode = getActivePresentationNode(sourceRoot);
+            if (!candidatePaths.length || !activeNode) {
+                status.textContent = `Presentation mode on, but there are no level-${presentationFocusLevel} nodes`;
                 button.textContent = 'Exit Presentation';
                 return;
             }
 
-            const currentBranch = branches[presentationBranchIndex];
-            const branchTitle = currentBranch?.content || `Branch ${presentationBranchIndex + 1}`;
-            status.textContent = `Presentation: branch ${presentationBranchIndex + 1}/${branches.length} - ${branchTitle}. Keys: N next, P previous`;
+            const branchTitle = activeNode.content || `Node ${currentIndex + 1}`;
+            status.textContent = `Presentation L${presentationFocusLevel}: ${currentIndex + 1}/${candidatePaths.length} - ${branchTitle}. Keys: N next, P previous`;
             button.textContent = 'Exit Presentation';
-        }
-
-        function applyPresentationMode(root) {
-            const branches = root.children || [];
-            if (!branches.length) return root;
-
-            presentationBranchIndex = ((presentationBranchIndex % branches.length) + branches.length) % branches.length;
-
-            branches.forEach((branch, index) => {
-                if (!branch.payload) {
-                    branch.payload = {};
-                }
-
-                if (index !== presentationBranchIndex && branch.children && branch.children.length > 0) {
-                    branch.payload.fold = 1;
-                }
-            });
-
-            return root;
         }
 
         function getCurrentTransform() {
@@ -665,7 +970,7 @@
         function centerPresentationBranchVertically() {
             if (!presentationMode || !markmapInstance || !currentRoot) return;
 
-            const branch = currentRoot.children?.[presentationBranchIndex];
+            const branch = getActivePresentationNode(currentRoot);
             if (!branch || typeof markmapInstance.findElement !== 'function') return;
 
             try {
@@ -698,6 +1003,7 @@
         }
 
         async function updateMarkmap() {
+            rebuildSourceRoot();
             currentRoot = buildRenderedRoot();
             if (!currentRoot) return;
 
@@ -721,6 +1027,7 @@
 
             updateFoldStatus();
             updatePresentationStatus();
+            applyPresentationStyling();
             
             if (savedTransform) {
                 applyTransform(savedTransform);
@@ -732,6 +1039,7 @@
             if (currentRenderVersion !== renderVersion) return;
 
             centerPresentationBranchVertically();
+            applyPresentationStyling();
         }
 
         function initializeSettings() {
@@ -749,11 +1057,13 @@
 
             const sliders = [
                 { id: 'duration', key: 'duration' },
-                { id: 'maxWidth', key: 'maxWidth' },
                 { id: 'nodeMinHeight', key: 'nodeMinHeight' },
                 { id: 'spacingVertical', key: 'spacingVertical' },
                 { id: 'spacingHorizontal', key: 'spacingHorizontal' }
             ];
+
+            const wrapWidthSlider = document.getElementById('wrapWidth-slider');
+            const wrapWidthValue = document.getElementById('wrapWidth-value');
 
             sliders.forEach(({ id, key }) => {
                 const slider = document.getElementById(`${id}-slider`);
@@ -761,15 +1071,22 @@
 
                 slider.oninput = () => {
                     value.textContent = slider.value;
-                    currentOptions[key] = parseInt(slider.value);
+                    currentOptions[key] = parseInt(slider.value, 10);
                     updateMarkmap();
                 };
             });
+
+            wrapWidthSlider.oninput = () => {
+                wrapWidthValue.textContent = wrapWidthSlider.value;
+                browserWrapWidth = parseInt(wrapWidthSlider.value, 10);
+                updateMarkmap();
+            };
 
             document.getElementById('reset-settings').onclick = () => {
                 const savedTransform = getCurrentTransform();
                 
                 currentOptions = { ...defaultOptions };
+                browserWrapWidth = defaultBrowserWrapWidth;
                 
                 sliders.forEach(({ id, key }) => {
                     const slider = document.getElementById(`${id}-slider`);
@@ -777,6 +1094,9 @@
                     slider.value = defaultOptions[key];
                     value.textContent = defaultOptions[key];
                 });
+
+                wrapWidthSlider.value = defaultBrowserWrapWidth;
+                wrapWidthValue.textContent = defaultBrowserWrapWidth;
 
                 updateMarkmap();
                 
@@ -793,19 +1113,55 @@
 
             presentationMode = !presentationMode;
             if (presentationMode) {
+                currentFoldLevel = null;
+                presentationFocusLevel = 2;
                 presentationBranchIndex = 0;
+                presentationChildIndices = {};
             }
 
+            updateMarkmap();
+        }
+
+        function setPresentationFocusLevel(level) {
+            if (!sourceRoot) return;
+
+            if (!presentationMode) {
+                toggleFoldLevel(level);
+                return;
+            }
+
+            presentationFocusLevel = level;
+            const candidates = getPresentationCandidatePaths(sourceRoot, level);
+            if (!candidates.length) {
+                updateMarkmap();
+                return;
+            }
+
+            const currentPath = getCurrentPresentationIndexPath(sourceRoot, level);
+            const exactMatch = candidates.find((candidate) => pathKey(candidate) === pathKey(currentPath));
+            if (exactMatch) {
+                applyPresentationIndexPath(exactMatch);
+                updateMarkmap();
+                return;
+            }
+
+            const prefixMatch = candidates.find((candidate) => (
+                currentPath.every((part, index) => candidate[index] === part)
+            ));
+            applyPresentationIndexPath(prefixMatch || candidates[0]);
             updateMarkmap();
         }
 
         function stepPresentationBranch(direction) {
             if (!presentationMode || !sourceRoot) return;
 
-            const branches = sourceRoot.children || [];
-            if (!branches.length) return;
+            const candidatePaths = getPresentationCandidatePaths(sourceRoot);
+            if (!candidatePaths.length) return;
 
-            presentationBranchIndex = (presentationBranchIndex + direction + branches.length) % branches.length;
+            const currentPath = pathKey(getCurrentPresentationIndexPath(sourceRoot));
+            const currentIndex = candidatePaths.findIndex((item) => pathKey(item) === currentPath);
+            const nextIndex = ((currentIndex >= 0 ? currentIndex : 0) + direction + candidatePaths.length) % candidatePaths.length;
+            applyPresentationIndexPath(candidatePaths[nextIndex]);
             updateMarkmap();
         }
 
@@ -838,7 +1194,11 @@
 
                 if (['2', '3', '4', '5'].includes(event.key)) {
                     event.preventDefault();
-                    toggleFoldLevel(Number(event.key));
+                    if (presentationMode) {
+                        setPresentationFocusLevel(Number(event.key));
+                    } else {
+                        toggleFoldLevel(Number(event.key));
+                    }
                     return;
                 }
 
@@ -938,38 +1298,23 @@
 
                 let { root } = transformer.transform(markmapContent);
 
-                sourceRoot = assignColors(root);
-                currentRoot = buildRenderedRoot();
+                sourceTreeData = markmapRootToPlainTree(root);
+                rebuildSourceRoot();
 
-                console.log('Parsed tree with colors:', sourceRoot);
-
-                const svg = document.getElementById('markmap-svg');
-                const { Markmap } = window.markmap;
-
-                markmapInstance = Markmap.create(svg, {
-                    ...currentOptions,
-                    autoFit: true,
-                    color: (node) => node.payload?.color || '#5E35B1'
-                });
-
-                await Promise.resolve(markmapInstance.setData(currentRoot));
-                markmapInstance.fit();
-                updateFoldStatus();
-                updatePresentationStatus();
-
-                currentOptions.autoFit = false;
+                console.log('Parsed source tree:', sourceTreeData);
 
                 document.getElementById('zoom-in').onclick = () => {
-                    markmapInstance.rescale(1.25);
+                    if (markmapInstance) markmapInstance.rescale(1.25);
                 };
                 document.getElementById('zoom-out').onclick = () => {
-                    markmapInstance.rescale(0.8);
+                    if (markmapInstance) markmapInstance.rescale(0.8);
                 };
                 document.getElementById('fit').onclick = () => {
-                    markmapInstance.fit();
+                    if (markmapInstance) markmapInstance.fit();
                 };
 
                 initializeSettings();
+                await updateMarkmap();
 
             } catch (error) {
                 console.error('Markmap error:', error);

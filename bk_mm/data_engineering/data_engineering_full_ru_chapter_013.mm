@@ -1,4 +1,3 @@
-# Глава 12: RAG Data Pipeline
 
 - Глава 12: RAG Data Pipeline
   - Краткое содержание главы
