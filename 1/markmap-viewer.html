@@ -1,0 +1,985 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Markmap Viewer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: #f6f8fa;
+            overflow: hidden;
+        }
+        .toolbar {
+            background: #24292e;
+            color: white;
+            padding: 15px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .toolbar h1 {
+            margin: 0;
+            font-size: 18px;
+            font-weight: 600;
+        }
+        .toolbar-buttons {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+        }
+        .toolbar-meta {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 4px;
+        }
+        .shortcut-hint {
+            font-size: 12px;
+            color: rgba(255,255,255,0.72);
+            white-space: nowrap;
+        }
+        .toolbar a, .toolbar button {
+            color: #58a6ff;
+            text-decoration: none;
+            font-size: 14px;
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 5px 10px;
+            border-radius: 4px;
+            transition: background 0.2s;
+        }
+        .toolbar a:hover, .toolbar button:hover {
+            background: rgba(255,255,255,0.1);
+        }
+        
+        .settings-panel {
+            position: absolute;
+            top: 60px;
+            right: -350px;
+            width: 350px;
+            height: calc(100vh - 60px);
+            background: #ffffff;
+            box-shadow: -2px 0 8px rgba(0,0,0,0.15);
+            transition: right 0.3s ease;
+            z-index: 1000;
+            overflow-y: auto;
+        }
+        .settings-panel.active {
+            right: 0;
+        }
+        .settings-header {
+            background: #f6f8fa;
+            padding: 15px 20px;
+            border-bottom: 1px solid #e1e4e8;
+            font-weight: 600;
+            font-size: 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .settings-content {
+            padding: 20px;
+        }
+        .setting-group {
+            margin-bottom: 25px;
+        }
+        .setting-label {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+            font-size: 14px;
+            color: #24292e;
+            font-weight: 500;
+        }
+        .setting-value {
+            background: #f6f8fa;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 12px;
+            color: #0366d6;
+            min-width: 45px;
+            text-align: center;
+        }
+        .setting-slider {
+            width: 100%;
+            height: 6px;
+            -webkit-appearance: none;
+            appearance: none;
+            background: #e1e4e8;
+            border-radius: 3px;
+            outline: none;
+            transition: background 0.2s;
+        }
+        .setting-slider:hover {
+            background: #d1d5da;
+        }
+        .setting-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 16px;
+            height: 16px;
+            background: #0366d6;
+            cursor: pointer;
+            border-radius: 50%;
+            transition: background 0.2s;
+        }
+        .setting-slider::-webkit-slider-thumb:hover {
+            background: #0256c7;
+        }
+        .setting-slider::-moz-range-thumb {
+            width: 16px;
+            height: 16px;
+            background: #0366d6;
+            cursor: pointer;
+            border-radius: 50%;
+            transition: background 0.2s;
+        }
+        .setting-slider::-moz-range-thumb:hover {
+            background: #0256c7;
+        }
+        .settings-description {
+            font-size: 12px;
+            color: #586069;
+            margin-top: 5px;
+        }
+        .reset-button {
+            width: 100%;
+            padding: 10px;
+            background: #f6f8fa;
+            border: 1px solid #e1e4e8;
+            border-radius: 6px;
+            color: #24292e;
+            font-size: 14px;
+            cursor: pointer;
+            transition: background 0.2s;
+            margin-top: 20px;
+        }
+        .reset-button:hover {
+            background: #e1e4e8;
+        }
+        .close-settings {
+            background: none;
+            border: none;
+            font-size: 20px;
+            cursor: pointer;
+            color: #586069;
+            padding: 0;
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .close-settings:hover {
+            color: #24292e;
+        }
+        
+        #settings-toggle {
+            background: #0366d6;
+            color: white;
+            padding: 6px 12px;
+            border-radius: 6px;
+        }
+        #settings-toggle:hover {
+            background: #0256c7;
+        }
+        
+        #markmap-container {
+            width: 100vw;
+            height: calc(100vh - 60px);
+            background: white;
+            position: relative;
+        }
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: calc(100vh - 60px);
+            font-size: 18px;
+            color: #666;
+        }
+        .error {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: calc(100vh - 60px);
+            padding: 20px;
+        }
+        .error-content {
+            background: #ffebee;
+            color: #c62828;
+            padding: 30px;
+            border-radius: 8px;
+            border-left: 4px solid #c62828;
+            max-width: 600px;
+        }
+        svg {
+            width: 100%;
+            height: 100%;
+        }
+        .markmap-foreign pre {
+            background: #f6f8fa;
+            padding: 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            overflow-x: auto;
+            margin: 4px 0;
+        }
+        .markmap-foreign code {
+            font-family: 'Courier New', Courier, monospace;
+            color: #24292e;
+        }
+    </style>
+</head>
+<body>
+    <div class="toolbar">
+        <h1 id="filename">Loading...</h1>
+        <div class="toolbar-buttons">
+            <div class="toolbar-meta">
+                <span class="shortcut-hint" id="fold-status">All levels are expanded. Keys: 2-5 set visible depth, 0 expands all</span>
+                <span class="shortcut-hint" id="presentation-status">Presentation mode off. Press N/P after enabling it</span>
+            </div>
+            <button id="zoom-in">Zoom In</button>
+            <button id="zoom-out">Zoom Out</button>
+            <button id="fit">Fit</button>
+            <button id="presentation-toggle">Presentation</button>
+            <button id="settings-toggle">Settings</button>
+            <a href="#" id="raw-link">View Raw</a>
+        </div>
+    </div>
+    <div id="markmap-container">
+        <div class="loading">Loading mind map...</div>
+    </div>
+    
+    <div class="settings-panel" id="settings-panel">
+        <div class="settings-header">
+            <span>Markmap Settings</span>
+            <button class="close-settings" id="close-settings">&times;</button>
+        </div>
+        <div class="settings-content">
+            <div class="setting-group">
+                <div class="setting-label">
+                    <span>Animation Duration</span>
+                    <span class="setting-value" id="duration-value">500</span>
+                </div>
+                <input type="range" class="setting-slider" id="duration-slider" 
+                       min="0" max="2000" value="500" step="50">
+                <div class="settings-description">Animation speed in milliseconds</div>
+            </div>
+            
+            <div class="setting-group">
+                <div class="setting-label">
+                    <span>Max Width</span>
+                    <span class="setting-value" id="maxWidth-value">500</span>
+                </div>
+                <input type="range" class="setting-slider" id="maxWidth-slider" 
+                       min="100" max="800" value="500" step="10">
+                <div class="settings-description">Maximum width of node content</div>
+            </div>
+            
+            <div class="setting-group">
+                <div class="setting-label">
+                    <span>Node Min Height</span>
+                    <span class="setting-value" id="nodeMinHeight-value">10</span>
+                </div>
+                <input type="range" class="setting-slider" id="nodeMinHeight-slider" 
+                       min="5" max="100" value="10" step="5">
+                <div class="settings-description">Minimum height of nodes</div>
+            </div>
+            
+            <div class="setting-group">
+                <div class="setting-label">
+                    <span>Vertical Spacing</span>
+                    <span class="setting-value" id="spacingVertical-value">5</span>
+                </div>
+                <input type="range" class="setting-slider" id="spacingVertical-slider" 
+                       min="0" max="100" value="5" step="5">
+                <div class="settings-description">Space between nodes vertically</div>
+            </div>
+            
+            <div class="setting-group">
+                <div class="setting-label">
+                    <span>Horizontal Spacing</span>
+                    <span class="setting-value" id="spacingHorizontal-value">70</span>
+                </div>
+                <input type="range" class="setting-slider" id="spacingHorizontal-slider" 
+                       min="20" max="500" value="70" step="10">
+                <div class="settings-description">Space between nodes horizontally</div>
+            </div>
+            
+            <button class="reset-button" id="reset-settings">Reset to Defaults</button>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/markmap-view@0.15.4/dist/browser/index.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/markmap-lib@0.15.4/dist/browser/index.js"></script>
+
+    <script>
+        let markmapInstance = null;
+        let sourceRoot = null;
+        let currentRoot = null;
+        let currentFoldLevel = null;
+        let presentationMode = false;
+        let presentationBranchIndex = 0;
+        let renderVersion = 0;
+        let currentOptions = {
+            duration: 500,
+            maxWidth: 500,
+            paddingX: 8,
+            nodeMinHeight: 20,
+            spacingVertical: 10,
+            spacingHorizontal: 70,
+            autoFit: false,
+            embedGlobalCSS: true
+        };
+        
+        const defaultOptions = { ...currentOptions };
+
+        // Функция для проверки безопасности URL
+        function isSecureUrl(url) {
+            try {
+                const urlObj = new URL(url, window.location.origin);
+                
+                // Проверяем, что это тот же origin
+                if (urlObj.origin !== window.location.origin) {
+                    console.error('Security: External URL blocked', urlObj.origin);
+                    return false;
+                }
+                
+                // Проверяем, что путь не содержит опасных последовательностей
+                const path = urlObj.pathname;
+                const normalizedPath = path.replace(/\/+/g, '/');
+                
+                if (normalizedPath.includes('..')) {
+                    console.error('Security: Path traversal blocked');
+                    return false;
+                }
+                
+                return true;
+            } catch (e) {
+                console.error('Security: Invalid URL', e);
+                return false;
+            }
+        }
+
+        function extractMarkmapContent(text) {
+            const lines = text.split('\n');
+            let inMarkdownBlock = false;
+            let nestedCodeBlockCount = 0;
+            let markmapLines = [];
+            let contentLines = [];
+
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
+                const trimmedLine = line.trim();
+
+                if (!inMarkdownBlock && trimmedLine.startsWith('```markdown')) {
+                    inMarkdownBlock = true;
+                    contentLines = [];
+                    continue;
+                }
+
+                if (inMarkdownBlock) {
+                    if (trimmedLine.startsWith('```') && trimmedLine !== '```') {
+                        nestedCodeBlockCount++;
+                        contentLines.push(line);
+                        continue;
+                    }
+
+                    if (trimmedLine === '```') {
+                        if (nestedCodeBlockCount > 0) {
+                            nestedCodeBlockCount--;
+                            contentLines.push(line);
+                        } else {
+                            markmapLines = contentLines;
+                            break;
+                        }
+                        continue;
+                    }
+
+                    contentLines.push(line);
+                }
+            }
+
+            if (markmapLines.length > 0) {
+                console.log('Found markdown block, extracting content');
+                return markmapLines.join('\n').trim();
+            }
+
+            inMarkdownBlock = false;
+            nestedCodeBlockCount = 0;
+            contentLines = [];
+
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
+                const trimmedLine = line.trim();
+
+                if (!inMarkdownBlock && trimmedLine === '```') {
+                    inMarkdownBlock = true;
+                    contentLines = [];
+                    continue;
+                }
+
+                if (inMarkdownBlock) {
+                    if (trimmedLine.startsWith('```') && trimmedLine !== '```') {
+                        nestedCodeBlockCount++;
+                        contentLines.push(line);
+                        continue;
+                    }
+
+                    if (trimmedLine === '```') {
+                        if (nestedCodeBlockCount > 0) {
+                            nestedCodeBlockCount--;
+                            contentLines.push(line);
+                        } else {
+                            markmapLines = contentLines;
+                            break;
+                        }
+                        continue;
+                    }
+
+                    contentLines.push(line);
+                }
+            }
+
+            if (markmapLines.length > 0) {
+                console.log('Found code block without language marker, extracting content');
+                return markmapLines.join('\n').trim();
+            }
+
+            console.log('No outer code blocks found, using entire content');
+            return text.trim();
+        }
+
+        function normalizeMarkmapMarkdown(text) {
+            return text
+                .split('\n')
+                .map((line) => line.replace(/^(\s*[-+*]\s+)(\d+)\.\s+(.*)$/, '$1$2\\. $3'))
+                .join('\n');
+        }
+
+        function assignColors(node, depth = 0) {
+            const colors = ['#5E35B1', '#1E88E5', '#43A047', '#FB8C00', '#E53935', '#8E24AA', '#00ACC1'];
+
+            if (!node.payload) {
+                node.payload = {};
+            }
+
+            node.payload.color = colors[depth % colors.length];
+
+            if (node.children && node.children.length > 0) {
+                node.children.forEach(child => assignColors(child, depth + 1));
+            }
+
+            return node;
+        }
+
+        function cloneNode(node) {
+            if (!node) return null;
+
+            return {
+                ...node,
+                payload: node.payload ? { ...node.payload } : undefined,
+                state: node.state ? { ...node.state } : undefined,
+                children: (node.children || []).map(cloneNode)
+            };
+        }
+
+        function clearFoldFlags(node) {
+            if (!node) return node;
+
+            if (node.payload && node.payload.fold) {
+                delete node.payload.fold;
+            }
+
+            if (node.children && node.children.length > 0) {
+                node.children.forEach(clearFoldFlags);
+            }
+
+            return node;
+        }
+
+        function applyFoldLevel(node, foldLevel, depth = 1) {
+            if (!node) return node;
+
+            if (!node.payload) {
+                node.payload = {};
+            }
+
+            if (node.children && node.children.length > 0 && foldLevel && depth >= foldLevel) {
+                node.payload.fold = 1;
+            } else if (node.payload.fold) {
+                delete node.payload.fold;
+            }
+
+            if (node.children && node.children.length > 0) {
+                node.children.forEach((child) => applyFoldLevel(child, foldLevel, depth + 1));
+            }
+
+            return node;
+        }
+
+        function buildRenderedRoot() {
+            const clonedRoot = cloneNode(sourceRoot);
+
+            if (!clonedRoot) return null;
+            clearFoldFlags(clonedRoot);
+            if (presentationMode) return applyPresentationMode(clonedRoot);
+            if (!currentFoldLevel) return clonedRoot;
+
+            return applyFoldLevel(clonedRoot, currentFoldLevel);
+        }
+
+        function updateFoldStatus() {
+            const status = document.getElementById('fold-status');
+            if (!status) return;
+
+            if (presentationMode) {
+                status.textContent = 'Presentation mode: the active level-2 branch is fully expanded, the others are folded to level 2';
+            } else if (currentFoldLevel === null) {
+                status.textContent = 'All levels are expanded. Keys: 2-5 set visible depth, 0 expands all';
+            } else if (currentFoldLevel <= 1) {
+                status.textContent = 'Only the root level is visible. Press 2-5 to open deeper levels, 0 to expand all';
+            } else {
+                status.textContent = `Visible up to level ${currentFoldLevel}. Press ${currentFoldLevel} to close it, 0 to expand all`;
+            }
+        }
+
+        function updatePresentationStatus() {
+            const status = document.getElementById('presentation-status');
+            const button = document.getElementById('presentation-toggle');
+            if (!status || !button) return;
+
+            if (!presentationMode) {
+                status.textContent = 'Presentation mode off. Press N/P after enabling it';
+                button.textContent = 'Presentation';
+                return;
+            }
+
+            const branches = sourceRoot?.children || [];
+            if (!branches.length) {
+                status.textContent = 'Presentation mode on, but there are no level-2 branches';
+                button.textContent = 'Exit Presentation';
+                return;
+            }
+
+            const currentBranch = branches[presentationBranchIndex];
+            const branchTitle = currentBranch?.content || `Branch ${presentationBranchIndex + 1}`;
+            status.textContent = `Presentation: branch ${presentationBranchIndex + 1}/${branches.length} - ${branchTitle}. Keys: N next, P previous`;
+            button.textContent = 'Exit Presentation';
+        }
+
+        function applyPresentationMode(root) {
+            const branches = root.children || [];
+            if (!branches.length) return root;
+
+            presentationBranchIndex = ((presentationBranchIndex % branches.length) + branches.length) % branches.length;
+
+            branches.forEach((branch, index) => {
+                if (!branch.payload) {
+                    branch.payload = {};
+                }
+
+                if (index !== presentationBranchIndex && branch.children && branch.children.length > 0) {
+                    branch.payload.fold = 1;
+                }
+            });
+
+            return root;
+        }
+
+        function getCurrentTransform() {
+            if (!markmapInstance) return null;
+            
+            try {
+                const svg = document.getElementById('markmap-svg');
+                if (!svg) return null;
+                
+                const g = svg.querySelector('g');
+                if (!g) return null;
+                
+                const transform = g.getAttribute('transform');
+                if (!transform) return null;
+                
+                const match = transform.match(/translate\(([^,]+),([^)]+)\)\s*scale\(([^)]+)\)/);
+                if (match) {
+                    return {
+                        x: parseFloat(match[1]),
+                        y: parseFloat(match[2]),
+                        scale: parseFloat(match[3])
+                    };
+                }
+                
+                return null;
+            } catch (e) {
+                console.error('Error getting transform:', e);
+                return null;
+            }
+        }
+
+        function applyTransform(transform) {
+            if (!transform || !markmapInstance) return;
+            
+            try {
+                const svg = document.getElementById('markmap-svg');
+                if (!svg) return;
+                
+                const g = svg.querySelector('g');
+                if (!g) return;
+                
+                const transformStr = `translate(${transform.x},${transform.y}) scale(${transform.scale})`;
+                g.setAttribute('transform', transformStr);
+                
+                if (markmapInstance.state) {
+                    markmapInstance.state.data = {
+                        ...markmapInstance.state.data,
+                        x: transform.x,
+                        y: transform.y,
+                        scale: transform.scale
+                    };
+                }
+            } catch (e) {
+                console.error('Error applying transform:', e);
+            }
+        }
+
+        function waitForNextFrame() {
+            return new Promise((resolve) => {
+                requestAnimationFrame(() => {
+                    requestAnimationFrame(resolve);
+                });
+            });
+        }
+
+        function centerPresentationBranchVertically() {
+            if (!presentationMode || !markmapInstance || !currentRoot) return;
+
+            const branch = currentRoot.children?.[presentationBranchIndex];
+            if (!branch || typeof markmapInstance.findElement !== 'function') return;
+
+            try {
+                const svg = document.getElementById('markmap-svg');
+                if (!svg) return;
+
+                const elementInfo = markmapInstance.findElement(branch);
+                if (!elementInfo?.g) return;
+
+                const currentTransform = getCurrentTransform();
+                if (!currentTransform) return;
+
+                const svgRect = svg.getBoundingClientRect();
+                const branchRect = elementInfo.g.getBoundingClientRect();
+                if (!svgRect.height || !branchRect.height) return;
+
+                const svgCenterY = svgRect.top + (svgRect.height / 2);
+                const branchCenterY = branchRect.top + (branchRect.height / 2);
+                const deltaY = svgCenterY - branchCenterY;
+
+                if (Math.abs(deltaY) < 1) return;
+
+                applyTransform({
+                    ...currentTransform,
+                    y: currentTransform.y + deltaY
+                });
+            } catch (e) {
+                console.error('Error centering presentation branch:', e);
+            }
+        }
+
+        async function updateMarkmap() {
+            currentRoot = buildRenderedRoot();
+            if (!currentRoot) return;
+
+            const svg = document.getElementById('markmap-svg');
+            if (!svg) return;
+
+            const savedTransform = getCurrentTransform();
+            const currentRenderVersion = ++renderVersion;
+
+            svg.innerHTML = '';
+
+            const { Markmap } = window.markmap;
+
+            markmapInstance = Markmap.create(svg, {
+                ...currentOptions,
+                color: (node) => node.payload?.color || '#5E35B1'
+            });
+
+            await Promise.resolve(markmapInstance.setData(currentRoot));
+            if (currentRenderVersion !== renderVersion) return;
+
+            updateFoldStatus();
+            updatePresentationStatus();
+            
+            if (savedTransform) {
+                applyTransform(savedTransform);
+            } else {
+                markmapInstance.fit();
+            }
+
+            await waitForNextFrame();
+            if (currentRenderVersion !== renderVersion) return;
+
+            centerPresentationBranchVertically();
+        }
+
+        function initializeSettings() {
+            document.getElementById('settings-toggle').onclick = () => {
+                document.getElementById('settings-panel').classList.toggle('active');
+            };
+
+            document.getElementById('close-settings').onclick = () => {
+                document.getElementById('settings-panel').classList.remove('active');
+            };
+
+            document.getElementById('presentation-toggle').onclick = () => {
+                togglePresentationMode();
+            };
+
+            const sliders = [
+                { id: 'duration', key: 'duration' },
+                { id: 'maxWidth', key: 'maxWidth' },
+                { id: 'nodeMinHeight', key: 'nodeMinHeight' },
+                { id: 'spacingVertical', key: 'spacingVertical' },
+                { id: 'spacingHorizontal', key: 'spacingHorizontal' }
+            ];
+
+            sliders.forEach(({ id, key }) => {
+                const slider = document.getElementById(`${id}-slider`);
+                const value = document.getElementById(`${id}-value`);
+
+                slider.oninput = () => {
+                    value.textContent = slider.value;
+                    currentOptions[key] = parseInt(slider.value);
+                    updateMarkmap();
+                };
+            });
+
+            document.getElementById('reset-settings').onclick = () => {
+                const savedTransform = getCurrentTransform();
+                
+                currentOptions = { ...defaultOptions };
+                
+                sliders.forEach(({ id, key }) => {
+                    const slider = document.getElementById(`${id}-slider`);
+                    const value = document.getElementById(`${id}-value`);
+                    slider.value = defaultOptions[key];
+                    value.textContent = defaultOptions[key];
+                });
+
+                updateMarkmap();
+                
+                if (savedTransform) {
+                    setTimeout(() => {
+                        applyTransform(savedTransform);
+                    }, 10);
+                }
+            };
+        }
+
+        function togglePresentationMode() {
+            if (!sourceRoot) return;
+
+            presentationMode = !presentationMode;
+            if (presentationMode) {
+                presentationBranchIndex = 0;
+            }
+
+            updateMarkmap();
+        }
+
+        function stepPresentationBranch(direction) {
+            if (!presentationMode || !sourceRoot) return;
+
+            const branches = sourceRoot.children || [];
+            if (!branches.length) return;
+
+            presentationBranchIndex = (presentationBranchIndex + direction + branches.length) % branches.length;
+            updateMarkmap();
+        }
+
+        function toggleFoldLevel(level) {
+            if (!sourceRoot) return;
+
+            if (presentationMode) {
+                presentationMode = false;
+            }
+
+            if (currentFoldLevel === null) {
+                currentFoldLevel = level;
+            } else if (currentFoldLevel >= level) {
+                currentFoldLevel = level - 1;
+            } else {
+                currentFoldLevel = level;
+            }
+
+            updateMarkmap();
+        }
+
+        function initializeKeyboardShortcuts() {
+            document.addEventListener('keydown', (event) => {
+                if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) return;
+
+                const target = event.target;
+                if (target && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))) {
+                    return;
+                }
+
+                if (['2', '3', '4', '5'].includes(event.key)) {
+                    event.preventDefault();
+                    toggleFoldLevel(Number(event.key));
+                    return;
+                }
+
+                if (event.key === '0' || event.key === 'Escape') {
+                    if (!currentFoldLevel && !presentationMode) return;
+                    event.preventDefault();
+                    currentFoldLevel = null;
+                    presentationMode = false;
+                    updateMarkmap();
+                    return;
+                }
+
+                if (event.key === 'n' || event.key === 'N' || event.key === 'т' || event.key === 'Т') {
+                    if (!presentationMode) return;
+                    event.preventDefault();
+                    stepPresentationBranch(1);
+                    return;
+                }
+
+                if (event.key === 'p' || event.key === 'P' || event.key === 'з' || event.key === 'З') {
+                    if (!presentationMode) return;
+                    event.preventDefault();
+                    stepPresentationBranch(-1);
+                    return;
+                }
+
+                if (event.key === 'm' || event.key === 'M' || event.key === 'ь' || event.key === 'Ь') {
+                    event.preventDefault();
+                    togglePresentationMode();
+                }
+            });
+        }
+
+        async function loadMarkmap() {
+            const urlParams = new URLSearchParams(window.location.search);
+            let file = urlParams.get('file');
+
+            if (!file) {
+                document.getElementById('markmap-container').innerHTML =
+                    '<div class="error"><div class="error-content">No file specified. Add ?file=yourfile.mm to the URL</div></div>';
+                return;
+            }
+
+            try {
+                // Декодируем URL, если он был закодирован
+                file = decodeURIComponent(file);
+                
+                // Если это полный URL (начинается с http:// или https://)
+                if (file.match(/^https?:\/\//)) {
+                    const fileUrl = new URL(file);
+                    if (fileUrl.origin !== window.location.origin) {
+                        throw new Error('External URLs are not allowed for security reasons');
+                    }
+                    file = fileUrl.pathname;
+                }
+                
+                // Убираем множественные слеши
+                file = file.replace(/\/+/g, '/');
+                
+                // Если путь не начинается с /, добавляем текущий путь
+                if (!file.startsWith('/')) {
+                    const currentPath = window.location.pathname.substring(0, window.location.pathname.lastIndexOf('/'));
+                    file = currentPath + '/' + file;
+                }
+                
+                // Создаем полный URL для проверки
+                const fullUrl = new URL(file, window.location.origin);
+                
+                // Проверяем безопасность URL
+                if (!isSecureUrl(fullUrl.href)) {
+                    throw new Error('Access denied: URL is not allowed');
+                }
+
+                const filename = file.split('/').pop();
+                document.getElementById('filename').textContent = filename;
+                document.getElementById('raw-link').href = file;
+
+                const response = await fetch(file);
+                if (!response.ok) throw new Error('File not found (status: ' + response.status + ')');
+
+                const fileContent = await response.text();
+
+                const rawMarkmapContent = extractMarkmapContent(fileContent);
+                const markmapContent = normalizeMarkmapMarkdown(rawMarkmapContent);
+
+                if (!markmapContent) {
+                    throw new Error('No valid markmap content found in file');
+                }
+
+                console.log('Markmap content extracted:', markmapContent);
+
+                const container = document.getElementById('markmap-container');
+                container.innerHTML = '<svg id="markmap-svg"></svg>';
+
+                const { Transformer } = window.markmap;
+                const transformer = new Transformer();
+
+                let { root } = transformer.transform(markmapContent);
+
+                sourceRoot = assignColors(root);
+                currentRoot = buildRenderedRoot();
+
+                console.log('Parsed tree with colors:', sourceRoot);
+
+                const svg = document.getElementById('markmap-svg');
+                const { Markmap } = window.markmap;
+
+                markmapInstance = Markmap.create(svg, {
+                    ...currentOptions,
+                    autoFit: true,
+                    color: (node) => node.payload?.color || '#5E35B1'
+                });
+
+                await Promise.resolve(markmapInstance.setData(currentRoot));
+                markmapInstance.fit();
+                updateFoldStatus();
+                updatePresentationStatus();
+
+                currentOptions.autoFit = false;
+
+                document.getElementById('zoom-in').onclick = () => {
+                    markmapInstance.rescale(1.25);
+                };
+                document.getElementById('zoom-out').onclick = () => {
+                    markmapInstance.rescale(0.8);
+                };
+                document.getElementById('fit').onclick = () => {
+                    markmapInstance.fit();
+                };
+
+                initializeSettings();
+
+            } catch (error) {
+                console.error('Markmap error:', error);
+                document.getElementById('markmap-container').innerHTML =
+                    `<div class="error"><div class="error-content">Error loading mind map: ${error.message}<br><br>Check console for details.</div></div>`;
+            }
+        }
+
+        initializeKeyboardShortcuts();
+        window.addEventListener('load', loadMarkmap);
+    </script>
+</body>
+</html>

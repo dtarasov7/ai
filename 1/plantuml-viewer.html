@@ -1,0 +1,1006 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PlantUML Viewer</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            margin: 0;
+            background: #f5f5f5;
+            color: #24292e;
+        }
+        .container {
+            width: min(1400px, calc(100vw - 32px));
+            margin: 16px auto;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 4px 14px rgba(0,0,0,0.08);
+            overflow: hidden;
+        }
+        .header {
+            background: #24292e;
+            color: white;
+            padding: 16px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 16px;
+        }
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 18px;
+            font-weight: 600;
+            word-break: break-word;
+        }
+        .header a {
+            color: #58a6ff;
+            text-decoration: none;
+            white-space: nowrap;
+        }
+        .header a:hover {
+            text-decoration: underline;
+        }
+        .render-mode-switch {
+            display: none;
+            align-items: center;
+            gap: 6px;
+            padding: 4px;
+            border-radius: 999px;
+            background: rgba(255,255,255,0.08);
+        }
+        .render-mode-switch.active {
+            display: inline-flex;
+        }
+        .render-mode-switch button {
+            border: none;
+            background: transparent;
+            color: rgba(255,255,255,0.78);
+            cursor: pointer;
+            font-size: 13px;
+            padding: 6px 10px;
+            border-radius: 999px;
+            transition: background 0.2s, color 0.2s;
+        }
+        .render-mode-switch button.active {
+            background: #58a6ff;
+            color: #0d1117;
+        }
+        .tabs {
+            display: flex;
+            gap: 10px;
+            padding: 0 20px;
+            border-bottom: 1px solid #e1e4e8;
+            background: #fafbfc;
+        }
+        .tab {
+            padding: 12px 4px;
+            cursor: pointer;
+            border: none;
+            background: none;
+            font-size: 15px;
+            color: #586069;
+            border-bottom: 3px solid transparent;
+        }
+        .tab.active {
+            color: #0366d6;
+            border-bottom-color: #0366d6;
+        }
+        .content {
+            display: none;
+        }
+        .content.active {
+            display: block;
+        }
+        .mindmap-toolbar {
+            display: none;
+            padding: 14px 20px;
+            background: #24292e;
+            color: white;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+        .mindmap-toolbar.active {
+            display: flex;
+        }
+        .toolbar-meta {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .shortcut-hint {
+            font-size: 12px;
+            color: rgba(255,255,255,0.76);
+        }
+        .toolbar-buttons {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .toolbar-buttons button {
+            color: #58a6ff;
+            text-decoration: none;
+            font-size: 14px;
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 6px 10px;
+            border-radius: 4px;
+            transition: background 0.2s;
+        }
+        .toolbar-buttons button:hover {
+            background: rgba(255,255,255,0.1);
+        }
+        #presentation-toggle {
+            background: #0366d6;
+            color: white;
+        }
+        #presentation-toggle:hover {
+            background: #0256c7;
+        }
+        .diagram-area {
+            min-height: 70vh;
+            padding: 20px;
+            background: white;
+        }
+        .diagram-area.centered {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .diagram-area.loading,
+        .diagram-area.error {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #666;
+            font-size: 18px;
+        }
+        .diagram-area.error {
+            padding: 20px;
+        }
+        .error-box {
+            background: #ffebee;
+            color: #c62828;
+            padding: 20px;
+            border-radius: 8px;
+            border-left: 4px solid #c62828;
+            max-width: 760px;
+        }
+        .diagram-image {
+            display: block;
+            max-width: 100%;
+            height: auto;
+            margin: 0 auto;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background: white;
+        }
+        .mindmap-host {
+            width: 100%;
+            height: 72vh;
+            min-height: 560px;
+            background: white;
+        }
+        .mindmap-host svg {
+            width: 100%;
+            height: 100%;
+        }
+        .markmap-foreign pre {
+            background: #f6f8fa;
+            padding: 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            overflow-x: auto;
+            margin: 4px 0;
+        }
+        .markmap-foreign code {
+            font-family: "Courier New", Courier, monospace;
+            color: #24292e;
+        }
+        #source {
+            margin: 0;
+            padding: 20px;
+            background: #f8f8f8;
+            white-space: pre-wrap;
+            font-family: "Courier New", monospace;
+            font-size: 14px;
+            line-height: 1.5;
+            overflow-x: auto;
+        }
+        @media (max-width: 900px) {
+            .container {
+                width: calc(100vw - 16px);
+                margin: 8px auto;
+            }
+            .header,
+            .mindmap-toolbar,
+            .tabs {
+                padding-left: 14px;
+                padding-right: 14px;
+            }
+            .diagram-area {
+                padding: 14px;
+            }
+            .mindmap-host {
+                height: 68vh;
+                min-height: 460px;
+            }
+        }
+    </style>
+</head>
+<body>
+        <div class="container">
+            <div class="header">
+                <h1 id="filename">Loading...</h1>
+                <div class="header-actions">
+                    <div id="render-mode-switch" class="render-mode-switch">
+                        <button id="render-mode-plantuml" type="button">PlantUML</button>
+                        <button id="render-mode-interactive" type="button">Interactive</button>
+                    </div>
+                    <a href="#" id="raw-link">View Raw</a>
+                </div>
+            </div>
+
+        <div class="tabs">
+            <button class="tab active" onclick="showTab('diagram', this)">Diagram</button>
+            <button class="tab" onclick="showTab('source', this)">Source</button>
+        </div>
+
+        <div id="diagram-content" class="content active">
+            <div id="mindmap-toolbar" class="mindmap-toolbar">
+                <div class="toolbar-meta">
+                    <span class="shortcut-hint" id="fold-status">All levels are expanded. Keys: 2-5 set visible depth, 0 expands all</span>
+                    <span class="shortcut-hint" id="presentation-status">Presentation mode off. Press N/P after enabling it</span>
+                </div>
+                <div class="toolbar-buttons">
+                    <button id="zoom-in" type="button">Zoom In</button>
+                    <button id="zoom-out" type="button">Zoom Out</button>
+                    <button id="fit" type="button">Fit</button>
+                    <button id="presentation-toggle" type="button">Presentation</button>
+                </div>
+            </div>
+
+            <div id="diagram" class="diagram-area loading centered">Loading diagram...</div>
+        </div>
+
+        <div id="source-content" class="content">
+            <pre id="source"></pre>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/markmap-view@0.15.4/dist/browser/index.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/markmap-lib@0.15.4/dist/browser/index.js"></script>
+    <script>
+        const localPlantUMLServer = '/plantuml-server/png/';
+        const markmapDefaultOptions = {
+            duration: 500,
+            maxWidth: 500,
+            paddingX: 8,
+            nodeMinHeight: 20,
+            spacingVertical: 10,
+            spacingHorizontal: 70,
+            autoFit: false,
+            embedGlobalCSS: true
+        };
+
+        let currentMode = 'plantuml';
+        let markmapInstance = null;
+        let sourceRoot = null;
+        let currentRoot = null;
+        let currentFoldLevel = null;
+        let presentationMode = false;
+        let presentationBranchIndex = 0;
+        let renderVersion = 0;
+        let currentSourceText = '';
+        let currentIsMindmapSource = false;
+        let preferredMindmapRenderMode = 'interactive';
+
+        function showTab(tabName, button) {
+            document.querySelectorAll('.tab').forEach((tab) => tab.classList.remove('active'));
+            document.querySelectorAll('.content').forEach((content) => content.classList.remove('active'));
+
+            button.classList.add('active');
+            document.getElementById(tabName + '-content').classList.add('active');
+        }
+
+        function isSecureUrl(url) {
+            try {
+                const urlObj = new URL(url, window.location.origin);
+                if (urlObj.origin !== window.location.origin) {
+                    console.error('Security: External URL blocked', urlObj.origin);
+                    return false;
+                }
+
+                const normalizedPath = urlObj.pathname.replace(/\/+/g, '/');
+                if (normalizedPath.includes('..')) {
+                    console.error('Security: Path traversal blocked');
+                    return false;
+                }
+
+                return true;
+            } catch (e) {
+                console.error('Security: Invalid URL', e);
+                return false;
+            }
+        }
+
+        function normalizeRequestedFile(file) {
+            let normalized = decodeURIComponent(file);
+
+            if (normalized.match(/^https?:\/\//)) {
+                const fileUrl = new URL(normalized);
+                if (fileUrl.origin !== window.location.origin) {
+                    throw new Error('External URLs are not allowed for security reasons');
+                }
+                normalized = fileUrl.pathname;
+            }
+
+            normalized = normalized.replace(/\/+/g, '/');
+
+            if (!normalized.startsWith('/')) {
+                const currentPath = window.location.pathname.substring(0, window.location.pathname.lastIndexOf('/'));
+                normalized = currentPath + '/' + normalized;
+            }
+
+            const fullUrl = new URL(normalized, window.location.origin);
+            if (!isSecureUrl(fullUrl.href)) {
+                throw new Error('Access denied: URL is not allowed');
+            }
+
+            return normalized;
+        }
+
+        function encode64(data) {
+            let r = '';
+            for (let i = 0; i < data.length; i += 3) {
+                if (i + 2 === data.length) {
+                    r += append3bytes(data[i], data[i + 1], 0);
+                } else if (i + 1 === data.length) {
+                    r += append3bytes(data[i], 0, 0);
+                } else {
+                    r += append3bytes(data[i], data[i + 1], data[i + 2]);
+                }
+            }
+            return r;
+        }
+
+        function append3bytes(b1, b2, b3) {
+            const c1 = b1 >> 2;
+            const c2 = ((b1 & 0x3) << 4) | (b2 >> 4);
+            const c3 = ((b2 & 0xF) << 2) | (b3 >> 6);
+            const c4 = b3 & 0x3F;
+            let r = '';
+            r += encode6bit(c1 & 0x3F);
+            r += encode6bit(c2 & 0x3F);
+            r += encode6bit(c3 & 0x3F);
+            r += encode6bit(c4 & 0x3F);
+            return r;
+        }
+
+        function encode6bit(b) {
+            if (b < 10) return String.fromCharCode(48 + b);
+            b -= 10;
+            if (b < 26) return String.fromCharCode(65 + b);
+            b -= 26;
+            if (b < 26) return String.fromCharCode(97 + b);
+            b -= 26;
+            if (b === 0) return '-';
+            if (b === 1) return '_';
+            return '?';
+        }
+
+        function encodePlantUML(text) {
+            const utf8Bytes = new TextEncoder().encode(text);
+            const compressed = pako.deflateRaw(utf8Bytes, { level: 9 });
+            return encode64(compressed);
+        }
+
+        function isPlantUMLMindmap(text) {
+            const normalized = text.trim().toLowerCase();
+            return normalized.startsWith('@startmindmap') || normalized.startsWith('@startwbs');
+        }
+
+        function normalizePlantUMLSource(text) {
+            if (text.trim().startsWith('@start')) return text;
+            return '@startuml\n' + text + '\n@enduml';
+        }
+
+        function normalizeMarkmapMarkdown(text) {
+            return text
+                .split('\n')
+                .map((line) => line.replace(/^(\s*[-+*]\s+)(\d+)\.\s+(.*)$/, '$1$2\\. $3'))
+                .join('\n');
+        }
+
+        function convertPlantUMLMindmapToMarkdown(text) {
+            const lines = text.split(/\r?\n/);
+            const markdownLines = [];
+            let inStyleBlock = false;
+
+            for (const line of lines) {
+                const trimmed = line.trim();
+
+                if (!trimmed) continue;
+                if (trimmed.startsWith('@start') || trimmed.startsWith('@end')) continue;
+                if (trimmed.startsWith("'") || trimmed.startsWith('//')) continue;
+
+                if (trimmed === '<style>') {
+                    inStyleBlock = true;
+                    continue;
+                }
+                if (trimmed === '</style>') {
+                    inStyleBlock = false;
+                    continue;
+                }
+                if (inStyleBlock) continue;
+
+                const match = line.match(/^\s*(\*+)\s+(.*)$/);
+                if (!match) continue;
+
+                const level = match[1].length;
+                const content = match[2].trim().replace(/\\n/g, '<br>');
+                markdownLines.push(`${'  '.repeat(level - 1)}- ${content}`);
+            }
+
+            if (!markdownLines.length) {
+                throw new Error('The PlantUML mindmap does not contain any supported "*" outline nodes');
+            }
+
+            return normalizeMarkmapMarkdown(markdownLines.join('\n'));
+        }
+
+        function assignColors(node, depth = 0) {
+            const colors = ['#5E35B1', '#1E88E5', '#43A047', '#FB8C00', '#E53935', '#8E24AA', '#00ACC1'];
+
+            if (!node.payload) {
+                node.payload = {};
+            }
+
+            node.payload.color = colors[depth % colors.length];
+
+            if (node.children && node.children.length > 0) {
+                node.children.forEach((child) => assignColors(child, depth + 1));
+            }
+
+            return node;
+        }
+
+        function cloneNode(node) {
+            if (!node) return null;
+
+            return {
+                ...node,
+                payload: node.payload ? { ...node.payload } : undefined,
+                state: node.state ? { ...node.state } : undefined,
+                children: (node.children || []).map(cloneNode)
+            };
+        }
+
+        function clearFoldFlags(node) {
+            if (!node) return node;
+
+            if (node.payload && node.payload.fold) {
+                delete node.payload.fold;
+            }
+
+            if (node.children && node.children.length > 0) {
+                node.children.forEach(clearFoldFlags);
+            }
+
+            return node;
+        }
+
+        function applyFoldLevel(node, foldLevel, depth = 1) {
+            if (!node) return node;
+
+            if (!node.payload) {
+                node.payload = {};
+            }
+
+            if (node.children && node.children.length > 0 && foldLevel && depth >= foldLevel) {
+                node.payload.fold = 1;
+            } else if (node.payload.fold) {
+                delete node.payload.fold;
+            }
+
+            if (node.children && node.children.length > 0) {
+                node.children.forEach((child) => applyFoldLevel(child, foldLevel, depth + 1));
+            }
+
+            return node;
+        }
+
+        function applyPresentationMode(root) {
+            const branches = root.children || [];
+            if (!branches.length) return root;
+
+            presentationBranchIndex = ((presentationBranchIndex % branches.length) + branches.length) % branches.length;
+
+            branches.forEach((branch, index) => {
+                if (!branch.payload) {
+                    branch.payload = {};
+                }
+
+                if (index !== presentationBranchIndex && branch.children && branch.children.length > 0) {
+                    branch.payload.fold = 1;
+                }
+            });
+
+            return root;
+        }
+
+        function buildRenderedRoot() {
+            const clonedRoot = cloneNode(sourceRoot);
+            if (!clonedRoot) return null;
+
+            clearFoldFlags(clonedRoot);
+
+            if (presentationMode) return applyPresentationMode(clonedRoot);
+            if (!currentFoldLevel) return clonedRoot;
+
+            return applyFoldLevel(clonedRoot, currentFoldLevel);
+        }
+
+        function getCurrentTransform() {
+            if (!markmapInstance) return null;
+
+            try {
+                const svg = document.getElementById('mindmap-svg');
+                if (!svg) return null;
+
+                const g = svg.querySelector('g');
+                if (!g) return null;
+
+                const transform = g.getAttribute('transform');
+                if (!transform) return null;
+
+                const match = transform.match(/translate\(([^,]+),([^)]+)\)\s*scale\(([^)]+)\)/);
+                if (!match) return null;
+
+                return {
+                    x: parseFloat(match[1]),
+                    y: parseFloat(match[2]),
+                    scale: parseFloat(match[3])
+                };
+            } catch (e) {
+                console.error('Error getting transform:', e);
+                return null;
+            }
+        }
+
+        function applyTransform(transform) {
+            if (!transform || !markmapInstance) return;
+
+            try {
+                const svg = document.getElementById('mindmap-svg');
+                if (!svg) return;
+
+                const g = svg.querySelector('g');
+                if (!g) return;
+
+                g.setAttribute('transform', `translate(${transform.x},${transform.y}) scale(${transform.scale})`);
+
+                if (markmapInstance.state) {
+                    markmapInstance.state.data = {
+                        ...markmapInstance.state.data,
+                        x: transform.x,
+                        y: transform.y,
+                        scale: transform.scale
+                    };
+                }
+            } catch (e) {
+                console.error('Error applying transform:', e);
+            }
+        }
+
+        function waitForNextFrame() {
+            return new Promise((resolve) => {
+                requestAnimationFrame(() => {
+                    requestAnimationFrame(resolve);
+                });
+            });
+        }
+
+        function centerPresentationBranchVertically() {
+            if (!presentationMode || !markmapInstance || !currentRoot) return;
+
+            const branch = currentRoot.children?.[presentationBranchIndex];
+            if (!branch || typeof markmapInstance.findElement !== 'function') return;
+
+            try {
+                const svg = document.getElementById('mindmap-svg');
+                if (!svg) return;
+
+                const elementInfo = markmapInstance.findElement(branch);
+                if (!elementInfo?.g) return;
+
+                const currentTransform = getCurrentTransform();
+                if (!currentTransform) return;
+
+                const svgRect = svg.getBoundingClientRect();
+                const branchRect = elementInfo.g.getBoundingClientRect();
+                if (!svgRect.height || !branchRect.height) return;
+
+                const svgCenterY = svgRect.top + (svgRect.height / 2);
+                const branchCenterY = branchRect.top + (branchRect.height / 2);
+                const deltaY = svgCenterY - branchCenterY;
+
+                if (Math.abs(deltaY) < 1) return;
+
+                applyTransform({
+                    ...currentTransform,
+                    y: currentTransform.y + deltaY
+                });
+            } catch (e) {
+                console.error('Error centering presentation branch:', e);
+            }
+        }
+
+        function updateFoldStatus() {
+            const status = document.getElementById('fold-status');
+            if (!status) return;
+
+            if (currentMode !== 'mindmap') {
+                status.textContent = 'Mindmap shortcuts are available only for PlantUML mindmaps';
+            } else if (presentationMode) {
+                status.textContent = 'Presentation mode: the active level-2 branch is fully expanded, the others are folded to level 2';
+            } else if (currentFoldLevel === null) {
+                status.textContent = 'All levels are expanded. Keys: 2-5 set visible depth, 0 expands all';
+            } else if (currentFoldLevel <= 1) {
+                status.textContent = 'Only the root level is visible. Press 2-5 to open deeper levels, 0 to expand all';
+            } else {
+                status.textContent = `Visible up to level ${currentFoldLevel}. Press ${currentFoldLevel} to close it, 0 to expand all`;
+            }
+        }
+
+        function updatePresentationStatus() {
+            const status = document.getElementById('presentation-status');
+            const button = document.getElementById('presentation-toggle');
+            if (!status || !button) return;
+
+            if (currentMode !== 'mindmap') {
+                status.textContent = 'Presentation navigation is available only for PlantUML mindmaps';
+                button.textContent = 'Presentation';
+                return;
+            }
+
+            if (!presentationMode) {
+                status.textContent = 'Presentation mode off. Press N/P after enabling it';
+                button.textContent = 'Presentation';
+                return;
+            }
+
+            const branches = sourceRoot?.children || [];
+            if (!branches.length) {
+                status.textContent = 'Presentation mode on, but there are no level-2 branches';
+                button.textContent = 'Exit Presentation';
+                return;
+            }
+
+            const currentBranch = branches[presentationBranchIndex];
+            const branchTitle = currentBranch?.content || `Branch ${presentationBranchIndex + 1}`;
+            status.textContent = `Presentation: branch ${presentationBranchIndex + 1}/${branches.length} - ${branchTitle}. Keys: N next, P previous`;
+            button.textContent = 'Exit Presentation';
+        }
+
+        async function updateMarkmap() {
+            if (currentMode !== 'mindmap') return;
+
+            currentRoot = buildRenderedRoot();
+            if (!currentRoot) return;
+
+            const svg = document.getElementById('mindmap-svg');
+            if (!svg) return;
+
+            const savedTransform = getCurrentTransform();
+            const currentRenderVersion = ++renderVersion;
+            svg.innerHTML = '';
+
+            const { Markmap } = window.markmap;
+            markmapInstance = Markmap.create(svg, {
+                ...markmapDefaultOptions,
+                color: (node) => node.payload?.color || '#5E35B1'
+            });
+
+            await Promise.resolve(markmapInstance.setData(currentRoot));
+            if (currentRenderVersion !== renderVersion) return;
+
+            updateFoldStatus();
+            updatePresentationStatus();
+
+            if (savedTransform) {
+                applyTransform(savedTransform);
+            } else {
+                markmapInstance.fit();
+            }
+
+            await waitForNextFrame();
+            if (currentRenderVersion !== renderVersion) return;
+
+            centerPresentationBranchVertically();
+        }
+
+        function resetMindmapState() {
+            markmapInstance = null;
+            sourceRoot = null;
+            currentRoot = null;
+            currentFoldLevel = null;
+            presentationMode = false;
+            presentationBranchIndex = 0;
+        }
+
+        function updateRenderModeSwitch() {
+            const switcher = document.getElementById('render-mode-switch');
+            const plantumlButton = document.getElementById('render-mode-plantuml');
+            const interactiveButton = document.getElementById('render-mode-interactive');
+            if (!switcher || !plantumlButton || !interactiveButton) return;
+
+            const isVisible = currentIsMindmapSource;
+            switcher.classList.toggle('active', isVisible);
+            plantumlButton.classList.toggle('active', isVisible && preferredMindmapRenderMode === 'plantuml');
+            interactiveButton.classList.toggle('active', isVisible && preferredMindmapRenderMode === 'interactive');
+        }
+
+        function showMindmapToolbar(isVisible) {
+            const toolbar = document.getElementById('mindmap-toolbar');
+            if (!toolbar) return;
+            toolbar.classList.toggle('active', isVisible);
+            updateFoldStatus();
+            updatePresentationStatus();
+        }
+
+        function showDiagramLoading(message) {
+            const diagram = document.getElementById('diagram');
+            diagram.className = 'diagram-area loading centered';
+            diagram.textContent = message;
+        }
+
+        function showDiagramError(message) {
+            const diagram = document.getElementById('diagram');
+            diagram.className = 'diagram-area error centered';
+            diagram.innerHTML = `<div class="error-box">${message}</div>`;
+        }
+
+        async function renderPlantUMLImage(plantUMLSource) {
+            currentMode = 'plantuml';
+            resetMindmapState();
+            showMindmapToolbar(false);
+            updateRenderModeSwitch();
+
+            const encoded = encodePlantUML(plantUMLSource);
+            const imageUrl = localPlantUMLServer + encoded;
+
+            const diagram = document.getElementById('diagram');
+            diagram.className = 'diagram-area centered';
+            diagram.innerHTML = `<img class="diagram-image" src="${imageUrl}" alt="PlantUML Diagram" onerror="handlePlantUMLError()">`;
+        }
+
+        async function renderMindmap(plantUMLSource) {
+            currentMode = 'mindmap';
+            resetMindmapState();
+            showMindmapToolbar(true);
+            updateRenderModeSwitch();
+
+            const markmapContent = convertPlantUMLMindmapToMarkdown(plantUMLSource);
+            const diagram = document.getElementById('diagram');
+            diagram.className = 'diagram-area';
+            diagram.innerHTML = '<div class="mindmap-host"><svg id="mindmap-svg"></svg></div>';
+
+            const { Transformer } = window.markmap;
+            const transformer = new Transformer();
+            let { root } = transformer.transform(markmapContent);
+
+            sourceRoot = assignColors(root);
+            currentRoot = buildRenderedRoot();
+
+            const svg = document.getElementById('mindmap-svg');
+            const { Markmap } = window.markmap;
+            markmapInstance = Markmap.create(svg, {
+                ...markmapDefaultOptions,
+                autoFit: true,
+                color: (node) => node.payload?.color || '#5E35B1'
+            });
+
+            await Promise.resolve(markmapInstance.setData(currentRoot));
+            markmapInstance.fit();
+            updateFoldStatus();
+            updatePresentationStatus();
+        }
+
+        async function renderCurrentDiagram() {
+            if (!currentSourceText) return;
+
+            if (!currentIsMindmapSource || preferredMindmapRenderMode === 'plantuml') {
+                await renderPlantUMLImage(currentSourceText);
+            } else {
+                await renderMindmap(currentSourceText);
+            }
+        }
+
+        async function setMindmapRenderMode(mode) {
+            if (!currentIsMindmapSource) return;
+            if (!['plantuml', 'interactive'].includes(mode)) return;
+            if (preferredMindmapRenderMode === mode) return;
+
+            preferredMindmapRenderMode = mode;
+            updateRenderModeSwitch();
+            showDiagramLoading('Switching render mode...');
+            await renderCurrentDiagram();
+        }
+
+        function togglePresentationMode() {
+            if (currentMode !== 'mindmap' || !sourceRoot) return;
+
+            presentationMode = !presentationMode;
+            if (presentationMode) {
+                presentationBranchIndex = 0;
+            }
+
+            updateMarkmap();
+        }
+
+        function stepPresentationBranch(direction) {
+            if (currentMode !== 'mindmap' || !presentationMode || !sourceRoot) return;
+
+            const branches = sourceRoot.children || [];
+            if (!branches.length) return;
+
+            presentationBranchIndex = (presentationBranchIndex + direction + branches.length) % branches.length;
+            updateMarkmap();
+        }
+
+        function toggleFoldLevel(level) {
+            if (currentMode !== 'mindmap' || !sourceRoot) return;
+
+            if (presentationMode) {
+                presentationMode = false;
+            }
+
+            if (currentFoldLevel === null) {
+                currentFoldLevel = level;
+            } else if (currentFoldLevel >= level) {
+                currentFoldLevel = level - 1;
+            } else {
+                currentFoldLevel = level;
+            }
+
+            updateMarkmap();
+        }
+
+        function initializeControls() {
+            document.getElementById('zoom-in').onclick = () => {
+                if (currentMode === 'mindmap' && markmapInstance) {
+                    markmapInstance.rescale(1.25);
+                }
+            };
+
+            document.getElementById('zoom-out').onclick = () => {
+                if (currentMode === 'mindmap' && markmapInstance) {
+                    markmapInstance.rescale(0.8);
+                }
+            };
+
+            document.getElementById('fit').onclick = () => {
+                if (currentMode === 'mindmap' && markmapInstance) {
+                    markmapInstance.fit();
+                }
+            };
+
+            document.getElementById('presentation-toggle').onclick = () => {
+                togglePresentationMode();
+            };
+
+            document.getElementById('render-mode-plantuml').onclick = () => {
+                setMindmapRenderMode('plantuml');
+            };
+
+            document.getElementById('render-mode-interactive').onclick = () => {
+                setMindmapRenderMode('interactive');
+            };
+
+            document.addEventListener('keydown', (event) => {
+                if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) return;
+
+                const target = event.target;
+                if (target && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))) {
+                    return;
+                }
+
+                if (currentMode !== 'mindmap') return;
+
+                if (['2', '3', '4', '5'].includes(event.key)) {
+                    event.preventDefault();
+                    toggleFoldLevel(Number(event.key));
+                    return;
+                }
+
+                if (event.key === '0' || event.key === 'Escape') {
+                    if (!currentFoldLevel && !presentationMode) return;
+                    event.preventDefault();
+                    currentFoldLevel = null;
+                    presentationMode = false;
+                    updateMarkmap();
+                    return;
+                }
+
+                if (event.key === 'n' || event.key === 'N' || event.key === 'т' || event.key === 'Т') {
+                    if (!presentationMode) return;
+                    event.preventDefault();
+                    stepPresentationBranch(1);
+                    return;
+                }
+
+                if (event.key === 'p' || event.key === 'P' || event.key === 'з' || event.key === 'З') {
+                    if (!presentationMode) return;
+                    event.preventDefault();
+                    stepPresentationBranch(-1);
+                    return;
+                }
+
+                if (event.key === 'm' || event.key === 'M' || event.key === 'ь' || event.key === 'Ь') {
+                    event.preventDefault();
+                    togglePresentationMode();
+                }
+            });
+        }
+
+        function handlePlantUMLError() {
+            showDiagramError('Failed to render diagram. Check the PlantUML syntax and make sure the local PlantUML server is running.');
+        }
+
+        async function loadDiagram() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const fileParam = urlParams.get('file');
+
+            if (!fileParam) {
+                showDiagramError('No file specified. Add ?file=yourfile.plant to the URL');
+                return;
+            }
+
+            try {
+                const file = normalizeRequestedFile(fileParam);
+                const filename = file.split('/').pop();
+                document.getElementById('filename').textContent = filename;
+                document.getElementById('raw-link').href = file;
+
+                const response = await fetch(file);
+                if (!response.ok) {
+                    throw new Error('File not found');
+                }
+
+                let plantUMLSource = await response.text();
+                plantUMLSource = normalizePlantUMLSource(plantUMLSource);
+                document.getElementById('source').textContent = plantUMLSource;
+                currentSourceText = plantUMLSource;
+                currentIsMindmapSource = isPlantUMLMindmap(plantUMLSource);
+                updateRenderModeSwitch();
+
+                await renderCurrentDiagram();
+            } catch (error) {
+                console.error('PlantUML viewer error:', error);
+                showDiagramError(`Error loading diagram: ${error.message}`);
+            }
+        }
+
+        initializeControls();
+        loadDiagram();
+    </script>
+</body>
+</html>
