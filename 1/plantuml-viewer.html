@@ -38,6 +38,12 @@
             flex-wrap: wrap;
             justify-content: flex-end;
         }
+        .header-meta {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 6px;
+        }
         .header h1 {
             margin: 0;
             font-size: 18px;
@@ -51,6 +57,15 @@
         }
         .header a:hover {
             text-decoration: underline;
+        }
+        .header-status {
+            font-size: 12px;
+            color: rgba(255,255,255,0.76);
+            min-height: 16px;
+            text-align: right;
+        }
+        .header-status.error {
+            color: #ffb4b4;
         }
         .render-mode-switch {
             display: none;
@@ -145,12 +160,21 @@
         .toolbar-buttons button:hover {
             background: rgba(255,255,255,0.1);
         }
+        .toolbar-buttons button:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+            background: none;
+        }
         #presentation-toggle {
             background: #0366d6;
             color: white;
         }
         #presentation-toggle:hover {
             background: #0256c7;
+        }
+        #presentation-toggle:disabled {
+            background: rgba(255,255,255,0.18);
+            color: rgba(255,255,255,0.7);
         }
         .diagram-area {
             min-height: 70vh;
@@ -183,12 +207,34 @@
         }
         .diagram-image {
             display: block;
-            max-width: 100%;
+            max-width: none;
             height: auto;
-            margin: 0 auto;
             border: 1px solid #ddd;
             border-radius: 4px;
             background: white;
+            user-select: none;
+            -webkit-user-drag: none;
+            pointer-events: none;
+        }
+        .diagram-viewport {
+            position: relative;
+            width: 100%;
+            height: 72vh;
+            min-height: 560px;
+            overflow: hidden;
+            background: #fff;
+            cursor: grab;
+            touch-action: none;
+        }
+        .diagram-viewport.dragging {
+            cursor: grabbing;
+        }
+        .diagram-panzoom {
+            position: absolute;
+            left: 0;
+            top: 0;
+            transform-origin: 0 0;
+            will-change: transform;
         }
         .mindmap-host {
             width: 100%;
@@ -240,6 +286,10 @@
                 height: 68vh;
                 min-height: 460px;
             }
+            .diagram-viewport {
+                height: 68vh;
+                min-height: 460px;
+            }
         }
     </style>
 </head>
@@ -248,10 +298,14 @@
             <div class="header">
                 <h1 id="filename">Loading...</h1>
                 <div class="header-actions">
-                    <div id="render-mode-switch" class="render-mode-switch">
-                        <button id="render-mode-plantuml" type="button">PlantUML</button>
-                        <button id="render-mode-interactive" type="button">Interactive</button>
+                    <div class="header-meta">
+                        <span id="render-status" class="header-status">Preparing viewer...</span>
+                        <div id="render-mode-switch" class="render-mode-switch">
+                            <button id="render-mode-plantuml" type="button">PlantUML</button>
+                            <button id="render-mode-interactive" type="button">Interactive</button>
+                        </div>
                     </div>
+                    <a href="#" id="save-png" download>Save PNG</a>
                     <a href="#" id="raw-link">View Raw</a>
                 </div>
             </div>
@@ -311,6 +365,13 @@
         let currentSourceText = '';
         let currentIsMindmapSource = false;
         let preferredMindmapRenderMode = 'interactive';
+        let currentPlantumlImageUrl = '';
+        let plantumlScale = 1;
+        let plantumlTranslateX = 0;
+        let plantumlTranslateY = 0;
+        let plantumlDragging = false;
+        let plantumlLastPointerX = 0;
+        let plantumlLastPointerY = 0;
 
         function showTab(tabName, button) {
             document.querySelectorAll('.tab').forEach((tab) => tab.classList.remove('active'));
@@ -318,6 +379,33 @@
 
             button.classList.add('active');
             document.getElementById(tabName + '-content').classList.add('active');
+        }
+
+        function setRenderStatus(message, kind = 'info') {
+            const status = document.getElementById('render-status');
+            if (!status) return;
+            status.textContent = message || '';
+            status.classList.toggle('error', kind === 'error');
+        }
+
+        function updateSavePngLink(filename = null) {
+            const link = document.getElementById('save-png');
+            if (!link) return;
+
+            if (!currentPlantumlImageUrl) {
+                link.href = '#';
+                link.removeAttribute('download');
+                link.style.pointerEvents = 'none';
+                link.style.opacity = '0.45';
+                return;
+            }
+
+            const baseName = (filename || document.getElementById('filename')?.textContent || 'diagram')
+                .replace(/\.[^.]+$/, '');
+            link.href = currentPlantumlImageUrl;
+            link.download = `${baseName}.png`;
+            link.style.pointerEvents = '';
+            link.style.opacity = '';
         }
 
         function isSecureUrl(url) {
@@ -764,6 +852,10 @@
             toolbar.classList.toggle('active', isVisible);
             updateFoldStatus();
             updatePresentationStatus();
+            const presentationButton = document.getElementById('presentation-toggle');
+            if (presentationButton) {
+                presentationButton.disabled = currentMode !== 'mindmap';
+            }
         }
 
         function showDiagramLoading(message) {
@@ -778,18 +870,134 @@
             diagram.innerHTML = `<div class="error-box">${message}</div>`;
         }
 
+        function getPlantumlViewportElements() {
+            return {
+                viewport: document.getElementById('diagram-viewport'),
+                panzoom: document.getElementById('diagram-panzoom'),
+                image: document.getElementById('diagram-image')
+            };
+        }
+
+        function applyPlantumlTransform() {
+            const { panzoom } = getPlantumlViewportElements();
+            if (!panzoom) return;
+            panzoom.style.transform = `translate(${plantumlTranslateX}px, ${plantumlTranslateY}px) scale(${plantumlScale})`;
+        }
+
+        function fitPlantumlDiagram() {
+            const { viewport, image } = getPlantumlViewportElements();
+            if (!viewport || !image || !image.naturalWidth || !image.naturalHeight) return;
+
+            const viewportRect = viewport.getBoundingClientRect();
+            if (!viewportRect.width || !viewportRect.height) return;
+
+            const scaleX = viewportRect.width / image.naturalWidth;
+            const scaleY = viewportRect.height / image.naturalHeight;
+            plantumlScale = Math.min(scaleX, scaleY, 1);
+
+            const renderedWidth = image.naturalWidth * plantumlScale;
+            const renderedHeight = image.naturalHeight * plantumlScale;
+            plantumlTranslateX = (viewportRect.width - renderedWidth) / 2;
+            plantumlTranslateY = (viewportRect.height - renderedHeight) / 2;
+            applyPlantumlTransform();
+        }
+
+        function zoomPlantumlDiagram(factor, originX = null, originY = null) {
+            const { viewport, image } = getPlantumlViewportElements();
+            if (!viewport || !image || !image.naturalWidth || !image.naturalHeight) return;
+
+            const viewportRect = viewport.getBoundingClientRect();
+            const anchorX = originX ?? (viewportRect.width / 2);
+            const anchorY = originY ?? (viewportRect.height / 2);
+            const nextScale = Math.min(8, Math.max(0.1, plantumlScale * factor));
+            const scaleRatio = nextScale / plantumlScale;
+
+            plantumlTranslateX = anchorX - ((anchorX - plantumlTranslateX) * scaleRatio);
+            plantumlTranslateY = anchorY - ((anchorY - plantumlTranslateY) * scaleRatio);
+            plantumlScale = nextScale;
+            applyPlantumlTransform();
+        }
+
+        function stopPlantumlDrag() {
+            plantumlDragging = false;
+            const { viewport } = getPlantumlViewportElements();
+            if (viewport) {
+                viewport.classList.remove('dragging');
+            }
+        }
+
+        function initializePlantumlViewport() {
+            const { viewport, image } = getPlantumlViewportElements();
+            if (!viewport || !image) return;
+
+            image.draggable = false;
+            fitPlantumlDiagram();
+
+            viewport.onwheel = (event) => {
+                if (currentMode !== 'plantuml') return;
+                event.preventDefault();
+                const rect = viewport.getBoundingClientRect();
+                const factor = event.deltaY < 0 ? 1.1 : 1 / 1.1;
+                zoomPlantumlDiagram(factor, event.clientX - rect.left, event.clientY - rect.top);
+            };
+
+            viewport.onmousedown = (event) => {
+                if (currentMode !== 'plantuml' || event.button !== 0) return;
+                event.preventDefault();
+                plantumlDragging = true;
+                plantumlLastPointerX = event.clientX;
+                plantumlLastPointerY = event.clientY;
+                viewport.classList.add('dragging');
+            };
+
+            viewport.ondragstart = (event) => {
+                event.preventDefault();
+            };
+        }
+
         async function renderPlantUMLImage(plantUMLSource) {
             currentMode = 'plantuml';
             resetMindmapState();
-            showMindmapToolbar(false);
+            showMindmapToolbar(true);
             updateRenderModeSwitch();
+            setRenderStatus('Preparing PlantUML PNG render...');
+            showDiagramLoading('Preparing PlantUML PNG render...');
 
+            setRenderStatus('Encoding PlantUML source...');
             const encoded = encodePlantUML(plantUMLSource);
             const imageUrl = localPlantUMLServer + encoded;
+            currentPlantumlImageUrl = imageUrl;
+            updateSavePngLink();
 
-            const diagram = document.getElementById('diagram');
-            diagram.className = 'diagram-area centered';
-            diagram.innerHTML = `<img class="diagram-image" src="${imageUrl}" alt="PlantUML Diagram" onerror="handlePlantUMLError()">`;
+            setRenderStatus('Requesting PNG from PlantUML server...');
+            showDiagramLoading('Rendering PNG via PlantUML server...');
+
+            await new Promise((resolve, reject) => {
+                const preloadImage = new Image();
+                preloadImage.onload = () => {
+                    const diagram = document.getElementById('diagram');
+                    diagram.className = 'diagram-area';
+                    diagram.innerHTML = `
+                        <div class="diagram-viewport" id="diagram-viewport">
+                            <div class="diagram-panzoom" id="diagram-panzoom">
+                                <img class="diagram-image" id="diagram-image" src="${imageUrl}" alt="PlantUML Diagram">
+                            </div>
+                        </div>
+                    `;
+
+                    const image = document.getElementById('diagram-image');
+                    if (image) {
+                        image.onload = null;
+                    }
+                    initializePlantumlViewport();
+                    setRenderStatus('PlantUML PNG ready');
+                    resolve();
+                };
+                preloadImage.onerror = () => {
+                    reject(new Error('Failed to render diagram. Check the PlantUML syntax and make sure the local PlantUML server is running.'));
+                };
+                preloadImage.src = imageUrl;
+            });
         }
 
         async function renderMindmap(plantUMLSource) {
@@ -797,11 +1005,14 @@
             resetMindmapState();
             showMindmapToolbar(true);
             updateRenderModeSwitch();
+            setRenderStatus('Converting PlantUML mindmap to markdown...');
+            showDiagramLoading('Parsing PlantUML mindmap...');
 
             const markmapContent = convertPlantUMLMindmapToMarkdown(plantUMLSource);
             const diagram = document.getElementById('diagram');
             diagram.className = 'diagram-area';
             diagram.innerHTML = '<div class="mindmap-host"><svg id="mindmap-svg"></svg></div>';
+            setRenderStatus('Building interactive mindmap...');
 
             const { Transformer } = window.markmap;
             const transformer = new Transformer();
@@ -822,6 +1033,7 @@
             markmapInstance.fit();
             updateFoldStatus();
             updatePresentationStatus();
+            setRenderStatus('Interactive mindmap ready');
         }
 
         async function renderCurrentDiagram() {
@@ -841,6 +1053,7 @@
 
             preferredMindmapRenderMode = mode;
             updateRenderModeSwitch();
+            setRenderStatus(`Switching to ${mode === 'plantuml' ? 'PlantUML PNG' : 'interactive mindmap'} mode...`);
             showDiagramLoading('Switching render mode...');
             await renderCurrentDiagram();
         }
@@ -888,18 +1101,24 @@
             document.getElementById('zoom-in').onclick = () => {
                 if (currentMode === 'mindmap' && markmapInstance) {
                     markmapInstance.rescale(1.25);
+                } else if (currentMode === 'plantuml') {
+                    zoomPlantumlDiagram(1.25);
                 }
             };
 
             document.getElementById('zoom-out').onclick = () => {
                 if (currentMode === 'mindmap' && markmapInstance) {
                     markmapInstance.rescale(0.8);
+                } else if (currentMode === 'plantuml') {
+                    zoomPlantumlDiagram(0.8);
                 }
             };
 
             document.getElementById('fit').onclick = () => {
                 if (currentMode === 'mindmap' && markmapInstance) {
                     markmapInstance.fit();
+                } else if (currentMode === 'plantuml') {
+                    fitPlantumlDiagram();
                 }
             };
 
@@ -914,6 +1133,25 @@
             document.getElementById('render-mode-interactive').onclick = () => {
                 setMindmapRenderMode('interactive');
             };
+
+            document.addEventListener('mousemove', (event) => {
+                if (!plantumlDragging || currentMode !== 'plantuml') return;
+                const deltaX = event.clientX - plantumlLastPointerX;
+                const deltaY = event.clientY - plantumlLastPointerY;
+                plantumlLastPointerX = event.clientX;
+                plantumlLastPointerY = event.clientY;
+                plantumlTranslateX += deltaX;
+                plantumlTranslateY += deltaY;
+                applyPlantumlTransform();
+            });
+
+            document.addEventListener('mouseup', () => {
+                stopPlantumlDrag();
+            });
+
+            document.addEventListener('mouseleave', () => {
+                stopPlantumlDrag();
+            });
 
             document.addEventListener('keydown', (event) => {
                 if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) return;
@@ -962,6 +1200,7 @@
         }
 
         function handlePlantUMLError() {
+            setRenderStatus('PlantUML render failed', 'error');
             showDiagramError('Failed to render diagram. Check the PlantUML syntax and make sure the local PlantUML server is running.');
         }
 
@@ -970,22 +1209,30 @@
             const fileParam = urlParams.get('file');
 
             if (!fileParam) {
+                setRenderStatus('No file specified', 'error');
                 showDiagramError('No file specified. Add ?file=yourfile.plant to the URL');
                 return;
             }
 
             try {
+                setRenderStatus('Resolving requested file...');
                 const file = normalizeRequestedFile(fileParam);
                 const filename = file.split('/').pop();
                 document.getElementById('filename').textContent = filename;
                 document.getElementById('raw-link').href = file;
+                currentPlantumlImageUrl = '';
+                updateSavePngLink(filename);
 
+                setRenderStatus('Loading source file...');
+                showDiagramLoading('Loading source file...');
                 const response = await fetch(file);
                 if (!response.ok) {
                     throw new Error('File not found');
                 }
 
+                setRenderStatus('Reading PlantUML source...');
                 let plantUMLSource = await response.text();
+                setRenderStatus('Normalizing PlantUML source...');
                 plantUMLSource = normalizePlantUMLSource(plantUMLSource);
                 document.getElementById('source').textContent = plantUMLSource;
                 currentSourceText = plantUMLSource;
@@ -995,11 +1242,13 @@
                 await renderCurrentDiagram();
             } catch (error) {
                 console.error('PlantUML viewer error:', error);
+                setRenderStatus(`Error: ${error.message}`, 'error');
                 showDiagramError(`Error loading diagram: ${error.message}`);
             }
         }
 
         initializeControls();
+        updateSavePngLink();
         loadDiagram();
     </script>
 </body>
