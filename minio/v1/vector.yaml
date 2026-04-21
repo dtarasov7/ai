@@ -1,0 +1,113 @@
+data_dir: /var/lib/vector
+
+api:
+  enabled: true
+  address: 127.0.0.1:8687
+
+sources:
+  minio_http:
+    type: http_server
+    address: 127.0.0.1:8686
+    method: POST
+    path: /
+    strict_path: false
+    path_key: http_path
+    decoding:
+      codec: json
+    framing:
+      method: bytes
+
+transforms:
+  route_minio_input:
+    type: route
+    inputs: ["minio_http"]
+    reroute_unmatched: false
+    route:
+      server_logs: '.http_path == "/minio/server"'
+      audit_logs: '.http_path == "/minio/audit"'
+
+  normalize_minio_server:
+    type: remap
+    inputs: ["route_minio_input.server_logs"]
+    source: |
+      .service = "minio"
+      .stream = "server"
+      .pipeline = "minio"
+      .host = get_hostname!()
+      .ingest_timestamp = now()
+
+  normalize_minio_audit:
+    type: remap
+    inputs: ["route_minio_input.audit_logs"]
+    source: |
+      .service = "minio"
+      .stream = "audit"
+      .pipeline = "minio"
+      .host = get_hostname!()
+      .ingest_timestamp = now()
+
+      .api_name = .api.name
+      .bucket = .api.bucket
+      .object = .api.object
+      .api_status = .api.status
+      .remote_host = .remotehost
+      .request_id = .requestID
+      .request_path = .requestPath
+      .request_host = .requestHost
+      .user_agent = .userAgent
+
+      .status_code = to_int(.api.statusCode) ?? null
+
+      .is_api_error = false
+      if is_integer(.status_code) {
+        .is_api_error, err = .status_code >= 400
+        if err != null {
+          .is_api_error = false
+        }
+      }
+
+      # верхний уровень
+      del(.accessKey)
+      del(.access_key)
+
+      # claims: либо убрать целиком, либо только ключ
+      # del(.requestClaims)
+      del(.requestClaims.accessKey)
+
+      # requestHeader: удаляем чувствительные заголовки через remove()
+      .requestHeader = remove!(value: .requestHeader, path: ["Authorization"])
+      .requestHeader = remove!(value: .requestHeader, path: ["X-Amz-Security-Token"])
+
+      # при желании можно убрать и эти поля
+      # .requestHeader = remove!(value: .requestHeader, path: ["X-Amz-Date"])
+      # .requestHeader = remove!(value: .requestHeader, path: ["X-Amz-Content-Sha256"])
+
+  route_minio_audit:
+    type: route
+    inputs: ["normalize_minio_audit"]
+    reroute_unmatched: false
+    route:
+      all_audit: 'true'
+      api_errors: '.is_api_error == true'
+
+sinks:
+  file_minio_server:
+    type: file
+    inputs: ["normalize_minio_server"]
+    path: /var/log/vector/minio-server.jsonl
+    encoding:
+      codec: json
+
+  file_minio_audit:
+    type: file
+    inputs: ["route_minio_audit.all_audit"]
+    path: /var/log/vector/minio-audit.jsonl
+    encoding:
+      codec: json
+
+  file_minio_api_errors:
+    type: file
+    inputs: ["route_minio_audit.api_errors"]
+    path: /var/log/vector/minio-api-errors.jsonl
+    encoding:
+      codec: json
