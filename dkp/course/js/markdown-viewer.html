@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Markdown Viewer</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.5.0/github-markdown.min.css">
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            background: #f6f8fa;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        }
+        .container {
+            max-width: 980px;
+            margin: 0 auto;
+            background: white;
+            padding: 45px;
+            border-radius: 6px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24);
+        }
+        .markdown-body {
+            box-sizing: border-box;
+            min-width: 200px;
+        }
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+            font-size: 18px;
+        }
+        .error {
+            background: #ffebee;
+            color: #c62828;
+            padding: 20px;
+            border-radius: 4px;
+            border-left: 4px solid #c62828;
+            margin: 20px 0;
+        }
+        .toolbar {
+            background: #24292e;
+            color: white;
+            padding: 10px 20px;
+            margin: -45px -45px 30px -45px;
+            border-radius: 6px 6px 0 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .toolbar h1 {
+            margin: 0;
+            font-size: 16px;
+            font-weight: 600;
+        }
+        .toolbar a {
+            color: #58a6ff;
+            text-decoration: none;
+            font-size: 14px;
+        }
+        .toolbar a:hover {
+            text-decoration: underline;
+        }
+        @media (max-width: 767px) {
+            .container {
+                padding: 15px;
+            }
+            .toolbar {
+                margin: -15px -15px 20px -15px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="toolbar">
+            <h1 id="filename">Loading...</h1>
+            <a href="#" id="raw-link">View Raw</a>
+        </div>
+        <div id="content" class="markdown-body">
+            <div class="loading">Loading markdown...</div>
+        </div>
+    </div>
+
+    <script>
+        marked.setOptions({
+            breaks: true,
+            gfm: true,
+            highlight: function(code, lang) {
+                return code;
+            }
+        });
+
+        // Функция для проверки безопасности URL
+        function isSecureUrl(url) {
+            try {
+                const urlObj = new URL(url, window.location.origin);
+                
+                // Проверяем, что это тот же origin (протокол + хост + порт)
+                if (urlObj.origin !== window.location.origin) {
+                    console.error('Security: External URL blocked', urlObj.origin);
+                    return false;
+                }
+                
+                // Проверяем, что путь не содержит опасных последовательностей
+                const path = urlObj.pathname;
+                
+                // Нормализуем путь для проверки
+                const normalizedPath = path.replace(/\/+/g, '/');
+                
+                // Запрещаем ../ и другие попытки обхода
+                if (normalizedPath.includes('..')) {
+                    console.error('Security: Path traversal blocked');
+                    return false;
+                }
+                
+                return true;
+            } catch (e) {
+                console.error('Security: Invalid URL', e);
+                return false;
+            }
+        }
+
+        async function loadMarkdown() {
+            const urlParams = new URLSearchParams(window.location.search);
+            let file = urlParams.get('file');
+            
+            if (!file) {
+                document.getElementById('content').innerHTML = 
+                    '<div class="error">No file specified. Add ?file=yourfile.md to the URL</div>';
+                return;
+            }
+
+            try {
+                // Декодируем URL, если он был закодирован
+                file = decodeURIComponent(file);
+                
+                // Если это полный URL (начинается с http:// или https://)
+                if (file.match(/^https?:\/\//)) {
+                    // Проверяем, что это URL нашего сервера
+                    const fileUrl = new URL(file);
+                    if (fileUrl.origin !== window.location.origin) {
+                        throw new Error('External URLs are not allowed for security reasons');
+                    }
+                    // Используем pathname из URL
+                    file = fileUrl.pathname;
+                }
+                
+                // Убираем множественные слеши
+                file = file.replace(/\/+/g, '/');
+                
+                // Если путь не начинается с /, добавляем текущий путь
+                if (!file.startsWith('/')) {
+                    const currentPath = window.location.pathname.substring(0, window.location.pathname.lastIndexOf('/'));
+                    file = currentPath + '/' + file;
+                }
+                
+                // Создаем полный URL для проверки
+                const fullUrl = new URL(file, window.location.origin);
+                
+                // Проверяем безопасность URL
+                if (!isSecureUrl(fullUrl.href)) {
+                    throw new Error('Access denied: URL is not allowed');
+                }
+                
+                // Показываем имя файла
+                const filename = file.split('/').pop();
+                document.getElementById('filename').textContent = filename;
+                document.getElementById('raw-link').href = file;
+
+                // Загружаем содержимое файла
+                const response = await fetch(file);
+                if (!response.ok) throw new Error('File not found (status: ' + response.status + ')');
+                
+                const markdownText = await response.text();
+                
+                // Конвертируем Markdown в HTML
+                const htmlContent = marked.parse(markdownText);
+                
+                // Отображаем результат
+                document.getElementById('content').innerHTML = htmlContent;
+                
+            } catch (error) {
+                document.getElementById('content').innerHTML = 
+                    `<div class="error">Error loading markdown: ${error.message}</div>`;
+            }
+        }
+
+        loadMarkdown();
+    </script>
+</body>
+</html>

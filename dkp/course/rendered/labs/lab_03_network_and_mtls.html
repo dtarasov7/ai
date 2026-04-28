@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Лабораторная работа 3. Минимальные сетевые требования и mTLS</title>
+  <link rel="stylesheet" href="../../styles.css">
+  <style>
+    body {
+      background: #f6f8f5;
+    }
+    .viewer-page {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 28px;
+    }
+    .markmap-viewer-page {
+      width: 100%;
+      max-width: none;
+      margin: 0;
+      padding: 12px 18px 18px;
+    }
+    .viewer-topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 18px;
+      padding: 12px 0;
+    }
+    .viewer-topbar a,
+    .markmap-actions a,
+    .markmap-actions button {
+      display: inline-flex;
+      align-items: center;
+      min-height: 34px;
+      padding: 0 12px;
+      border: 0;
+      border-radius: 6px;
+      background: #fff;
+      color: #165745;
+      text-decoration: none;
+      font: inherit;
+      cursor: pointer;
+    }
+    .markdown-body {
+      background: #fff;
+      border: 1px solid rgba(31, 46, 40, 0.14);
+      border-radius: 8px;
+      padding: 28px;
+      line-height: 1.6;
+    }
+    .markdown-body table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 18px 0;
+    }
+    .markdown-body th,
+    .markdown-body td {
+      border: 1px solid rgba(31, 46, 40, 0.2);
+      padding: 8px 10px;
+      vertical-align: top;
+    }
+    .markdown-body pre {
+      overflow-x: auto;
+      padding: 16px;
+      border-radius: 8px;
+      background: #f1f3f2;
+      color: #1f2e28;
+    }
+    .markdown-body pre code {
+      color: inherit;
+    }
+    .markmap-page {
+      min-height: calc(100vh - 80px);
+      background: #fff;
+      padding: 0;
+    }
+    .markmap-toolbar {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+      margin-bottom: 12px;
+      padding-bottom: 12px;
+    }
+    .markmap-toolbar h2 {
+      margin: 0 0 6px;
+    }
+    .markmap-toolbar p {
+      margin: 0;
+      color: #5c6b63;
+    }
+    .markmap-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      align-items: center;
+      max-width: 680px;
+    }
+    .markmap-status {
+      flex: 1 1 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-width: 260px;
+      color: #5c6b63;
+      font-size: 12px;
+      line-height: 1.35;
+      text-align: right;
+    }
+    #zoom-in,
+    #zoom-out {
+      width: 34px;
+      justify-content: center;
+      padding: 0;
+    }
+    #markmap-svg {
+      width: 100%;
+      height: calc(100vh - 160px);
+      min-height: 680px;
+    }
+    .settings-panel {
+      position: fixed;
+      top: 0;
+      right: -360px;
+      z-index: 20;
+      width: 340px;
+      max-width: calc(100vw - 28px);
+      height: 100vh;
+      background: #fff;
+      box-shadow: -8px 0 24px rgba(31, 46, 40, 0.12);
+      transition: right 0.2s ease;
+      overflow-y: auto;
+    }
+    .settings-panel.active {
+      right: 0;
+    }
+    .settings-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      padding: 16px 18px;
+      font-weight: 700;
+    }
+    .settings-content {
+      padding: 18px;
+    }
+    .setting-group {
+      margin-bottom: 18px;
+    }
+    .setting-label {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 8px;
+      color: #24352e;
+      font-size: 14px;
+      font-weight: 600;
+    }
+    .setting-value {
+      color: #165745;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    .setting-slider {
+      width: 100%;
+    }
+    .close-settings {
+      width: 34px;
+      height: 34px;
+      padding: 0;
+      border: 0;
+      border-radius: 6px;
+      background: #fff;
+      color: #165745;
+      cursor: pointer;
+      font-size: 22px;
+      line-height: 1;
+    }
+    .reset-button {
+      width: 100%;
+      min-height: 38px;
+      border: 0;
+      border-radius: 6px;
+      background: #fff;
+      color: #165745;
+      cursor: pointer;
+      font: inherit;
+    }
+    .viewer-error {
+      margin: 24px 0;
+      padding: 18px;
+      border-left: 4px solid #b3261e;
+      background: #fff1f1;
+      color: #77120c;
+    }
+    @media (max-width: 760px) {
+      .viewer-page {
+        padding: 14px;
+      }
+      .markmap-viewer-page {
+        padding: 8px;
+      }
+      .viewer-topbar,
+      .markmap-toolbar {
+        flex-direction: column;
+        align-items: stretch;
+      }
+      .markdown-body {
+        padding: 18px;
+      }
+      #markmap-svg {
+        height: calc(100vh - 220px);
+        min-height: 480px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="viewer-page">
+    <nav class="viewer-topbar">
+      <a href="../../index.html">К основному курсу</a>
+      <a href="../../labs/lab_03_network_and_mtls.md">Открыть исходный файл</a>
+    </nav>
+<main class="markdown-body">
+<h1>Лабораторная работа 3. Минимальные сетевые требования и mTLS</h1>
+<h2>Цель</h2>
+<p>Ограничить east-west трафик <code>shop-demo</code>, ввести default deny и построить доверие между сервисами на основе ServiceAccount, а не IP-адреса.</p>
+<h2>Исходные материалы</h2>
+<ul>
+<li><code>shop-demo/manifests/</code></li>
+<li>глава 3 курса</li>
+<li>markmap <code>markmaps/chapter_03_network_mtls.mm</code></li>
+</ul>
+<h2>Ожидаемое время</h2>
+<p>90-120 минут</p>
+<h2>Задание</h2>
+<ol>
+<li>Составьте матрицу допустимых соединений:<ul>
+<li><code>frontend -&gt; orders</code>;</li>
+<li><code>orders -&gt; payments</code>;</li>
+<li>что должно быть запрещено.</li>
+</ul>
+</li>
+<li>Подготовьте минимальный набор сетевых правил:<ul>
+<li>default deny ingress;</li>
+<li>default deny egress там, где это допустимо;</li>
+<li>allow only explicit dependencies.</li>
+</ul>
+</li>
+<li>Определите, где достаточно <code>NetworkPolicy</code>, а где действительно нужен язык Cilium.</li>
+<li>Для цепочки <code>orders -&gt; payments</code> спроектируйте:<ul>
+<li>strict mTLS;</li>
+<li>доверенный ServiceAccount сервиса;</li>
+<li><code>AuthorizationPolicy</code>.</li>
+</ul>
+</li>
+<li>Подготовьте YAML-манифесты для двух способов выразить допустимую связь:<ul>
+<li>стандартный <code>NetworkPolicy</code>;</li>
+<li><code>CiliumNetworkPolicy</code>, если в вашем сценарии есть причина использовать возможности Cilium.</li>
+</ul>
+</li>
+<li>Опишите, как вы будете тестировать отсутствие перемещения атакующего внутри среды (lateral movement).</li>
+</ol>
+<h2>Что нужно сдать</h2>
+<ul>
+<li>network dependency matrix;</li>
+<li>набор <code>NetworkPolicy</code>/<code>CiliumNetworkPolicy</code>, <code>PeerAuthentication</code> и <code>AuthorizationPolicy</code>;</li>
+<li>схема доверия между сервисами (trust between services);</li>
+<li>план тестирования допустимых и запрещённых связей.</li>
+</ul>
+<h2>Критерии завершения</h2>
+<ul>
+<li>изоляция namespace не подменяется предположением “и так всё разделено”;</li>
+<li>отдельно рассмотрен egress;</li>
+<li>mTLS не используется как замена segmentation;</li>
+<li>есть тест на запрещённый доступ из неподходящего namespace.</li>
+</ul>
+
+</main>
+  </div>
+</body>
+</html>

@@ -1,0 +1,48 @@
+# Глава 10. NeuVector и внешние security-платформы
+
+- Зачем внешний security product
+  - Поведенческий baseline
+  - Runtime protection
+  - Network map
+  - Registry scanning
+  - SOC workflow
+- NeuVector
+  - Experimental module в DKP
+  - Controller
+  - Enforcer
+  - Scanner
+  - Manager
+  - Требует ресурсов и storage
+- Режимы
+  - Discover
+  - Monitor
+  - Protect
+  - Поэтапный rollout
+- DKP built-ins перед внешним продуктом
+  - Admission
+  - RBAC
+  - NetworkPolicy
+  - operator-trivy
+  - runtime-audit-engine
+  - API audit
+  - log-shipper
+- Luntry
+  - Публично заявлена совместимость с Deckhouse
+  - Kubernetes-native security observability
+  - eBPF sensor
+  - on-premise
+  - Helm chart
+  - Требует проверки по версии и правам
+- Вопросы к вендору
+  - Совместимость
+  - Privileged permissions
+  - Host mounts
+  - RBAC
+  - Data flow
+  - SIEM integration
+  - Update and rollback
+- Decision matrix
+  - Какие gaps закрываем
+  - Какая цена эксплуатации
+  - Где риск false positives
+  - Кто владеет rules

@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>v2. Глава 9. Compliance, CIS и DKP CSE</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="page">
+    <header class="hero">
+      <span class="eyebrow">Глава 9</span>
+      <h1>Compliance, CIS и DKP CSE: что это даёт и чего не заменяет</h1>
+      <p>В этой главе мы отделяем реальную безопасность от отчётности. Compliance помогает доказать соответствие требованиям, но не заменяет threat model, инженерные ограничения, расследование findings и эксплуатационную дисциплину.</p>
+      <div class="meta">
+        <span class="badge">Фокус: CIS + compliance</span>
+        <span class="badge">DKP CSE</span>
+        <span class="badge">Дата сверки: 26 апреля 2026</span>
+        <span class="badge">Есть лабораторная работа</span>
+      </div>
+    </header>
+
+    <div class="layout">
+      <aside class="toc">
+        <h3>Содержание</h3>
+        <ol>
+          <li><a href="#outcomes">Что вы сможете после главы</a></li>
+          <li><a href="#scenario">Где эта глава в сквозном сценарии</a></li>
+          <li><a href="#terms">Базовые понятия</a></li>
+          <li><a href="#cis">CIS Kubernetes Benchmark в DKP</a></li>
+          <li><a href="#reports">Где смотреть результаты</a></li>
+          <li><a href="#system-namespaces">Почему системные namespace имеют исключения</a></li>
+          <li><a href="#cse">DKP Certified Security Edition</a></li>
+          <li><a href="#audit-pack">Что показать аудитору</a></li>
+          <li><a href="#lab">Лабораторная работа</a></li>
+          <li><a href="#ownership">Что DKP даёт из коробки, а что делает команда</a></li>
+          <li><a href="#review">Вопросы для самопроверки</a></li>
+          <li><a href="#sources">Источники</a></li>
+        </ol>
+      </aside>
+
+      <main class="main">
+        <section class="section" id="outcomes">
+          <h2>Что вы сможете после главы</h2>
+          <div class="grid two">
+            <div class="card">
+              <h3>Обязательный минимум</h3>
+              <ul>
+                <li>Объяснить, что такое compliance и чем он отличается от фактической защищённости.</li>
+                <li>Понимать, как DKP использует Trivy Operator для CIS Kubernetes Benchmark checks.</li>
+                <li>Читать <code>ClusterComplianceReport</code> и отделять автоматические findings от ручной проверки.</li>
+                <li>Объяснить, что DKP CSE даёт как сертифицированная редакция и чего она не делает за команду.</li>
+              </ul>
+            </div>
+            <div class="card">
+              <h3>Углубление и применимость</h3>
+              <ul>
+                <li>Готовить evidence pack для внутреннего или внешнего аудита.</li>
+                <li>Понимать исключения DKP для системных namespace <code>d8-*</code> и <code>kube-system</code>.</li>
+                <li>Связывать compliance findings с реальными изменениями RBAC, Pod security, network policy и secret delivery.</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <section class="section" id="scenario">
+          <h2>Где эта глава в сквозном сценарии</h2>
+          <p class="lead">После того как <code>shop-demo</code> получил политики допуска, сеть, доступ, секреты и scanning, появляется следующий вопрос: как доказать, что минимальные требования действительно выполняются, и как объяснить исключения. Эта глава учит строить audit trail для уже внедрённых мер защиты.</p>
+          <div class="diagram">
+            <pre><code>меры защиты в кластере
+      |
+      v
+CIS checks / reports / dashboards
+      |
+      v
+evidence pack -> audit discussion
+      |
+      v
+engineering actions, not just reports</code></pre>
+          </div>
+        </section>
+
+        <section class="section" id="terms">
+          <h2>Базовые понятия</h2>
+          <ul>
+            <li><strong>Compliance</strong> — соответствие внешнему стандарту, внутренней политике или регуляторному требованию.</li>
+            <li><strong>CIS Kubernetes Benchmark</strong> — набор рекомендаций по безопасной конфигурации Kubernetes.</li>
+            <li><strong>Compliance finding</strong> — найденное несоответствие требованию: например, слишком широкая RBAC-роль или Pod без нужного securityContext.</li>
+            <li><strong>Evidence</strong> — доказательство для проверки: отчёт, YAML, лог, dashboard, ссылка на change request или результат команды.</li>
+            <li><strong>Compensating control</strong> — компенсирующая мера, которая снижает риск, если требование нельзя выполнить буквально.</li>
+          </ul>
+          <div class="note">
+            Хорошая формулировка для новичка: compliance отвечает на вопрос “можем ли мы показать соответствие требованию”, а security engineering отвечает на вопрос “действительно ли риск снижен”.
+          </div>
+        </section>
+
+        <section class="section" id="cis">
+          <h2>CIS Kubernetes Benchmark в DKP</h2>
+          <p>DKP выполняет CIS-проверки через <code>operator-trivy</code>. Проверяются как настройки control plane и worker nodes, так и Kubernetes-объекты: RBAC, Pod Security Standards, network policies и другие элементы конфигурации.</p>
+          <pre><code>apiVersion: deckhouse.io/v1alpha1
+kind: ModuleConfig
+metadata:
+  name: operator-trivy
+spec:
+  version: 1
+  enabled: true
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: payments
+  labels:
+    security-scanning.deckhouse.io/enabled: ""</code></pre>
+          <p>Для compliance важно понимать расписание и область покрытия: CIS checks выполняются регулярно, но отчёт не освобождает команду от анализа исключений, false positives и ручных проверок.</p>
+        </section>
+
+        <section class="section" id="reports">
+          <h2>Где смотреть результаты</h2>
+          <div class="grid two">
+            <div class="card">
+              <h3>В Kubernetes API</h3>
+              <ul>
+                <li><code>ClusterComplianceReport</code> — сводный отчёт по CIS compliance.</li>
+                <li><code>VulnerabilityReport</code> — уязвимости образов.</li>
+                <li><code>SbomReport</code> — состав образов.</li>
+                <li><code>ConfigAuditReport</code> — проблемы конфигурации Kubernetes-объектов.</li>
+                <li><code>ExposedSecretReport</code> — секреты, найденные в контейнерах.</li>
+              </ul>
+            </div>
+            <div class="card">
+              <h3>В Grafana</h3>
+              <ul>
+                <li><code>Security / CIS Kubernetes Benchmark</code>.</li>
+                <li><code>Security / Trivy Image Vulnerability Overview</code>.</li>
+                <li>Kubernetes audit logs.</li>
+                <li>Runtime audit engine logs.</li>
+                <li>Admission policy engine violations.</li>
+              </ul>
+            </div>
+          </div>
+          <pre><code>d8 k get clustercompliancereports.aquasecurity.github.io cis -o json | \
+  jq '.status.detailReport.results | map(select(.checks | map(.success) | all | not))'</code></pre>
+        </section>
+
+        <section class="section" id="system-namespaces">
+          <h2>Почему системные namespace имеют исключения</h2>
+          <p>В CIS-отчётах DKP часть checks отключена или исключена для системных namespace. Это не “дырка”, а следствие архитектуры: сетевые агенты, storage-компоненты, node exporters и другие системные workloads иногда обязаны работать с host network, hostPath, root или дополнительными capabilities.</p>
+          <table>
+            <thead>
+              <tr>
+                <th>Что важно объяснить</th>
+                <th>Практический вывод</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Системные компоненты могут иметь привилегии по технической необходимости.</td>
+                <td>Эти исключения нельзя копировать в пользовательские namespace.</td>
+              </tr>
+              <tr>
+                <td>Некоторые CIS checks требуют ручной интерпретации.</td>
+                <td>Compliance report — начало анализа, а не автоматический verdict.</td>
+              </tr>
+              <tr>
+                <td>DKP может исключать checks из метрик, но сохранять результаты для аудита.</td>
+                <td>Нужно знать, где находится raw evidence и как его объяснять.</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section class="section" id="cse">
+          <h2>DKP Certified Security Edition</h2>
+          <p>DKP Certified Security Edition (CSE) — сертифицированная редакция платформы. По публичным материалам Deckhouse CSE имеет сертификат ФСТЭК России № 4860 от 04.10.2024 на ПО Deckhouse Platform CSE, соответствует требованиям приказа ФСТЭК № 118 к средствам контейнеризации по 4-му классу защиты и требованиям приказа № 76 по 4-му уровню доверия.</p>
+          <div class="grid two">
+            <div class="card">
+              <h3>Что CSE даёт</h3>
+              <ul>
+                <li>Сертифицированную поставку платформы для регулируемых сред.</li>
+                <li>Основание для включения DKP в контур compliance и регуляторной документации.</li>
+                <li>Упрощение разговора с аудитом о статусе платформенного ПО.</li>
+              </ul>
+            </div>
+            <div class="card">
+              <h3>Чего CSE не заменяет</h3>
+              <ul>
+                <li>Проектирование RBAC, NetworkPolicy, ProjectTemplate и secret delivery для конкретной организации.</li>
+                <li>Разбор findings, исправление уязвимых образов и сопровождение исключений.</li>
+                <li>Локальные процедуры доступа, change management, incident response и evidence collection.</li>
+              </ul>
+            </div>
+          </div>
+          <div class="note">
+            Сертифицированная платформа не делает любую установку автоматически безопасной. Она даёт сильную базу и юридически значимый статус продукта, но эксплуатационная конфигурация всё равно остаётся ответственностью команды.
+          </div>
+        </section>
+
+        <section class="section" id="audit-pack">
+          <h2>Что показать аудитору</h2>
+          <ol>
+            <li>Версию DKP, редакцию, release channel и статус модулей безопасности.</li>
+            <li>CIS summary из Grafana и raw <code>ClusterComplianceReport</code>.</li>
+            <li>Список пользовательских namespace и их labels для scanning/policy enforcement.</li>
+            <li>Примеры <code>OperationPolicy</code>, <code>NetworkPolicy</code>, <code>RoleBinding</code>, <code>Project</code>/<code>ProjectTemplate</code>.</li>
+            <li>Список исключений: кто владелец, почему исключение нужно, когда оно пересматривается.</li>
+            <li>Action log: какие findings привели к изменению образа, роли, политики или процесса.</li>
+          </ol>
+        </section>
+
+        <section class="section" id="lab">
+          <h2>Лабораторная работа</h2>
+          <div class="grid two">
+            <div class="card">
+              <h3>Задача</h3>
+              <ol>
+                <li>Собрать evidence pack по <code>shop-demo</code>.</li>
+                <li>Показать, какие CIS findings являются реальными проблемами, а какие требуют объяснения или исключения.</li>
+                <li>Подготовить список corrective actions и владельцев.</li>
+                <li>Сформулировать, что меняется при использовании DKP CSE и что всё равно остаётся на стороне команды.</li>
+              </ol>
+            </div>
+            <div class="card">
+              <h3>Ожидаемый результат</h3>
+              <ul>
+                <li>Короткий compliance report для <code>shop-demo</code>.</li>
+                <li>Таблица <code>finding -> риск -> владелец -> действие -> evidence</code>.</li>
+                <li>Список исключений и компенсирующих мер защиты (compensating controls).</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <section class="section" id="ownership">
+          <h2>Что DKP даёт из коробки, а что делает команда</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>DKP из коробки</th>
+                <th>Что должна сделать команда</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Даёт CIS checks, reports и security dashboards.</td>
+                <td>Назначить владельцев findings и процесс их разбора.</td>
+              </tr>
+              <tr>
+                <td>Даёт CSE как сертифицированную редакцию для регулируемых сред.</td>
+                <td>Спроектировать локальную эксплуатационную конфигурацию и evidence process.</td>
+              </tr>
+              <tr>
+                <td>Документирует часть исключений для системных namespace.</td>
+                <td>Не переносить системные исключения на приложения и объяснять локальные отклонения.</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section class="section" id="review">
+          <h2>Вопросы для самопроверки</h2>
+          <ol>
+            <li>Почему compliance finding не всегда равен инциденту?</li>
+            <li>Почему 100% PASS в отчёте не является гарантией отсутствия риска?</li>
+            <li>Какие документы и YAML-объекты вы бы включили в evidence pack?</li>
+            <li>Что даёт DKP CSE регулируемой организации?</li>
+            <li>Почему системные namespace могут иметь исключения, но пользовательские namespace не должны их наследовать?</li>
+          </ol>
+        </section>
+
+        <section class="section" id="sources">
+          <h2>Источники</h2>
+          <ul class="sources">
+            <li><a href="https://deckhouse.io/modules/operator-trivy/cis_checks.html">Deckhouse: operator-trivy CIS Kubernetes Benchmark checks</a>.</li>
+            <li><a href="https://deckhouse.io/modules/operator-trivy/">Deckhouse: operator-trivy module</a>.</li>
+            <li><a href="https://deckhouse.io/products/kubernetes-platform/documentation/v1/user/web/grafana.html">Deckhouse: Grafana security dashboards</a>.</li>
+            <li><a href="https://deckhouse.ru/products/kubernetes-platform/certified-security-edition/">Deckhouse: Certified Security Edition</a>.</li>
+            <li><a href="https://www.cisecurity.org/benchmark/kubernetes">CIS Kubernetes Benchmark</a>.</li>
+          </ul>
+        </section>
+
+        <div class="chapter-nav">
+          <div class="nav-card">
+            <small>Предыдущая глава</small>
+            <a href="../chapter_8/index.html">Глава 8. Мультиарендность</a>
+          </div>
+          <div class="nav-card">
+            <small>Следующая глава</small>
+            <a href="../chapter_10/index.html">Глава 10. NeuVector и Luntry</a>
+          </div>
+          <div class="nav-card">
+            <small>К оглавлению</small>
+            <a href="../index.html">Вернуться к курсу v2</a>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+</body>
+</html>

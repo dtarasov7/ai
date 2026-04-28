@@ -1,0 +1,38 @@
+# Глава 9. Compliance, CIS и DKP CSE
+
+- Compliance
+  - Соответствие стандарту или политике
+  - Evidence для аудита
+  - Не равно полной безопасности
+- CIS Kubernetes Benchmark
+  - Проверяемые требования
+  - Автоматические findings
+  - Ручные проверки остаются
+- `operator-trivy`
+  - `ClusterComplianceReport`
+  - `VulnerabilityReport`
+  - `ConfigAuditReport`
+  - `ExposedSecretReport`
+  - `SbomReport`
+  - Grafana dashboards
+- Как читать finding
+  - Что нарушено
+  - Где найдено
+  - Почему это риск
+  - Кто владелец
+  - Как проверить исправление
+- DKP CSE
+  - Сертифицированная редакция
+  - Уменьшает часть регуляторной неопределённости
+  - Не заменяет проектирование доступа, сети и секретов
+- Чего compliance не заменяет
+  - Threat model
+  - Access review
+  - Incident response
+  - Vendor integrations
+  - Эксплуатационную дисциплину
+- Практика
+  - Найти отчёты
+  - Разобрать findings
+  - Собрать audit pack
+  - Отделить автоматическое evidence от ручной проверки

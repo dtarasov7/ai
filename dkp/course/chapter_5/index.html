@@ -1,0 +1,511 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>v2. Глава 5. Argo CD и operator-argo: контролируемый доступ к приложениям, GitOps и новые риски</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="page">
+    <header class="hero">
+      <span class="eyebrow">Глава 5</span>
+      <h1>Argo CD и <code>operator-argo</code>: контролируемый доступ к приложениям, GitOps и новые риски</h1>
+      <p>В этой главе Argo CD рассматривается не как "ещё один модный deployment tool", а как отдельный слой доступа и изменений. Он может убрать у dev/test прямой <code>kubectl</code> без потери удобства диагностики, но взамен добавляет новый привилегированный контур: со своим UI, API, токенами, RBAC, repo credentials и ошибками настройки. Задача этой главы - научиться видеть обе стороны сразу.</p>
+      <div class="meta">
+        <span class="badge">Фокус: operator-argo + Argo CD</span>
+        <span class="badge">GitOps, AppProject, RBAC</span>
+        <span class="badge">Дата сверки: 27 апреля 2026</span>
+        <span class="badge">Есть лабораторная работа</span>
+      </div>
+    </header>
+
+    <div class="layout">
+      <aside class="toc">
+        <h3>Содержание</h3>
+        <ol>
+          <li><a href="#outcomes">Что вы сможете после главы</a></li>
+          <li><a href="#scenario">Где эта глава в сквозном сценарии</a></li>
+          <li><a href="#why">Зачем теме Argo CD нужна отдельная глава</a></li>
+          <li><a href="#glossary">Мини-словарь</a></li>
+          <li><a href="#operator-argo">Что делает <code>operator-argo</code> в DKP</a></li>
+          <li><a href="#why-argo">Какие трудности Argo CD действительно снимает</a></li>
+          <li><a href="#model">Модель контролируемого доступа к приложениям</a></li>
+          <li><a href="#rbac">RBAC Argo CD: что можно давать, а что лучше не давать</a></li>
+          <li><a href="#appproject">Почему <code>AppProject</code> - это граница полномочий</a></li>
+          <li><a href="#risks">Какие новые риски появляются</a></li>
+          <li><a href="#autosync">Решение по <code>auto-sync</code> и <code>self-heal</code></a></li>
+          <li><a href="#when-not">Когда Argo CD может не окупиться</a></li>
+          <li><a href="#lab">Лабораторная работа</a></li>
+          <li><a href="#ownership">Что DKP даёт из коробки, а что делает команда</a></li>
+          <li><a href="#review">Вопросы для самопроверки</a></li>
+          <li><a href="#sources">Источники</a></li>
+        </ol>
+      </aside>
+
+      <main class="main">
+        <section class="section" id="outcomes">
+          <h2>Что вы сможете после главы</h2>
+          <div class="grid two">
+            <div class="card">
+              <h3>Обязательный минимум</h3>
+              <ul>
+                <li>Объяснить, зачем Argo CD вообще появляется в курсе по безопасности, а не только в курсе по CI/CD.</li>
+                <li>Понять, когда Argo CD позволяет убрать прямой <code>kubectl</code> у dev/test без потери диагностики.</li>
+                <li>Различать, какие действия через Argo CD допустимы для обычной команды, а какие должны остаться только у platform/SRE.</li>
+                <li>Читать <code>argocd-rbac-cm</code> и <code>AppProject</code> как описание границ доступа.</li>
+                <li>Понимать риск <code>auto-sync</code>, <code>self-heal</code>, <code>exec</code>, <code>override</code> и слишком широкого <code>AppProject</code>.</li>
+              </ul>
+            </div>
+            <div class="card">
+              <h3>Углубление и применимость</h3>
+              <ul>
+                <li>Оценивать, нужен ли Argo CD как пользовательский слой доступа именно в вашей среде, или прямой <code>kubectl</code> под жёсткие компенсирующие меры пока честнее и дешевле.</li>
+                <li>Связывать GitOps, auditability, drift detection и supply chain risk в одну инженерную картину.</li>
+                <li>Отдельно проектировать границы production и non-production для синхронизации и rollback.</li>
+                <li>Понимать, что <code>operator-argo</code> добавляет не только удобство, но и новый административный контур, который нужно сопровождать и обновлять.</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <section class="section" id="scenario">
+          <h2>Где эта глава в сквозном сценарии</h2>
+          <p class="lead">В <code>shop-demo</code> после IAM-главы уже понятно, кто вообще имеет право работать с кластером. Следующий практический вопрос звучит так: обязательно ли давать разработчикам и тестировщикам прямой доступ к Kubernetes API, если им в повседневной работе в основном нужны статус приложения, дерево ресурсов, события и логи?</p>
+          <div class="diagram">
+            <pre><code>Git repository
+      |
+      v
+Argo CD / operator-argo
+      |
+      +--> status / history / events / logs for dev/test
+      |
+      +--> controlled sync path
+      |
+      v
+Kubernetes cluster
+      ^
+      |
+direct kubectl stays only for platform/SRE</code></pre>
+          </div>
+          <p>Эта глава закрывает разрыв между "мы умеем выдавать RBAC" и "мы умеем не раздавать лишний доступ в кластер, не ломая людям работу".</p>
+        </section>
+
+        <section class="section" id="why">
+          <h2>Зачем теме Argo CD нужна отдельная глава</h2>
+          <p>Argo CD часто ошибочно воспринимают просто как инструмент автоматического деплоя. Для курса по безопасности этого мало. Как только вы начинаете использовать его не только для синхронизации манифестов, но и как пользовательский интерфейс для разработчиков, тестировщиков и аудиторов, он становится частью security architecture.</p>
+          <div class="grid two">
+            <div class="card">
+              <h3>Если объяснять совсем просто</h3>
+              <ul>
+                <li><strong>Kubernetes API</strong> - это прямой административный вход в кластер.</li>
+                <li><strong>Argo CD UI</strong> - это более узкий пользовательский вход, если вы специально сделали его узким.</li>
+                <li><strong>GitOps</strong> - это модель, где желаемое состояние хранится в Git, а не меняется вручную командой <code>kubectl apply</code>.</li>
+              </ul>
+            </div>
+            <div class="card">
+              <h3>Почему этого нельзя прятать в примечании</h3>
+              <ul>
+                <li>Меняется не только способ деплоя, но и модель доступа.</li>
+                <li>Появляется новый высокопривилегированный сервис.</li>
+                <li>Появляется второй слой RBAC поверх Kubernetes RBAC.</li>
+                <li>Ошибки в <code>AppProject</code> и sync-политиках меняют blast radius не хуже ошибок в обычном RBAC.</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <section class="section" id="glossary">
+          <h2>Мини-словарь</h2>
+          <div class="grid two">
+            <div class="card">
+              <ul>
+                <li><strong>GitOps</strong> - подход, при котором нужное состояние приложений хранится в Git, а кластер приводится к этому состоянию автоматически или полуавтоматически.</li>
+                <li><strong>Drift</strong> - расхождение между тем, что описано в Git, и тем, что реально работает в кластере.</li>
+                <li><strong>AppProject</strong> - объект Argo CD, который задаёт, из каких репозиториев можно брать манифесты, в какие namespace можно разворачивать приложения и какие типы ресурсов разрешены.</li>
+                <li><strong>Repo credentials</strong> - учётные данные, которыми Argo CD пользуется для доступа к Git-репозиторию или registry.</li>
+              </ul>
+            </div>
+            <div class="card">
+              <ul>
+                <li><strong><code>auto-sync</code></strong> - автоматическое применение изменений из Git без ручного подтверждения.</li>
+                <li><strong><code>self-heal</code></strong> - автоматическое возвращение к состоянию из Git, если кто-то изменил объект в кластере вручную.</li>
+                <li><strong><code>exec</code></strong> в Argo CD - право открыть интерактивную сессию внутрь контейнера. По сути это близко к <code>kubectl exec</code>.</li>
+                <li><strong>Break-glass</strong> - заранее описанный аварийный путь доступа, когда обычный путь через Argo CD, Git или SSO недоступен.</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <section class="section" id="operator-argo">
+          <h2>Что делает <code>operator-argo</code> в DKP</h2>
+          <p>Модуль <code>operator-argo</code> разворачивает в кластере Argo CD Operator. Дальше платформа создаёт конкретные инстансы Argo CD через ресурс <code>ArgoCD</code>. Для слушателя здесь важна не только эксплуатационная деталь "как ставится", но и смысл: появляется отдельный слой управления приложениями, который платформа должна сопровождать как security-sensitive компонент.</p>
+          <div class="grid two">
+            <div class="card">
+              <h3>Что это даёт</h3>
+              <ul>
+                <li>Более предсказуемую установку и обновление Argo CD через платформенный модуль.</li>
+                <li>Интеграцию с SSO Deckhouse через Dex.</li>
+                <li>Единый UI для просмотра приложений, статуса синхронизации, истории и логов.</li>
+              </ul>
+            </div>
+            <div class="card">
+              <h3>Что это не отменяет</h3>
+              <ul>
+                <li>Нужду отдельно проектировать RBAC самого Argo CD.</li>
+                <li>Нужду отдельно ограничивать источники манифестов и целевые namespace.</li>
+                <li>Нужду обновлять и проверять сам Argo CD как отдельный привилегированный сервис.</li>
+              </ul>
+            </div>
+          </div>
+          <pre><code>apiVersion: deckhouse.io/v1alpha1
+kind: ModuleConfig
+metadata:
+  name: operator-argo
+spec:
+  enabled: true
+  version: 1</code></pre>
+          <p>Практическая мысль здесь простая: как только вы включили <code>operator-argo</code>, вы не "чуть-чуть упростили delivery", а добавили в платформу ещё один контур, который теперь должен пройти через review прав, review конфигурации и цикл обновлений.</p>
+        </section>
+
+        <section class="section" id="why-argo">
+          <h2>Какие трудности Argo CD действительно снимает</h2>
+          <div class="grid two">
+            <div class="card">
+              <h3>Что становится лучше</h3>
+              <ul>
+                <li>Можно перестать массово раздавать kubeconfig и прямой <code>kubectl</code> разработчикам и тестировщикам.</li>
+                <li>Обычная диагностика переезжает в контролируемый UI: видны статус, события, дерево ресурсов и логи.</li>
+                <li>Изменения лучше аудируются: есть Git-история desired state и история синхронизации.</li>
+                <li>Проще замечать drift между "как должно быть" и "как стало на самом деле".</li>
+              </ul>
+            </div>
+            <div class="card">
+              <h3>Что именно это значит в жизни</h3>
+              <ul>
+                <li>У dev/test меньше причин просить "временный read-only kubeconfig".</li>
+                <li>У platform/SRE меньше ручной рутины вроде "скиньте, пожалуйста, логи из pod".</li>
+                <li>У аудитора появляется более наблюдаемый путь просмотра приложений, чем прямой вход в кластер.</li>
+              </ul>
+            </div>
+          </div>
+          <div class="note">
+            Важно: Argo CD решает задачу только тогда, когда вы даёте через него действительно более узкий доступ. Если через UI вы почти полностью вернули те же возможности, что и через <code>kubectl</code>, выигрыш по безопасности быстро исчезает.
+          </div>
+        </section>
+
+        <section class="section" id="model">
+          <h2>Модель контролируемого доступа к приложениям</h2>
+          <p>Хорошая учебная модель выглядит так: доступ к самим приложениям и их диагностике отделяется от административного доступа к кластеру. Для чтения и повседневной диагностики используется Argo CD. Для администрирования кластера, аварийных действий и platform-level изменений остаётся прямой <code>kubectl</code>.</p>
+          <table>
+            <thead>
+              <tr>
+                <th>Группа</th>
+                <th>Основной интерфейс</th>
+                <th>Что разрешено</th>
+                <th>Что остаётся запрещено</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>shop-dev</code></td>
+                <td>Argo CD UI / CLI</td>
+                <td>статус приложения, дерево ресурсов, история синхронизации, логи</td>
+                <td><code>kubectl</code>, <code>exec</code>, изменение <code>AppProject</code>, sync в production</td>
+              </tr>
+              <tr>
+                <td><code>shop-test</code></td>
+                <td>Argo CD UI</td>
+                <td>статус rollout, события, логи</td>
+                <td><code>kubectl</code>, <code>exec</code>, доступ к чужим namespace</td>
+              </tr>
+              <tr>
+                <td><code>shop-auditors</code></td>
+                <td>Argo CD UI + отчёты</td>
+                <td>read-only просмотр приложений и связанной evidence</td>
+                <td>любые изменения, repo credentials, cluster-scoped действия</td>
+              </tr>
+              <tr>
+                <td><code>platform-sre</code></td>
+                <td><code>kubectl</code> + Argo CD admin</td>
+                <td>администрирование, break-glass, настройка оператора и sync-политик</td>
+                <td>неформальные исключения без журнала и review</td>
+              </tr>
+            </tbody>
+          </table>
+          <p>Сильная сторона этой модели в том, что она не путает "диагностировать приложение" и "администрировать кластер". Это разные виды доступа, и их не надо искусственно склеивать в одну роль.</p>
+        </section>
+
+        <section class="section" id="rbac">
+          <h2>RBAC Argo CD: что можно давать, а что лучше не давать</h2>
+          <p>Argo CD имеет собственную систему RBAC. Это отдельный слой поверх Kubernetes RBAC, и именно поэтому он требует отдельного проектирования. Для dev/test безопасный учебный baseline обычно очень узкий: видеть приложения и видеть логи. Всё остальное даётся только после отдельного решения.</p>
+          <pre><code>apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-rbac-cm
+  namespace: argocd
+data:
+  policy.default: role:none
+  policy.csv: |
+    p, role:shop-dev-readonly, applications, get, shop-demo/*, allow
+    p, role:shop-dev-readonly, logs, get, shop-demo/*, allow
+    p, role:shop-auditor-readonly, applications, get, shop-demo/*, allow
+    p, role:shop-auditor-readonly, logs, get, shop-demo/*, allow
+    g, shop-dev, role:shop-dev-readonly
+    g, shop-test, role:shop-dev-readonly
+    g, shop-auditors, role:shop-auditor-readonly</code></pre>
+          <div class="grid two">
+            <div class="card">
+              <h3>Почему это хороший минимум</h3>
+              <ul>
+                <li>Есть право видеть приложения.</li>
+                <li>Есть право видеть логи.</li>
+                <li>Нет широкого доступа "всем аутентифицированным пользователям".</li>
+              </ul>
+            </div>
+            <div class="card">
+              <h3>Что особенно легко испортить</h3>
+              <ul>
+                <li><code>policy.default</code> слишком широкая - и лишний доступ получают сразу все.</li>
+                <li><code>exec</code> - это уже почти возврат <code>kubectl exec</code> через UI.</li>
+                <li><code>override</code> - это путь применить произвольную ревизию или манифест в обход обычной Git-дисциплины.</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <section class="section" id="appproject">
+          <h2>Почему <code>AppProject</code> - это граница полномочий</h2>
+          <p>Очень частая ошибка - считать <code>AppProject</code> просто удобной папкой для приложений. На самом деле он описывает security boundary: откуда можно брать манифесты, куда их можно применять и какие типы объектов вообще разрешены.</p>
+          <pre><code>apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: shop-demo
+  namespace: argocd
+spec:
+  sourceRepos:
+    - https://git.example.org/platform/shop-demo.git
+  destinations:
+    - namespace: frontend
+      server: https://kubernetes.default.svc
+    - namespace: orders
+      server: https://kubernetes.default.svc
+    - namespace: payments
+      server: https://kubernetes.default.svc
+  clusterResourceWhitelist: []
+  namespaceResourceWhitelist:
+    - group: apps
+      kind: Deployment
+    - group: ""
+      kind: Service
+    - group: ""
+      kind: ConfigMap
+    - group: networking.k8s.io
+      kind: Ingress
+  namespaceResourceBlacklist:
+    - group: ""
+      kind: Secret</code></pre>
+          <div class="grid two">
+            <div class="card">
+              <h3>Что этот пример делает правильно</h3>
+              <ul>
+                <li>Разрешает ровно один репозиторий.</li>
+                <li>Разрешает только свои namespace.</li>
+                <li>Не даёт cluster-scoped ресурсы.</li>
+                <li>Не превращает Git в место хранения обычных <code>Secret</code>.</li>
+              </ul>
+            </div>
+            <div class="card">
+              <h3>Чем опасен слишком широкий проект</h3>
+              <ul>
+                <li>Команда может получить обходной путь к платформенным изменениям не через <code>kubectl</code>, а через GitOps.</li>
+                <li>Можно случайно разрешить чужие namespace.</li>
+                <li>Можно разрешить cluster-scoped объекты и тем самым фактически менять не приложение, а весь кластер.</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <section class="section" id="risks">
+          <h2>Какие новые риски появляются</h2>
+          <p>Argo CD уменьшает одну группу рисков и одновременно создаёт другую. Это нормально. Ошибка не в появлении риска как такового, а в том, что команда не замечает, что он появился.</p>
+          <div class="grid two">
+            <div class="card">
+              <h3>Риски, которые уменьшаются</h3>
+              <ul>
+                <li>Массовая раздача kubeconfig и прямого доступа к API.</li>
+                <li>Ручные ad hoc действия через <code>kubectl apply</code> без понятного review.</li>
+                <li>Слабая наблюдаемость изменений и drift.</li>
+              </ul>
+            </div>
+            <div class="card">
+              <h3>Риски, которые добавляются</h3>
+              <ul>
+                <li>Компрометация Argo CD, Git или repo credentials может привести к компрометации деплоя.</li>
+                <li>Появляется ещё один публичный или корпоративный UI/API endpoint.</li>
+                <li>Ошибки в Argo RBAC и Kubernetes RBAC накапливаются, а не взаимно отменяются.</li>
+              </ul>
+            </div>
+          </div>
+          <div class="card">
+            <h3>Особенно неприятные места</h3>
+            <ul>
+              <li><strong>Слишком широкий <code>AppProject</code></strong> - даёт лишние права через GitOps.</li>
+              <li><strong><code>exec</code> и <code>override</code></strong> - возвращают через UI то, что вы вроде бы хотели не раздавать через <code>kubectl</code>.</li>
+              <li><strong>Git как новая точка атаки</strong> - вредоносный commit, компрометация PR-пайплайна или утечка repo token становятся напрямую значимыми для кластера.</li>
+              <li><strong>Зависимость от SSO и Argo CD</strong> - если они недоступны, нужен заранее описанный break-glass путь.</li>
+            </ul>
+          </div>
+          <div class="note">
+            Отдельная тонкость operator-based модели: неаккуратная настройка управляемых namespace может неожиданно дать слишком широкие полномочия внутри этих namespace. Это ещё одна причина, почему platform-команда не должна отдавать обычным командам право менять саму модель Argo CD.
+          </div>
+        </section>
+
+        <section class="section" id="autosync">
+          <h2>Решение по <code>auto-sync</code> и <code>self-heal</code></h2>
+          <p>Эти функции легко выглядят как "просто удобная автоматизация", но для production это уже вопрос границы доверия. Если Git скомпрометирован или в merge попала ошибка, то автоматический sync быстро превращает её в реальное изменение среды.</p>
+          <table>
+            <thead>
+              <tr>
+                <th>Среда</th>
+                <th><code>auto-sync</code></th>
+                <th><code>self-heal</code></th>
+                <th>Разумный учебный baseline</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Production</td>
+                <td>обычно выключен</td>
+                <td>обычно выключен</td>
+                <td>Git + review + ручное подтверждение sync platform/SRE</td>
+              </tr>
+              <tr>
+                <td>Non-production</td>
+                <td>может быть включён</td>
+                <td>может быть включён</td>
+                <td>допустим после проверки команды и границ проекта</td>
+              </tr>
+            </tbody>
+          </table>
+          <p>Правильный вывод здесь не "автоматизация плоха". Правильный вывод другой: для разных сред цена ошибки разная, значит и sync-политика не обязана быть одинаковой.</p>
+        </section>
+
+        <section class="section" id="when-not">
+          <h2>Когда Argo CD может не окупиться</h2>
+          <p>Argo CD не обязан быть универсально правильным ответом. Иногда честнее оставить прямой <code>kubectl</code> очень узкому кругу людей и обложить его компенсирующими мерами, чем вводить новый привилегированный сервис, который команда не готова сопровождать.</p>
+          <div class="grid two">
+            <div class="card">
+              <h3>Когда Argo CD обычно полезен</h3>
+              <ul>
+                <li>Команд много, а прямой <code>kubectl</code> хочется резко сократить.</li>
+                <li>Нужен единый self-service просмотр приложений для dev/test.</li>
+                <li>GitOps уже является основной delivery-моделью.</li>
+                <li>Есть platform-команда, которая реально будет сопровождать новый контур.</li>
+              </ul>
+            </div>
+            <div class="card">
+              <h3>Когда он может принести больше вреда, чем пользы</h3>
+              <ul>
+                <li>Среда маленькая и команд мало.</li>
+                <li>Нет зрелого Git-process и нет SSO-дисциплины.</li>
+                <li>Команда не готова сопровождать ещё один привилегированный сервис.</li>
+                <li>В реальности через Argo CD всё равно планируют выдать почти те же права, что и через прямой <code>kubectl</code>.</li>
+              </ul>
+            </div>
+          </div>
+          <p>Поэтому хороший инженерный ответ здесь бывает двух типов: "да, Argo CD нужен, потому что он реально сужает доступ" или "нет, пока не нужен, потому что сейчас это будет дорогой дублирующий контур". Плохой ответ только один: "поставили, потому что так делают все".</p>
+        </section>
+
+        <section class="section" id="lab">
+          <h2>Лабораторная работа</h2>
+          <p>В этой лабораторной слушатель проектирует доступ dev/test к приложениям через Argo CD, решает, где остаётся прямой <code>kubectl</code>, и подготавливает YAML-примеры для <code>argocd-rbac-cm</code> и <code>AppProject</code>.</p>
+          <div class="button-row">
+            <a class="button-link" href="../labs/lab_05_argocd_access.md">Открыть лабораторную работу 5</a>
+          </div>
+        </section>
+
+        <section class="section" id="ownership">
+          <h2>Что DKP даёт из коробки, а что делает команда</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Слой</th>
+                <th>Что даёт DKP</th>
+                <th>Что остаётся за командой</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Установка и базовая эксплуатация</td>
+                <td>Модуль <code>operator-argo</code>, platform-managed путь развёртывания Argo CD.</td>
+                <td>Выбрать, нужен ли Argo CD вообще и сколько отдельных инстансов нужно для разных сред.</td>
+              </tr>
+              <tr>
+                <td>Аутентификация</td>
+                <td>Интеграция с Dex и общим SSO-контуром.</td>
+                <td>Согласовать группы, владельцев групп и lifecycle доступа.</td>
+              </tr>
+              <tr>
+                <td>Argo CD RBAC</td>
+                <td>Базовые механизмы авторизации самого Argo CD.</td>
+                <td>Определить роли, убрать широкую default-policy, решить вопрос с <code>logs</code>, <code>exec</code>, <code>override</code> и sync-правами.</td>
+              </tr>
+              <tr>
+                <td>Границы развёртывания</td>
+                <td>Поддержку <code>AppProject</code> и операторную модель.</td>
+                <td>Ограничить repo, namespace и типы ресурсов, не превратив GitOps в обход платформенных ограничений.</td>
+              </tr>
+              <tr>
+                <td>Надёжность и инциденты</td>
+                <td>Базовый продуктовый контур Argo CD.</td>
+                <td>Описать break-glass, обновления, мониторинг, экспорт audit-событий и реакцию на security advisories.</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section class="section" id="review">
+          <h2>Вопросы для самопроверки</h2>
+          <ol>
+            <li>Почему тема Argo CD в курсе по безопасности - это не "чужая DevOps-тема"?</li>
+            <li>Что именно получает dev/test через хороший ограниченный доступ к Argo CD, а что не должен получать?</li>
+            <li>Почему <code>AppProject</code> нужно считать границей полномочий, а не организационной папкой?</li>
+            <li>Чем опасны <code>exec</code>, <code>override</code> и слишком широкая <code>policy.default</code>?</li>
+            <li>Почему для production и non-production sync-политики часто должны различаться?</li>
+            <li>В каком случае вы бы сознательно отказались от Argo CD и оставили прямой <code>kubectl</code> под компенсирующие меры?</li>
+          </ol>
+        </section>
+
+        <section class="section" id="sources">
+          <h2>Источники</h2>
+          <ol>
+            <li><a href="https://deckhouse.io/modules/operator-argo/stable/">Deckhouse: operator-argo module</a>.</li>
+            <li><a href="https://deckhouse.io/modules/operator-argo/examples.html">Deckhouse: operator-argo examples</a>.</li>
+            <li><a href="https://argo-cd.readthedocs.io/en/stable/operator-manual/rbac/">Argo CD: RBAC</a>.</li>
+            <li><a href="https://argo-cd.readthedocs.io/en/release-2.14/operator-manual/declarative-setup/">Argo CD: declarative setup and AppProject</a>.</li>
+            <li><a href="https://argocd-operator.readthedocs.io/en/stable/usage/custom_roles/">Argo CD Operator: custom roles for managed namespaces</a>.</li>
+            <li><a href="https://argo-cd.readthedocs.io/en/stable/user-guide/auto_sync/">Argo CD: auto-sync and self-heal</a>.</li>
+            <li><a href="https://github.com/argoproj/argo-cd/security">Argo CD: security advisories</a>.</li>
+          </ol>
+        </section>
+
+        <div class="chapter-nav">
+          <div class="nav-card">
+            <small>Предыдущая глава</small>
+            <a href="../chapter_4/index.html">Глава 4. Управление доступом</a>
+          </div>
+          <div class="nav-card">
+            <small>Следующая глава</small>
+            <a href="../chapter_6/index.html">Глава 6. Сертификаты и секреты</a>
+          </div>
+          <div class="nav-card">
+            <small>К оглавлению</small>
+            <a href="../index.html">Вернуться к курсу v2</a>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+</body>
+</html>

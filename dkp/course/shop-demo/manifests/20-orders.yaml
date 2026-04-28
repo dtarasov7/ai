@@ -1,0 +1,44 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: orders-api
+  namespace: orders
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orders-api
+  namespace: orders
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: orders-api
+  template:
+    metadata:
+      labels:
+        app: orders-api
+    spec:
+      serviceAccountName: orders-api
+      containers:
+        - name: app
+          image: hashicorp/http-echo:1.0.0
+          args:
+            - -text=orders ok
+          env:
+            - name: PAYMENTS_URL
+              value: http://payments.payments.svc.cluster.local
+          ports:
+            - containerPort: 5678
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: orders
+  namespace: orders
+spec:
+  selector:
+    app: orders-api
+  ports:
+    - port: 80
+      targetPort: 5678

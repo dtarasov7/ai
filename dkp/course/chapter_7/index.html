@@ -1,0 +1,587 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>v2. Глава 7. Выявление уязвимостей и аудит безопасности в кластере</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="page">
+    <header class="hero">
+      <span class="eyebrow">Глава 7</span>
+      <h1>Выявление уязвимостей и аудит безопасности в кластере</h1>
+      <p>Даже строгие политики допуска и аккуратная RBAC-модель не гарантируют, что в кластере не появятся уязвимые образы, опасные runtime-действия или непонятные административные операции. Поэтому зрелый DKP-контур обязательно включает проверки и сигналы обнаружения проблем: <code>operator-trivy</code>, <code>runtime-audit-engine</code>, Kubernetes API audit и контроль целостности.</p>
+      <div class="meta">
+        <span class="badge">Фокус: scanning + runtime audit</span>
+        <span class="badge">Trivy + Falco + audit</span>
+        <span class="badge">Дата сверки: 27 апреля 2026</span>
+        <span class="badge">Есть лабораторная работа</span>
+      </div>
+    </header>
+
+    <div class="layout">
+      <aside class="toc">
+        <h3>Содержание</h3>
+        <ol>
+          <li><a href="#outcomes">Что вы сможете после главы</a></li>
+          <li><a href="#scenario">Где эта глава в сквозном сценарии</a></li>
+          <li><a href="#why">Почему проверки и сигналы обнаружения обязательны</a></li>
+          <li><a href="#trivy">operator-trivy и scanning</a></li>
+          <li><a href="#reports-dashboards">Reports и dashboard: где смотреть результат</a></li>
+          <li><a href="#supply">Минимальные требования к supply chain: trusted registries, digests, signatures, SBOM</a></li>
+          <li><a href="#deny-vulnerable-images">Блокировка уязвимых образов</a></li>
+          <li><a href="#runtime">runtime-audit-engine и Falco</a></li>
+          <li><a href="#api-audit">Kubernetes API audit</a></li>
+          <li><a href="#log-forwarding">Передача security logs во внешнее хранилище</a></li>
+          <li><a href="#integrity">Контроль целостности</a></li>
+          <li><a href="#process">Как превратить найденные проблемы в процесс</a></li>
+          <li><a href="#lab">Лабораторная работа</a></li>
+          <li><a href="#ownership">Что DKP даёт из коробки, а что делает команда</a></li>
+          <li><a href="#review">Вопросы для самопроверки</a></li>
+          <li><a href="#sources">Источники</a></li>
+        </ol>
+      </aside>
+
+      <main class="main">
+        <section class="section" id="outcomes">
+          <h2>Что вы сможете после главы</h2>
+          <div class="grid two">
+            <div class="card">
+              <h3>Обязательный минимум</h3>
+              <ul>
+                <li>Объяснить различие между scanning, контролем целостности, runtime detection и API audit.</li>
+                <li>Разобрать найденную проблему (finding) и понять, какое инженерное действие должно за ней последовать.</li>
+                <li>Построить базовый поток разборки CVE, runtime alerts и административных действий.</li>
+                <li>Понять, почему одних запретов и ограничений без обнаружения проблем недостаточно для устойчивой security-модели.</li>
+              </ul>
+            </div>
+            <div class="card">
+              <h3>Углубление и применимость</h3>
+              <ul>
+                <li>Усилить минимальные требования к supply chain за счёт trusted registries, digest pinning, подписей и SBOM.</li>
+                <li>Связать найденные проблемы с ужесточением политик допуска, RBAC, network policy и image lifecycle.</li>
+                <li>Подготовить процесс первичного разбора сигналов и роли владельцев найденных проблем (findings) по namespace и типам сигналов.</li>
+              </ul>
+              <p>Материал сверён на 26 апреля 2026 года. Подпись образов и SBOM здесь описываются как следующий уровень зрелости и должны проверяться на совместимость с вашим registry, CI/CD и политиками допуска.</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="section" id="scenario">
+          <h2>Где эта глава в сквозном сценарии</h2>
+          <p class="lead">К этому моменту <code>shop-demo</code> уже имеет минимальные требования к допуску Pod, сетевую сегментацию, IAM и управляемые секреты. Теперь задача меняется: обнаружить то, что всё равно прошло, изменилось со временем или появилось из-за обновления образа, дрейфа конфигурации или злоупотребления доступом.</p>
+          <div class="diagram">
+            <pre><code>image / manifest -> запреты и ограничения -> runtime
+       |                                   |
+       v                                   v
+   scanning / integrity            Falco / API audit
+       \                                   /
+        \                                 /
+         v                               v
+             triage -> fix -> tighter policy</code></pre>
+          </div>
+        </section>
+
+        <section class="section" id="why">
+          <h2>Почему проверки и сигналы обнаружения обязательны</h2>
+          <p class="lead">Запреты и ограничения отвечают за вопрос «что не должно пройти». Проверки и сигналы обнаружения отвечают за вопрос «что уже происходит, что проскочило и что изменилось во времени». Для production-кластера вторая группа не менее важна, чем первая.</p>
+          <div class="card">
+            <h3>Мини-словарь для новичка</h3>
+            <ul>
+              <li><strong>CVE</strong> — зарегистрированная известная уязвимость.</li>
+              <li><strong>Scanning</strong> — поиск известных уязвимостей и misconfiguration в артефактах или ресурсах.</li>
+              <li><strong>Finding</strong> — найденная проблема или сигнал проверки: уязвимость, несоответствие требованию, подозрительное runtime-действие или запись audit, которую нужно разобрать.</li>
+              <li><strong>Compliance finding</strong> — найденное несоответствие требованиям безопасности или внутреннему стандарту, например CIS benchmark или политике компании.</li>
+              <li><strong>Triage-flow</strong> — путь первичного разбора сигнала: кто смотрит найденную проблему (finding), как определяет срочность, что исправляет и как подтверждает результат.</li>
+              <li><strong>Audit</strong> — журналирование и анализ действий в системе.</li>
+              <li><strong>Runtime detection</strong> — наблюдение за фактическим поведением процесса после запуска.</li>
+              <li><strong>Integrity</strong> — уверенность в том, что артефакт не подменён и соответствует ожидаемому состоянию.</li>
+            </ul>
+          </div>
+          <div class="grid two">
+            <div class="card">
+              <h3>Что слой предотвращения не может гарантировать</h3>
+              <ul>
+                <li>Что в разрешённом образе нет неизвестной или новой уязвимости.</li>
+                <li>Что после старта контейнер не начнёт вести себя подозрительно.</li>
+                <li>Что администратор или automation не совершили опасное действие через API.</li>
+                <li>Что запущенное приложение не отклонилось от ожидаемого поведения со временем.</li>
+              </ul>
+            </div>
+            <div class="card">
+              <h3>Что даёт слой обнаружения</h3>
+              <ul>
+                <li>Видимость уязвимых образов и несоответствий требованиям безопасности.</li>
+                <li>Сигналы о shell inside container, privileged behavior и других runtime-анти-паттернах.</li>
+                <li>Понимание того, кто реально делал операции в API и в каких namespace.</li>
+                <li>Основание для incident response и повторной настройки запретов, политик и ограничений.</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <section class="section">
+          <h2>Как новичку читать найденные проблемы (findings) и не путать разные типы сигналов</h2>
+          <div class="grid two">
+            <div class="card">
+              <h3>Если Trivy показывает CVE</h3>
+              <p>Это означает, что в образе есть известная уязвимость или проблема конфигурации. Такая найденная проблема (finding) говорит о свойствах артефакта до запуска. Она ещё не доказывает эксплуатацию, но показывает, что риск уже встроен в то, что мы собираемся или уже начали запускать.</p>
+            </div>
+            <div class="card">
+              <h3>Если Falco показывает shell inside container</h3>
+              <p>Это уже сигнал о поведении в runtime. Даже если образ был относительно безопасным, кто-то или что-то внутри контейнера запустило shell. Такая найденная проблема (finding) ближе к инциденту и обычно требует более быстрой реакции.</p>
+            </div>
+            <div class="card">
+              <h3>Если API audit показывает подозрительную операцию</h3>
+              <p>Это значит, что у нас есть evidence того, какой субъект совершил действие через kube-apiserver. Такой сигнал особенно полезен при расследовании: он помогает понять не только что произошло, но и кто это сделал.</p>
+            </div>
+            <div class="card">
+              <h3>Если контроль целостности показывает несоответствие</h3>
+              <p>Это сигнал о проблеме с целостностью или о расхождении между ожидаемым и фактическим состоянием артефакта. Он особенно важен в сценариях защиты от подмены образов и supply-chain drift.</p>
+            </div>
+          </div>
+          <div class="note">
+            Удобная памятка: CVE чаще отвечает на вопрос «насколько опасно то, что мы запускаем», runtime-аудит — «что оно делает сейчас», а API audit — «кто и как менял систему».
+          </div>
+        </section>
+
+        <section class="section" id="trivy">
+          <h2><code>operator-trivy</code> и scanning</h2>
+          <p>Deckhouse предоставляет встроенное сканирование образов на базе Trivy. Это важный момент: scanning встроен в платформу и не требует отдельного внешнего сервиса, чтобы хотя бы на базовом уровне видеть CVE и найденные несоответствия CIS-требованиям (CIS-related findings) по используемым артефактам.</p>
+          <div class="grid two">
+            <div class="card">
+              <h3>Что именно сканируется</h3>
+              <ul>
+                <li>Известные уязвимости (CVE) в образах, используемых Pod-ами.</li>
+                <li>Compliance checks, связанные с CIS benchmark.</li>
+                <li>Все ресурсы в namespace, если для него включён scanning через label.</li>
+              </ul>
+            </div>
+            <div class="card">
+              <h3>Что особенно важно в operational плане</h3>
+              <ul>
+                <li>По умолчанию сканируется только <code>default</code> namespace, пока не размечены другие.</li>
+                <li>Как только в кластере появляется хотя бы один размеченный namespace, <code>default</code> перестаёт сканироваться автоматически.</li>
+                <li>Это вынуждает команду явно определить security coverage.</li>
+              </ul>
+            </div>
+          </div>
+          <p>Включение удобно показывать не только командой, но и манифестом: модуль отвечает за сам механизм, а label на namespace определяет зону покрытия.</p>
+          <pre><code>apiVersion: deckhouse.io/v1alpha1
+kind: ModuleConfig
+metadata:
+  name: operator-trivy
+spec:
+  version: 1
+  enabled: true
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: payments
+  labels:
+    security-scanning.deckhouse.io/enabled: ""</code></pre>
+          <p>Такое решение может показаться неудобным, но оно полезно архитектурно: платформа не создаёт иллюзию, будто scanning включён «сам собой везде», если команда не провела границы ответственности и покрытия.</p>
+        </section>
+
+        <section class="section" id="reports-dashboards">
+          <h2>Reports и dashboard: где смотреть результат</h2>
+          <p>После включения scanning важно показать слушателю не только сам манифест, но и место, где появляется результат. <code>operator-trivy</code> создаёт Kubernetes-ресурсы с отчётами, а также отдаёт метрики и dashboard в Grafana.</p>
+          <div class="grid two">
+            <div class="card">
+              <h3>Какие отчёты искать</h3>
+              <ul>
+                <li><code>VulnerabilityReport</code> — известные уязвимости в образах контейнеров.</li>
+                <li><code>SbomReport</code> — состав образа, то есть software bill of materials.</li>
+                <li><code>ConfigAuditReport</code> — найденные проблемы конфигурации Kubernetes-объектов.</li>
+                <li><code>ExposedSecretReport</code> — секреты, случайно попавшие в контейнерные образы.</li>
+                <li><code>ClusterComplianceReport</code> — сводная проверка соответствия CIS Kubernetes Benchmark.</li>
+              </ul>
+            </div>
+            <div class="card">
+              <h3>Что проверить руками</h3>
+              <ul>
+                <li>Есть ли отчёты в namespace, который вы пометили label для scanning.</li>
+                <li>Попадают ли результаты в Grafana dashboards <code>Security/Trivy Image Vulnerability Overview</code> и <code>Security/CIS Kubernetes Benchmark</code>.</li>
+                <li>Назначен ли владелец для найденных проблем, иначе отчёт быстро станет «шумом».</li>
+              </ul>
+            </div>
+          </div>
+          <pre><code>d8 k get vulnerabilityreports -A
+d8 k get sbomreports -A
+d8 k get configauditreports -A
+d8 k get clustercompliancereports.aquasecurity.github.io -A</code></pre>
+          <p>Смысл этих команд не в том, чтобы заменить Grafana, а в том, чтобы студент увидел: результат scanning — это не абстрактный “security report”, а конкретные Kubernetes-объекты, с которыми можно работать в automation и audit-процессах.</p>
+        </section>
+
+        <section class="section" id="supply">
+          <h2>Минимальные требования к supply chain: trusted registries, digests, signatures, SBOM</h2>
+          <p>Сканирование образа отвечает на вопрос «известно ли нам что-то плохое про этот артефакт». Но для зрелой supply chain security этого недостаточно. Нужен ещё ответ на вопросы: из какого источника образ пришёл, не был ли подменён тег, можно ли проверить происхождение артефакта и есть ли у нас прозрачность по его составу.</p>
+          <div class="grid two">
+            <div class="card">
+              <h3>Что стоит включить в минимальный набор требований</h3>
+              <ul>
+                <li>Разрешать только доверенные registry и запретить хаотичные внешние источники.</li>
+                <li>По возможности привязывать критичные приложения к digest, а не только к тегу.</li>
+                <li>Запретить <code>latest</code> и неконтролируемые mutable tags как часть политики допуска.</li>
+                <li>Для зрелых команд добавить подпись и верификацию образов как следующий уровень доверия.</li>
+              </ul>
+            </div>
+            <div class="card">
+              <h3>Что даёт дополнительную прозрачность</h3>
+              <ul>
+                <li>SBOM помогает видеть состав артефакта и быстрее оценивать затронутость уязвимостями.</li>
+                <li>Подпись образа помогает проверить происхождение и связать артефакт с доверенным процессом сборки.</li>
+                <li>Контроль целостности помогает убедиться, что запускается именно ожидаемый digest.</li>
+                <li>Scanning замыкает эту цепочку, показывая уже известные проблемы в составе образа.</li>
+              </ul>
+            </div>
+          </div>
+          <div class="note">
+            Практически это означает, что глава 6 должна опираться на решения из главы 2: allowed registries, запрет mutable tags и применение правил допуска лучше вводить раньше, а scanning и SBOM использовать как слой постоянной проверки и уточнения риска.
+          </div>
+          <p>На уровне манифестов это обычно распадается на две задачи: платформа запрещает небезопасные варианты, а приложение фиксирует конкретный артефакт через digest.</p>
+          <pre><code>apiVersion: deckhouse.io/v1alpha1
+kind: OperationPolicy
+metadata:
+  name: supply-chain-minimum
+spec:
+  enforcementAction: Deny
+  match:
+    namespaceSelector:
+      labelSelector:
+        matchLabels:
+          operation-policy.deckhouse.io/enabled: "true"
+  policies:
+    allowedRepos:
+      - registry.example.org/shop
+    disallowedImageTags:
+      - latest</code></pre>
+          <pre><code>apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payments-api
+  namespace: payments
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: payments-api
+  template:
+    metadata:
+      labels:
+        app: payments-api
+    spec:
+      containers:
+        - name: app
+          image: registry.example.org/shop/payments-api@sha256:1111111111111111111111111111111111111111111111111111111111111111</code></pre>
+        </section>
+
+        <section class="section" id="deny-vulnerable-images">
+          <h2>Блокировка уязвимых образов: когда monitoring превращается в deny</h2>
+          <p><code>denyVulnerableImages</code> — это уже не просто отчёт. При включённой настройке DKP будет запрещать создание <code>Pod</code>, <code>Deployment</code>, <code>StatefulSet</code> и <code>DaemonSet</code> с уязвимыми образами в namespace, где стоит label <code>security.deckhouse.io/trivy-provider: ""</code>.</p>
+          <p>Такой режим нельзя включать вслепую. Сначала соберите отчёты, разберите false positives, договоритесь с командами о допустимых severity, и только потом включайте deny на ограниченном scope.</p>
+          <pre><code>apiVersion: deckhouse.io/v1alpha1
+kind: ModuleConfig
+metadata:
+  name: operator-trivy
+spec:
+  version: 1
+  enabled: true
+  settings:
+    denyVulnerableImages:
+      enabled: true
+      allowedSeverityLevels:
+        - UNKNOWN
+        - LOW
+        - MEDIUM
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: payments
+  labels:
+    security.deckhouse.io/trivy-provider: ""</code></pre>
+          <p>В этом примере образы с уязвимостями только уровня <code>UNKNOWN</code>, <code>LOW</code> или <code>MEDIUM</code> не блокируются. Если в образе есть <code>HIGH</code> или <code>CRITICAL</code>, новый workload в помеченном namespace будет отклонён. Это уже жёсткая блокировка нарушений (hard enforcement), поэтому для курса важно проговорить rollback: снять label с namespace, ослабить список severity или временно вернуть режим наблюдения.</p>
+        </section>
+
+        <section class="section" id="runtime">
+          <h2><code>runtime-audit-engine</code> и Falco</h2>
+          <p>Если Trivy отвечает на вопрос «что мы запустили», то <code>runtime-audit-engine</code> отвечает на вопрос «что это приложение делает сейчас». В DKP этот механизм построен на Falco и собирает сигналы как из Linux kernel events, так и из Kubernetes audit событий.</p>
+          <div class="grid two">
+            <div class="card">
+              <h3>Что умеет видеть runtime-аудит</h3>
+              <ul>
+                <li>Shell внутри контейнера или Pod.</li>
+                <li>Привилегированные контейнеры.</li>
+                <li>Небезопасные монтирования, например чувствительных путей.</li>
+                <li>Попытки чтения чувствительных файлов вроде <code>/etc/shadow</code>.</li>
+                <li>Признаки эксплуатации уязвимостей и майнерной активности.</li>
+              </ul>
+            </div>
+            <div class="card">
+              <h3>Что особенно полезно в DKP</h3>
+              <ul>
+                <li>Встроенные правила Falco уже поставляются с платформой.</li>
+                <li>Можно добавлять свои правила через <code>FalcoAuditRules</code>.</li>
+                <li>События доступны как метрики и могут быть встроены в alerting/monitoring pipeline.</li>
+              </ul>
+            </div>
+          </div>
+          <pre><code>apiVersion: deckhouse.io/v1alpha1
+kind: ModuleConfig
+metadata:
+  name: runtime-audit-engine
+spec:
+  version: 1
+  enabled: true</code></pre>
+          <pre><code>apiVersion: deckhouse.io/v1alpha1
+kind: FalcoAuditRules
+metadata:
+  name: shell-detection
+spec:
+  rules:
+    - rule:
+        name: terminal-shell-in-container
+        desc: Detect shell in container
+        condition: container and proc.name in (bash, sh, zsh)
+        output: "Shell started in container (container=%container.name pod=%k8s.pod.name ns=%k8s.ns.name)"
+        priority: Warning
+        source: Syscall</code></pre>
+        </section>
+
+        <section class="section" id="api-audit">
+          <h2>Kubernetes API audit</h2>
+          <p>Ни scanning, ни runtime detection не расскажут, какой субъект создал, изменил или удалил ресурс через kube-apiserver. Для этого нужен API audit. Deckhouse включает built-in audit policy, которая уже покрывает системные namespace, чувствительные операции и bulk LIST-запросы.</p>
+          <div class="grid two">
+            <div class="card">
+              <h3>Практическая ценность</h3>
+              <ul>
+                <li>Помогает расследовать unexpected behavior и административные инциденты.</li>
+                <li>Даёт evidence для анализа злоупотребления правами.</li>
+                <li>Связывает действие в кластере с конкретным пользователем, группой или service account.</li>
+              </ul>
+            </div>
+            <div class="card">
+              <h3>Что важно помнить</h3>
+              <ul>
+                <li>Audit log полезен только тогда, когда он реально собирается и просматривается.</li>
+                <li>Нужно заранее продумать retention и интеграцию с внешним log storage или SIEM.</li>
+                <li>Сам факт включённого audit ещё не заменяет процедуру анализа и реагирования.</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <section class="section" id="log-forwarding">
+          <h2>Передача security logs во внешнее хранилище</h2>
+          <p>API audit, runtime-события и прикладные логи становятся полезными для расследования только тогда, когда они сохраняются достаточно долго и доступны команде, которая разбирает инциденты. В DKP за доставку логов отвечает модуль <code>log-shipper</code>: он строит pipeline из источника логов и назначения.</p>
+          <div class="grid two">
+            <div class="card">
+              <h3>Из чего состоит pipeline</h3>
+              <ul>
+                <li><code>ClusterLoggingConfig</code> или <code>PodLoggingConfig</code> описывает источник логов.</li>
+                <li><code>ClusterLogDestination</code> описывает, куда отправлять логи: Loki, Elasticsearch, S3, Logstash, Vector и другие поддерживаемые назначения.</li>
+                <li><code>destinationRefs</code> связывает источник с одним или несколькими назначениями.</li>
+              </ul>
+            </div>
+            <div class="card">
+              <h3>Что важно для security</h3>
+              <ul>
+                <li>Не отправлять всё подряд без retention и стоимости хранения.</li>
+                <li>Отдельно маркировать namespace, чьи security-события должны попадать в SIEM или long-term storage.</li>
+                <li>Проверять, не утекают ли sensitive values в логах приложений.</li>
+              </ul>
+            </div>
+          </div>
+          <pre><code>apiVersion: deckhouse.io/v1alpha1
+kind: ModuleConfig
+metadata:
+  name: log-shipper
+spec:
+  enabled: true
+---
+apiVersion: deckhouse.io/v1alpha2
+kind: ClusterLoggingConfig
+metadata:
+  name: security-pod-logs
+spec:
+  type: KubernetesPods
+  kubernetesPods:
+    namespaceSelector:
+      labelSelector:
+        matchLabels:
+          security-logs.deckhouse.io/enabled: "true"
+  destinationRefs:
+    - security-loki
+---
+apiVersion: deckhouse.io/v1alpha1
+kind: ClusterLogDestination
+metadata:
+  name: security-loki
+spec:
+  type: Loki
+  loki:
+    endpoint: https://loki.example.org/loki/api/v1/push</code></pre>
+          <p>Чтобы пример начал работать, пометьте нужный namespace label <code>security-logs.deckhouse.io/enabled: "true"</code>. В production к этому добавляются TLS, авторизация к хранилищу, правила фильтрации, защита токенов и понятная политика retention.</p>
+        </section>
+
+        <section class="section" id="integrity">
+          <h2>Контроль целостности: доверяем не только политике, но и проверке состояния</h2>
+          <p>В Deckhouse контроль целостности (integrity control) рассматривается в двух фазах. Первая фаза — проверка на старте контейнера: платформа сравнивает SHA-256 хеш образа с ожидаемым значением. Вторая фаза — наблюдение за поведением контейнера после запуска через runtime-аудит.</p>
+          <table>
+            <thead>
+              <tr>
+                <th>Фаза</th>
+                <th>Что проверяется</th>
+                <th>Зачем это нужно</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Старт контейнера</td>
+                <td>Соответствие фактического image digest эталонному значению.</td>
+                <td>Позволяет не запускать подменённые или повреждённые артефакты.</td>
+              </tr>
+              <tr>
+                <td>Runtime</td>
+                <td>Фактическое поведение контейнера в процессе работы.</td>
+                <td>Позволяет увидеть drift, shell access, privileged activity и другие отклонения.</td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="note">
+            Это важная мыслительная рамка для курса: scanning, контроль целостности и runtime audit не дублируют друг друга. Они отвечают на разные вопросы и вместе дают намного более надёжную картину, чем любой из них по отдельности.
+          </div>
+        </section>
+
+        <section class="section" id="process">
+          <h2>Как превратить найденные проблемы (findings) в работающий процесс</h2>
+          <ol>
+            <li>Явно определить, какие namespace покрываются scanning и почему.</li>
+            <li>Назначить владельцев для разборки <code>VulnerabilityReport</code> и найденных несоответствий требованиям безопасности (compliance findings).</li>
+            <li>Решить, где scanning остаётся наблюдением, а где <code>denyVulnerableImages</code> становится обязательной блокировкой.</li>
+            <li>Настроить поток событий runtime audit в систему мониторинга или SIEM.</li>
+            <li>Описать log pipeline через <code>log-shipper</code>: что отправляется наружу, куда, на какой срок и кто имеет доступ.</li>
+            <li>Если платформа использует GitOps-контур доставки, заранее определить владельца desired state repo и границу автоматической синхронизации. Подробно эта развилка разобрана в главе 5.</li>
+            <li>Связать найденные проблемы (findings) с циклом инженерного действия: обновить образ, усилить политику, сузить роль, проверить исправление.</li>
+            <li>Регулярно пересматривать built-in и custom Falco rules на соответствие локальной threat model.</li>
+          </ol>
+          <p>Если найденные проблемы (findings) не меняют конфигурацию, они быстро превращаются в фон. Поэтому у зрелой платформы проверки и сигналы обнаружения должны завершаться не только alert-ом, но и инженерным действием: изменением образа, политики, роли или процесса.</p>
+          <p>В GitOps-среде есть дополнительная тонкость: автоматическая синхронизация может быстро превратить ошибочный или вредоносный commit в реальное изменение кластера. Поэтому для production важно заранее определить, где нужен ручной барьер перед применением изменений. Подробный разбор вынесен в главу 5.</p>
+        </section>
+
+        <section class="section">
+          <h2>Мини-кейс: что делать после первой серьёзной найденной проблемы (finding)</h2>
+          <div class="grid two">
+            <div class="card">
+              <h3>Ситуация</h3>
+              <p>Trivy показал критичную CVE в образе, а через несколько дней Falco зафиксировал shell inside container в том же namespace. Команда не понимает, связано ли это и с чего начинать.</p>
+            </div>
+            <div class="card">
+              <h3>Разумная последовательность действий</h3>
+              <p>Сначала проверить API audit и понять, кто запускал или изменял приложение. Затем приоритизировать runtime-сигнал как более срочную найденную проблему и перевести вывод в конкретные правки: обновить <code>image</code> в <code>Deployment</code>, сузить <code>NetworkPolicy</code>, пересмотреть <code>RoleBinding</code> для подозрительного субъекта и усилить <code>OperationPolicy</code> для namespace. Это хороший пример того, как обнаружение проблем должно замыкаться на инженерные действия, а не оставаться заметкой в отчёте.</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="section" id="lab">
+          <h2>Лабораторная работа</h2>
+          <div class="grid two">
+            <div class="card">
+              <h3>Задача</h3>
+              <ol>
+                <li>Разобрать три сигнала по <code>shop-demo</code>: критичную CVE в образе, shell inside container и подозрительное административное действие в API.</li>
+                <li>Для каждого сигнала определить владельца, приоритет и ближайшее инженерное действие.</li>
+                <li>Показать, где находятся <code>VulnerabilityReport</code>, <code>SbomReport</code> и <code>ClusterComplianceReport</code> для выбранного namespace.</li>
+                <li>Собрать минимальные требования к supply chain: trusted registries, policy против mutable tags, digest pinning для критичных сервисов.</li>
+                <li>Описать, какие запреты, политики, log pipeline или <code>denyVulnerableImages</code>-настройки нужно усилить после расследования найденных проблем (findings).</li>
+              </ol>
+            </div>
+            <div class="card">
+              <h3>Ожидаемый результат</h3>
+              <ul>
+                <li>Путь разбора сигнала (triage-flow) для CVE, runtime alerts и API audit событий.</li>
+                <li>Команды просмотра отчётов и пример log-shipper pipeline для security-событий.</li>
+                <li>Список конкретных corrective actions: patch image, restrict role, tighten policy, review secret delivery.</li>
+                <li>Понимание, что проверки и сигналы обнаружения бесполезны без action loop и назначенных владельцев.</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <section class="section" id="ownership">
+          <h2>Что DKP даёт из коробки, а что делает команда</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>DKP из коробки</th>
+                <th>Что должна сделать команда</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Даёт scanning, runtime audit, API audit, log-shipper и контроль целостности как встроенные проверки, сигналы обнаружения и доставку логов.</td>
+                <td>Определить покрытие namespace, владельцев найденных проблем (findings), приоритеты, retention и SLA разборки сигналов.</td>
+              </tr>
+              <tr>
+                <td>Даёт технические сигналы, отчёты и возможность включить блокировку уязвимых образов через <code>denyVulnerableImages</code>.</td>
+                <td>Построить triage, согласовать границу жёсткой блокировки нарушений (hard enforcement), связать сигналы с конкретными инженерными действиями и замкнуть их на процесс улучшения политики.</td>
+              </tr>
+              <tr>
+                <td>Даёт основу для работы с image integrity.</td>
+                <td>Решить, какие supply chain практики вводятся дополнительно: trusted registries, digest pinning, подписи артефактов, SBOM и интеграция этих данных в процесс принятия решений.</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section class="section" id="review">
+          <h2>Вопросы для самопроверки</h2>
+          <ol>
+            <li>Почему найденная проблема (finding) о CVE и найденная проблема о shell inside container требуют разной срочности и разного типа реакции?</li>
+            <li>Как digest pinning и image signatures дополняют vulnerability scanning, а не дублируют его?</li>
+            <li>Что даёт API audit, чего не сможет дать ни Trivy, ни Falco?</li>
+            <li>Почему проверки и сигналы обнаружения без владельцев найденных проблем (findings) и цикла инженерного действия быстро превращаются в фон?</li>
+            <li>Какие запреты, политики или ограничения вы бы пересмотрели в первую очередь после серьёзной runtime-находки?</li>
+          </ol>
+        </section>
+
+        <section class="section" id="sources">
+          <h2>Источники</h2>
+          <ol class="sources">
+            <li><a href="https://deckhouse.io/products/kubernetes-platform/documentation/v1/admin/configuration/security/scanning.html">Deckhouse: container image vulnerability scanning</a>.</li>
+            <li><a href="https://deckhouse.io/modules/operator-trivy/">Deckhouse: operator-trivy module</a>.</li>
+            <li><a href="https://deckhouse.io/modules/operator-trivy/configuration.html">Deckhouse: operator-trivy configuration</a>.</li>
+            <li><a href="https://deckhouse.io/modules/log-shipper/">Deckhouse: log-shipper module</a>.</li>
+            <li><a href="https://deckhouse.io/modules/log-shipper/examples.html">Deckhouse: log-shipper examples</a>.</li>
+            <li><a href="https://deckhouse.io/products/kubernetes-platform/documentation/v1/admin/configuration/security/events/runtime-audit.html">Deckhouse: security event audit</a>.</li>
+            <li><a href="https://deckhouse.io/products/kubernetes-platform/documentation/v1/admin/configuration/security/events/kubernetes-api-audit.html">Deckhouse: Kubernetes API event audit</a>.</li>
+            <li><a href="https://deckhouse.io/products/kubernetes-platform/documentation/v1/architecture/security/integrity-control.html">Deckhouse: integrity control</a>.</li>
+            <li><a href="https://deckhouse.io/products/kubernetes-platform/documentation/v1/admin/configuration/security/">Deckhouse: security overview</a>.</li>
+            <li><a href="https://kubernetes.io/docs/concepts/containers/images/">Kubernetes: Images and digests</a>.</li>
+            <li><a href="https://docs.sigstore.dev/">Sigstore: overview</a>.</li>
+            <li><a href="https://www.cisa.gov/sbom">CISA: Software Bill of Materials (SBOM)</a>.</li>
+          </ol>
+        </section>
+
+        <div class="chapter-nav">
+          <div class="nav-card">
+            <small>Предыдущая глава</small>
+            <a href="../chapter_6/index.html">Глава 6. Сертификаты и секреты</a>
+          </div>
+          <div class="nav-card">
+            <small>Следующая глава</small>
+            <a href="../chapter_8/index.html">Глава 8. Мультиарендность</a>
+          </div>
+          <div class="nav-card">
+            <small>К оглавлению</small>
+            <a href="../index.html">Вернуться к курсу v2</a>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+</body>
+</html>

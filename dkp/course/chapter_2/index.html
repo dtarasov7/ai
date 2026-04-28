@@ -1,0 +1,504 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>v2. Глава 2. Безопасность пода</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="page">
+    <header class="hero">
+      <span class="eyebrow">Глава 2</span>
+      <h1>Безопасность пода</h1>
+      <p>В Kubernetes именно Pod часто становится точкой, где хорошая архитектура встречается с плохой эксплуатационной привычкой. В этой главе мы подробно разбираем, как превратить безопасность Pod из разовой ручной проверки в устойчивую платформенную политику на базе встроенного модуля Deckhouse <code>admission-policy-engine</code>.</p>
+      <div class="meta">
+        <span class="badge">Акцент на проверку перед запуском</span>
+        <span class="badge">Deckhouse-first</span>
+        <span class="badge">Дата сверки: 21 апреля 2026</span>
+        <span class="badge">Есть лабораторная работа</span>
+      </div>
+    </header>
+
+    <div class="layout">
+      <aside class="toc">
+        <h3>Содержание</h3>
+        <ol>
+          <li><a href="#outcomes">Что вы сможете после главы</a></li>
+          <li><a href="#scenario">Где эта глава в сквозном сценарии</a></li>
+          <li><a href="#problem">Почему Pod security — это основа</a></li>
+          <li><a href="#pss">Pod Security Standards</a></li>
+          <li><a href="#context">Security Context и усиление настроек Pod</a></li>
+          <li><a href="#admission">Admission как проверка на входе</a></li>
+          <li><a href="#deckhouse">admission-policy-engine в DKP</a></li>
+          <li><a href="#rollout">Как внедрять политики без поломки среды</a></li>
+          <li><a href="#mistakes">Типовые ошибки</a></li>
+          <li><a href="#lab">Лабораторная работа</a></li>
+          <li><a href="#ownership">Что DKP даёт из коробки, а что делает команда</a></li>
+          <li><a href="#review">Вопросы для самопроверки</a></li>
+          <li><a href="#sources">Источники</a></li>
+        </ol>
+      </aside>
+
+      <main class="main">
+        <section class="section" id="outcomes">
+          <h2>Что вы сможете после главы</h2>
+          <div class="grid two">
+            <div class="card">
+              <h3>Обязательный минимум</h3>
+              <ul>
+                <li>Объяснить разницу между Pod Security Standards, <code>securityContext</code> и политикой допуска ресурсов.</li>
+                <li>Определить минимальный набор требований для запускаемых приложений в production: non-root, запрет privilege escalation, ресурсы, probes и контролируемые registry.</li>
+                <li>Выбрать правильный режим rollout: <code>warn</code>, <code>dryrun</code> или <code>deny</code>.</li>
+                <li>Прочитать небезопасный Pod spec и быстро увидеть его основные риски.</li>
+              </ul>
+            </div>
+            <div class="card">
+              <h3>Углубление и применимость</h3>
+              <ul>
+                <li>Понять, где заканчивается PSS и начинаются общие правила платформы: обязательные probes, requests/limits, разрешённые registry и правила для тегов образов.</li>
+                <li>Использовать <code>OperationPolicy</code> и связанные ограничения как часть минимального уровня безопасности.</li>
+                <li>Подготовить путь миграции legacy-приложений без конфликта с разработкой.</li>
+              </ul>
+              <p>Механизмы сверены по документации DKP на 21 апреля 2026 года. Конкретные CRD и поля объектов политик нужно проверять по версии платформы, особенно перед массовым rollout в production.</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="section" id="scenario">
+          <h2>Где эта глава в сквозном сценарии</h2>
+          <p class="lead">Для <code>shop-demo</code> эта глава отвечает за базовую фразу “не любое приложение имеет право запуститься”. До того как мы будем сегментировать сеть и строить модель доступа, нужно сделать так, чтобы небезопасные Pods вообще не попадали в кластер.</p>
+          <div class="diagram">
+            <pre><code>Developer manifest
+      |
+      v
+admission-policy-engine
+      |
+      +--> PSS baseline / restricted
+      +--> SecurityPolicy
+      +--> OperationPolicy
+      |
+      v
+Allowed Pod with known security requirements</code></pre>
+          </div>
+        </section>
+
+        <section class="section" id="problem">
+          <h2>Почему Pod security — это основа, а не частная тема</h2>
+          <p class="lead">Pod — это не просто контейнер в Kubernetes. Это место, где описание в YAML превращается в реально запущенный код. Если небезопасный Pod допущен к запуску, многие другие проверки уже вынуждены догонять проблему постфактум.</p>
+          <div class="card">
+            <h3>Базовые понятия для новичка</h3>
+            <ul>
+              <li><strong>Container</strong> — изолированный процесс с собственным окружением и файловой системой.</li>
+              <li><strong>Pod</strong> — оболочка Kubernetes вокруг одного или нескольких контейнеров, которые запускаются вместе.</li>
+              <li><strong>Namespace</strong> — логическая область внутри кластера, помогающая разделять приложения и команды.</li>
+              <li><strong>Security Context</strong> — поля манифеста, которые задают права и ограничения процесса.</li>
+              <li><strong>Admission policy</strong> — правило допуска: оно не даёт ресурсу попасть в кластер, если он нарушает требования.</li>
+            </ul>
+          </div>
+          <div class="grid two">
+            <div class="card">
+              <h3>Какие ошибки Pod spec особенно опасны</h3>
+              <ul>
+                <li>Запуск от root без необходимости.</li>
+                <li>Разрешённый privilege escalation.</li>
+                <li>Избыточные Linux capabilities.</li>
+                <li>Подключение host namespaces и небезопасных hostPath.</li>
+                <li>Отсутствие ограничений по ресурсам, что повышает риск DoS внутри кластера.</li>
+              </ul>
+            </div>
+            <div class="card">
+              <h3>Почему нельзя надеяться только на review манифестов</h3>
+              <ul>
+                <li>Ручной review не масштабируется на десятки команд и сотни deployment-ов.</li>
+                <li>Нарушения появляются не только в исходном коде, но и в Helm values, generated manifests и оперативных hotfix.</li>
+                <li>Без политики допуска ресурсов платформа не может гарантировать единый минимальный набор требований.</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <section class="section" id="pss">
+          <h2>Pod Security Standards: от разрешающего режима к production-требованиям</h2>
+          <p>Pod Security Standards описывают три стандартных уровня строгости для Pod: <code>privileged</code>, <code>baseline</code> и <code>restricted</code>. Эти уровни отвечают на вопрос «насколько опасные настройки Pod разрешены». Здесь <code>baseline</code> — это имя официального уровня PSS, а не просто английское слово.</p>
+          <p>В Deckhouse эта схема уровней используется как базовый способ описать требования к безопасности Pod. Но PSS проверяет не всё, что нужно реальной платформе: например, он не знает, из каких registry организация разрешает брать образы, нужно ли всегда задавать probes и какие теги образов запрещены. Поэтому DKP расширяет стандартную проверку через Gatekeeper и собственные объекты политик.</p>
+          <table>
+            <thead>
+              <tr>
+                <th>Уровень</th>
+                <th>Смысл</th>
+                <th>Как использовать на практике</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>privileged</code></td>
+                <td>Почти ничего не запрещает в настройках Pod.</td>
+                <td>Оставлять только там, где есть доказанная необходимость, например для отдельных системных компонентов.</td>
+              </tr>
+              <tr>
+                <td><code>baseline</code></td>
+                <td>Запрещает самые известные опасные настройки, которые часто ведут к повышению привилегий.</td>
+                <td>Универсальный стартовый уровень требований для пользовательских namespace и новых установок DKP.</td>
+              </tr>
+              <tr>
+                <td><code>restricted</code></td>
+                <td>Самый строгий уровень требований к запуску Pod.</td>
+                <td>Целевой режим для production-приложений, если они готовы запускаться с такими ограничениями.</td>
+              </tr>
+            </tbody>
+          </table>
+          <p>В документации Deckhouse отдельно отмечено, что начиная с DKP v1.55 политика по умолчанию для новых установок смещена к <code>baseline</code>. Это важно организационно: платформа тем самым задаёт более безопасное исходное состояние, а не оставляет его на усмотрение каждой команды.</p>
+        </section>
+
+        <section class="section" id="context">
+          <h2>Security Context и усиление настроек Pod</h2>
+          <p>Pod Security Standards задают общую рамку допустимого, но реальная повседневная безопасность часто решается полями <code>securityContext</code>. Именно здесь описывается, с какими правами процесс стартует внутри контейнера и какие действия ему запрещены.</p>
+          <div class="grid two">
+            <div class="card">
+              <h3>Хороший минимальный набор требований для большинства приложений</h3>
+              <ul>
+                <li><code>runAsNonRoot: true</code></li>
+                <li>явно заданные <code>runAsUser</code> и <code>runAsGroup</code></li>
+                <li><code>allowPrivilegeEscalation: false</code></li>
+                <li><code>readOnlyRootFilesystem: true</code>, если приложение поддерживает этот режим</li>
+                <li><code>capabilities.drop: ["ALL"]</code></li>
+                <li><code>seccompProfile.type: RuntimeDefault</code></li>
+              </ul>
+            </div>
+            <div class="card">
+              <h3>Чего здесь не видно, но что критично</h3>
+              <ul>
+                <li>Совместимость приложения с корневой файловой системой только для чтения нужно тестировать заранее.</li>
+                <li>Некоторые legacy-приложения по умолчанию ожидают root-права и ломаются после усиления настроек.</li>
+                <li>Если capabilities возвращаются обратно «на всякий случай», усиление настроек быстро вырождается в имитацию.</li>
+              </ul>
+            </div>
+          </div>
+          <pre><code>apiVersion: v1
+kind: Pod
+metadata:
+  name: app
+spec:
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    runAsGroup: 10001
+  containers:
+  - name: app
+    image: registry.example.org/team/app:v1.4.2
+    securityContext:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities:
+        drop: ["ALL"]
+      seccompProfile:
+        type: RuntimeDefault</code></pre>
+        </section>
+
+        <section class="section" id="admission">
+          <h2>Admission как проверка на входе</h2>
+          <p>Admission controller нужен не потому, что разработчики пишут плохие манифесты. Он нужен потому, что даже хорошие команды со временем ошибаются, а платформа должна превращать важные требования безопасности в автоматическую норму.</p>
+          <p>Если объяснять совсем просто, admission — это турникет на входе в кластер. Пока ресурс не прошёл через него, он не считается допустимым. Так проще объяснить идею новичку: не нужно надеяться, что каждый человек каждый раз всё помнит; нужно, чтобы платформа автоматически останавливала опасные варианты.</p>
+          <div class="grid two">
+            <div class="card">
+              <h3>Стандартные admission-контролы Kubernetes</h3>
+              <ul>
+                <li><strong>PodSecurity</strong> применяет PSS.</li>
+                <li><strong>LimitRanger</strong> задаёт defaults и границы для requests/limits.</li>
+                <li><strong>ResourceQuota</strong> ограничивает совокупное потребление ресурсов.</li>
+                <li><strong>PodNodeSelector</strong> управляет допустимым размещением запускаемых приложений.</li>
+              </ul>
+            </div>
+            <div class="card">
+              <h3>Чего не хватает без платформенного слоя</h3>
+              <ul>
+                <li>Стандартная проверка Kubernetes не знает, из каких registry конкретная организация разрешает брать образы.</li>
+                <li>Она не заставляет команды всегда указывать probes, requests и limits.</li>
+                <li>Она не решает задачу общих для всей платформы правил по тегам образов, способам запуска и согласованным исключениям.</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <section class="section" id="deckhouse">
+          <h2><code>admission-policy-engine</code> в Deckhouse</h2>
+          <p>Deckhouse использует Gatekeeper как основу для централизованного применения политик: правила задаются в одном месте, а платформа проверяет по ним ресурсы перед запуском. Deckhouse оборачивает этот механизм в более удобную для DKP схему. Это позволяет не просто «включить Pod Security», а действительно строить развиваемый и операционно удобный минимальный уровень безопасности.</p>
+          <div class="grid two">
+            <div class="card">
+              <h3>Что особенно важно в модуле</h3>
+              <ul>
+                <li>Применение PSS по namespace и глобально.</li>
+                <li>Поддержка режимов <code>warn</code>, <code>dryrun</code> и <code>deny</code>: предупреждать, проверять без влияния на запуск или блокировать нарушение.</li>
+                <li><code>SecurityPolicy</code> для дополнительных ограничений безопасности.</li>
+                <li><code>OperationPolicy</code> для эксплуатационной дисциплины: обязательные probes, requests/limits, разрешённые registry и запрет нежелательных тегов.</li>
+                <li>Контроль <code>pods/exec</code> и <code>pods/attach</code> для чувствительных зон.</li>
+              </ul>
+            </div>
+            <div class="card">
+              <h3>Почему это важно организационно</h3>
+              <ul>
+                <li>Команды видят единое место, где описаны правила допуска Pod: что будет разрешено, что даст предупреждение, а что будет заблокировано.</li>
+                <li>Можно сначала включить мягкий режим: показывать предупреждения и собирать нарушения, но не ломать запуск. Затем перейти к жёсткому режиму: блокировать ресурсы, которые нарушают правила.</li>
+                <li>Безопасный запуск перестаёт быть серией исключений и становится поведением платформы по умолчанию.</li>
+              </ul>
+            </div>
+          </div>
+          <pre><code>apiVersion: deckhouse.io/v1alpha1
+kind: ModuleConfig
+metadata:
+  name: admission-policy-engine
+spec:
+  version: 1
+  enabled: true
+  settings:
+    podSecurityStandards:
+      defaultPolicy: Baseline
+      enforcementAction: Warn</code></pre>
+          <pre><code>apiVersion: deckhouse.io/v1alpha1
+kind: OperationPolicy
+metadata:
+  name: platform-defaults
+spec:
+  enforcementAction: Warn
+  match:
+    namespaceSelector:
+      labelSelector:
+        matchLabels:
+          operation-policy.deckhouse.io/enabled: "true"
+  policies:
+    allowedRepos:
+      - registry.example.org
+      - registry.deckhouse.io
+    requiredResources:
+      requests: [cpu, memory]
+      limits: [memory]
+    requiredProbes:
+      - livenessProbe
+      - readinessProbe
+    disallowedImageTags:
+      - latest</code></pre>
+          <p>Важно не пропускать поле <code>match</code>. В этом примере <code>OperationPolicy</code> начнёт проверять только те namespace, которые явно размечены как прикладные и готовые к этой политике.</p>
+          <pre><code>apiVersion: v1
+kind: Namespace
+metadata:
+  name: payments
+  labels:
+    operation-policy.deckhouse.io/enabled: "true"</code></pre>
+        </section>
+
+        <section class="section" id="rollout">
+          <h2>Как внедрять политики без поломки среды</h2>
+          <p>Самая частая причина сопротивления политикам безопасности — слишком резкое внедрение правил. Если сразу включить блокировку в production, часть приложений может перестать выпускаться или перезапускаться. Проблема будет не в самой идее проверок, а в том, что команда не успела увидеть нарушения, исправить манифесты и договориться об исключениях.</p>
+          <ol>
+            <li>Начать с инвентаризации namespace и классификации запускаемых приложений: системные, платформенные, пользовательские, legacy.</li>
+            <li>В <code>ModuleConfig</code> модуля <code>admission-policy-engine</code> включить уровень PSS <code>Baseline</code> в режиме <code>Warn</code>.</li>
+            <li>В манифестах приложений исправить типовые нарушения: запуск от root, отсутствующие probes, отсутствующие requests/limits, тег <code>latest</code>.</li>
+            <li>Для новых namespace сразу вводить более строгий набор требований, потому что там ещё нет старых приложений, которые могут сломаться от новых правил.</li>
+            <li>Когда поток предупреждений стабилизируется, переводить критичные namespace в режим <code>deny</code>, то есть блокировать новые нарушения.</li>
+            <li>Только после этого поднимать часть namespace до <code>restricted</code>.</li>
+          </ol>
+          <div class="note">
+            Правильное внедрение политики допуска почти всегда эволюционно. Сначала команда видит нарушения и исправляет типовые проблемы, затем платформа начинает блокировать новые нарушения. Иначе безопасность будет восприниматься как источник поломок, а не как нормальная возможность платформы.
+          </div>
+        </section>
+
+        <section class="section">
+          <h2>Мини-кейс: legacy-приложение и строгая политика</h2>
+          <div class="grid two">
+            <div class="card">
+              <h3>Ситуация</h3>
+              <p>Старое приложение запускается от root, пишет во временные каталоги корневой файловой системы и не имеет readiness/liveness probes — проверок готовности и работоспособности. Команда хочет быстро перевести namespace в <code>restricted</code>.</p>
+            </div>
+            <div class="card">
+              <h3>Разумный путь в DKP</h3>
+              <p>Здесь есть три разных места, где команда меняет настройки.</p>
+              <ol>
+                <li>В конфигурации модуля <code>admission-policy-engine</code> включить уровень PSS <code>Baseline</code> в режиме <code>Warn</code>. Это значит: платформа уже проверяет новые Pod, но пока только показывает предупреждения и не блокирует запуск.</li>
+                <li>В <code>OperationPolicy</code> для пользовательских namespace описать эксплуатационные требования: обязательные probes, requests/limits, разрешённые registry и запрет тега <code>latest</code>. Так новые манифесты не будут проходить без этих полей.</li>
+                <li>В манифестах самого приложения, например в <code>Deployment</code> или <code>Pod</code> spec, постепенно убрать запуск от root: добавить <code>runAsNonRoot</code>, явно задать <code>runAsUser</code>/<code>runAsGroup</code>, проверить запись во временные каталоги.</li>
+                <li>Когда предупреждения разобраны и приложение запускается с новыми ограничениями, перевести критичные namespace в <code>deny</code> и только после этого поднимать требования до <code>restricted</code>.</li>
+              </ol>
+              <pre><code>apiVersion: deckhouse.io/v1alpha1
+kind: ModuleConfig
+metadata:
+  name: admission-policy-engine
+spec:
+  version: 1
+  enabled: true
+  settings:
+    podSecurityStandards:
+      defaultPolicy: Baseline
+      enforcementAction: Warn</code></pre>
+              <pre><code>apiVersion: deckhouse.io/v1alpha1
+kind: OperationPolicy
+metadata:
+  name: application-defaults
+spec:
+  enforcementAction: Warn
+  match:
+    namespaceSelector:
+      labelSelector:
+        matchLabels:
+          operation-policy.deckhouse.io/enabled: "true"
+  policies:
+    requiredResources:
+      requests: [cpu, memory]
+      limits: [memory]
+    requiredProbes:
+      - readinessProbe
+      - livenessProbe
+    disallowedImageTags:
+      - latest</code></pre>
+              <p>А запуск от root, probes и ресурсы исправляются не в <code>OperationPolicy</code>, а в манифесте самого приложения. Обычно это <code>Deployment.spec.template.spec</code>, потому что именно из шаблона Deployment создаёт Pod.</p>
+              <pre><code>apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: legacy-api
+  namespace: payments
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: legacy-api
+  template:
+    metadata:
+      labels:
+        app: legacy-api
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+      containers:
+        - name: app
+          image: registry.example.org/payments/legacy-api:v1.4.2
+          ports:
+            - containerPort: 8080
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8080
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault</code></pre>
+              <p>Если сразу поставить <code>deny + restricted</code>, платформа начнёт блокировать существующие релизы. Для разработки это будет выглядеть не как понятное требование к манифестам, а как внезапная остановка поставки.</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="section" id="mistakes">
+          <h2>Типовые ошибки</h2>
+          <ul>
+            <li>Оставлять <code>privileged</code> по историческим причинам и забывать вернуться к пересмотру.</li>
+            <li>Считать, что PSS полностью заменяет Security Context и общие правила платформы.</li>
+            <li>Включать политики только для новых приложений, навсегда исключая старые критичные namespace.</li>
+            <li>Не контролировать allowed registries, image tags и probes, считая это «не про безопасность».</li>
+            <li>Рассматривать <code>warn</code> как финальное состояние, а не как переходный этап.</li>
+          </ul>
+        </section>
+
+        <section class="section" id="lab">
+          <h2>Лабораторная работа</h2>
+          <div class="grid two">
+            <div class="card">
+              <h3>Задача</h3>
+              <ol>
+                <li>Для namespace <code>orders</code> и <code>payments</code> определить стартовый набор политик и режим применения: только предупреждать или уже блокировать нарушения.</li>
+                <li>Описать правила, которые запрещают запуск от root, privilege escalation, небезопасные <code>hostPath</code> и отсутствие ресурсов.</li>
+                <li>Добавить эксплуатационные требования: разрешённые registry, запрет <code>latest</code>, обязательные probes и лимиты.</li>
+                <li>Подготовить отдельный путь для legacy-приложения, которое пока не совместимо с <code>restricted</code>.</li>
+              </ol>
+            </div>
+            <div class="card">
+              <h3>Ожидаемый результат</h3>
+              <ul>
+                <li>Набор политик допуска для пользовательских namespace.</li>
+                <li>План эволюционного rollout от <code>warn</code> к <code>deny</code>.</li>
+                <li>Список технического долга по приложениям, которые мешают поднять минимальный уровень требований.</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <section class="section" id="ownership">
+          <h2>Что DKP даёт из коробки, а что делает команда</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>DKP из коробки</th>
+                <th>Что должна сделать команда</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Даёт единый слой проверки ресурсов через <code>admission-policy-engine</code> и поддержку PSS.</td>
+                <td>Определить, какой минимальный набор требований обязателен для каждого класса namespace и запускаемого приложения.</td>
+              </tr>
+              <tr>
+                <td>Даёт объекты политик для расширения стандартной проверки Pod security.</td>
+                <td>Подготовить реальные правила для registries, probes, ресурсов, legacy-исключений и rollout-этапов.</td>
+              </tr>
+              <tr>
+                <td>Даёт механизм применения правил: сначала предупреждать, затем блокировать нарушения.</td>
+                <td>Построить процесс исправления нарушений, согласования исключений и постепенного ужесточения режима.</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section class="section" id="review">
+          <h2>Вопросы для самопроверки</h2>
+          <ol>
+            <li>Почему одного только <code>securityContext</code> в манифесте недостаточно для устойчивой Pod security модели?</li>
+            <li>Когда стоит начинать с <code>warn</code>, а когда можно переходить к <code>deny</code> быстрее?</li>
+            <li>Какую проблему решает <code>OperationPolicy</code>, если PSS уже включён?</li>
+            <li>Почему разрешённые registry, probes и ресурсы тоже являются частью минимального уровня безопасности, а не только удобством эксплуатации?</li>
+            <li>Как вы бы описали путь перевода legacy-приложения к более строгому набору требований без остановки продукта?</li>
+          </ol>
+        </section>
+
+        <section class="section" id="sources">
+          <h2>Источники</h2>
+          <ol class="sources">
+            <li><a href="https://deckhouse.io/products/kubernetes-platform/documentation/v1/modules/admission-policy-engine/">Deckhouse: admission-policy-engine module</a>.</li>
+            <li><a href="https://deckhouse.io/products/kubernetes-platform/documentation/v1/modules/admission-policy-engine/configuration.html">Deckhouse: admission-policy-engine configuration</a>.</li>
+            <li><a href="https://deckhouse.io/products/kubernetes-platform/documentation/v1/admin/configuration/security/policies.html">Deckhouse: Security policies</a>.</li>
+            <li><a href="https://kubernetes.io/docs/concepts/security/pod-security-admission/">Kubernetes: Pod Security Admission</a>.</li>
+            <li><a href="https://kubernetes.io/docs/concepts/security/pod-security-standards/">Kubernetes: Pod Security Standards</a>.</li>
+            <li><a href="https://kubernetes.io/docs/tasks/configure-pod-container/security-context/">Kubernetes: Configure a Security Context for a Pod or Container</a>.</li>
+            <li><a href="https://kubernetes.io/docs/reference/access-authn-authz/admission-controllers/">Kubernetes: Admission Controllers</a>.</li>
+            <li><a href="https://kubernetes.io/docs/concepts/policy/resource-quotas/">Kubernetes: Resource Quotas</a>.</li>
+            <li><a href="https://kubernetes.io/docs/concepts/policy/limit-range/">Kubernetes: Limit Ranges</a>.</li>
+          </ol>
+        </section>
+
+        <div class="chapter-nav">
+          <div class="nav-card">
+            <small>Предыдущая страница</small>
+            <a href="../chapter_1/index.html">Глава 1. Основы ИБ</a>
+          </div>
+          <div class="nav-card">
+            <small>Следующая глава</small>
+            <a href="../chapter_3/index.html">Глава 3. Сетевые политики и mTLS</a>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,565 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>v2. Глава 6. Управление сертификатами. Хранение и доставка секретов из Stronghold</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="page">
+    <header class="hero">
+      <span class="eyebrow">Глава 6</span>
+      <h1>Управление сертификатами. Хранение и доставка секретов из Stronghold</h1>
+      <p>В этой главе мы переходим от темы доступа к теме доверенных материалов: сертификатов, паролей, токенов, ключей и их жизненного цикла. Главная идея такая: в зрелой платформе секреты и сертификаты должны жить в управляемом контуре, а не в хаотическом наборе Kubernetes Secret. В Deckhouse ключевую роль здесь играют <code>cert-manager</code>, Stronghold и <code>secrets-store-integration</code>.</p>
+      <div class="meta">
+        <span class="badge">Фокус: cert-manager + Stronghold</span>
+        <span class="badge">Vault-compatible подход</span>
+        <span class="badge">Дата сверки: 21 апреля 2026</span>
+        <span class="badge">Есть лабораторная работа</span>
+      </div>
+    </header>
+
+    <div class="layout">
+      <aside class="toc">
+        <h3>Содержание</h3>
+        <ol>
+          <li><a href="#outcomes">Что вы сможете после главы</a></li>
+          <li><a href="#scenario">Где эта глава в сквозном сценарии</a></li>
+          <li><a href="#why">Почему Kubernetes Secret недостаточен</a></li>
+          <li><a href="#cert-manager">cert-manager как базовый certificate lifecycle</a></li>
+          <li><a href="#stronghold">Stronghold как централизованное хранилище</a></li>
+          <li><a href="#delivery">Доставка секретов в приложения</a></li>
+          <li><a href="#pki-ssh">PKI и SSH-сценарии</a></li>
+          <li><a href="#ops">Операционная модель и ошибки</a></li>
+          <li><a href="#lab">Лабораторная работа</a></li>
+          <li><a href="#ownership">Что DKP даёт из коробки, а что делает команда</a></li>
+          <li><a href="#review">Вопросы для самопроверки</a></li>
+          <li><a href="#sources">Источники</a></li>
+        </ol>
+      </aside>
+
+      <main class="main">
+        <section class="section" id="outcomes">
+          <h2>Что вы сможете после главы</h2>
+          <div class="grid two">
+            <div class="card">
+              <h3>Обязательный минимум</h3>
+              <ul>
+                <li>Объяснить, почему Kubernetes Secret сам по себе не решает задачу управления доверием.</li>
+                <li>Выбрать подход к lifecycle сертификатов через <code>cert-manager</code>.</li>
+                <li>Разобраться в различии между secret storage, secret delivery и rotation.</li>
+                <li>Подобрать delivery pattern под зрелость конкретного приложения: direct access, CSI или ENV injection.</li>
+              </ul>
+            </div>
+            <div class="card">
+              <h3>Углубление и применимость</h3>
+              <ul>
+                <li>Использовать Stronghold как основу для short-lived credentials, PKI и управляемого SSH-доступа.</li>
+                <li>Развести внешнее и внутреннее доверие: corporate CA, внутренняя PKI и platform-only сертификаты.</li>
+                <li>Проектировать TTL, rotation, backup и recovery-процедуры, а не только первый выпуск секрета.</li>
+              </ul>
+              <p>Материал и примеры сверены на 21 апреля 2026 года. Production-реализация всегда должна проверять совместимость выбранного delivery pattern с приложением и с конкретной версией модулей DKP.</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="section" id="scenario">
+          <h2>Где эта глава в сквозном сценарии</h2>
+          <p class="lead">Для <code>shop-demo</code> эта глава отвечает за вопрос “откуда сервисы берут доверенные материалы и кто отвечает за их жизненный цикл”. После того как мы ограничили доступ и сеть, нужно убрать хаотичные статические секреты и перевести приложения на управляемый контур доверия: кто выпускает, хранит, выдаёт и ротирует сертификаты, ключи и токены.</p>
+          <div class="diagram">
+            <pre><code>Issuer / CA -> cert-manager -> certificate lifecycle
+                     |
+                     v
+         Stronghold / Vault-compatible store
+                     |
+         +-----------+-----------+
+         |           |           |
+         v           v           v
+     direct API   CSI mount   ENV injection
+                     |
+                     v
+         application receives short-lived material</code></pre>
+          </div>
+        </section>
+
+        <section class="section" id="why">
+          <h2>Почему одного Kubernetes Secret недостаточно</h2>
+          <p class="lead">Kubernetes Secret — это удобный объект API, но сам по себе он не решает вопросов ротации, тонкой политики доступа, начального построения доверия (trust bootstrap), разделения обязанностей, аудита выдачи и централизованного секретного хранилища. Поэтому в production-платформе Secret обычно становится лишь адаптером, а не главным инструментом управления доверием.</p>
+          <div class="card">
+            <h3>Базовые понятия для новичка</h3>
+            <ul>
+              <li><strong>Secret</strong> — чувствительные данные: пароль, токен, ключ, сертификат.</li>
+              <li><strong>Certificate</strong> — цифровой документ, связывающий ключ с конкретным субъектом: сервисом, пользователем или доменом.</li>
+              <li><strong>Issuer / CA</strong> — сторона, которая выпускает и подписывает сертификаты.</li>
+              <li><strong>Rotation</strong> — регулярное обновление секрета или сертификата.</li>
+              <li><strong>Vault-compatible store</strong> — система хранения секретов, совместимая с API HashiCorp Vault.</li>
+            </ul>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Подход</th>
+                <th>Что удобно</th>
+                <th>Где ограничения</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Kubernetes Secret</td>
+                <td>Простой API, быстрая интеграция с Pod, минимальный порог входа.</td>
+                <td>Слабее выражены auditability, ротация, policy-based access и безопасные delivery patterns.</td>
+              </tr>
+              <tr>
+                <td>Stronghold / Vault-compatible store</td>
+                <td>Централизованное хранение, контролируемый lifecycle, short-lived credentials, access policies.</td>
+                <td>Требует более зрелой операционной модели и продуманной доставки секретов до приложения.</td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="grid two">
+            <div class="card">
+              <h3>Что часто не так с простым подходом</h3>
+              <ul>
+                <li>Секреты попадают в GitOps-процессы и начинают жить в виде зашифрованных, но всё же тиражируемых артефактов.</li>
+                <li>Непонятно, кто именно и когда читал секрет.</li>
+                <li>Ротация выполняется вручную и откладывается.</li>
+                <li>Разные приложения получают секреты одинаковым образом, хотя их требования к безопасности различаются.</li>
+              </ul>
+            </div>
+            <div class="card">
+              <h3>Что должна уметь зрелая система</h3>
+              <ul>
+                <li>Выпускать и продлевать сертификаты автоматически.</li>
+                <li>Хранить секреты в отдельном защищённом сервисе.</li>
+                <li>Давать приложениям доступ к секретам по минимально необходимой модели.</li>
+                <li>Поддерживать short-lived credentials и контролируемый audit trail.</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <section class="section" id="cert-manager">
+          <h2><code>cert-manager</code> как базовый certificate lifecycle</h2>
+          <p>В Deckhouse модуль <code>cert-manager</code> закрывает жизненный цикл X.509 сертификатов: выпуск, продление, issuer-модель, интеграцию с Let’s Encrypt, selfsigned-CA и внешними провайдерами DNS challenge. Это базовый platform building block, потому что без него PKI быстро превращается в набор статических вручную сгенерированных артефактов.</p>
+          <div class="grid two">
+            <div class="card">
+              <h3>Почему cert-manager важен именно платформенно</h3>
+              <ul>
+                <li>Позволяет централизовать правила выпуска и обновления сертификатов.</li>
+                <li>Уменьшает число вручную сгенерированных ключей и случайных сроков годности.</li>
+                <li>Легко встраивается в ingress, internal services и automation pipelines.</li>
+              </ul>
+            </div>
+            <div class="card">
+              <h3>Что подтверждает документация Deckhouse</h3>
+              <ul>
+                <li>Модуль является General Availability.</li>
+                <li>Поддерживает HTTP-01 и DNS-01 сценарии.</li>
+                <li>Поддерживает управление orphan secrets и создание встроенных issuers для провайдеров вроде Cloudflare.</li>
+              </ul>
+            </div>
+          </div>
+          <pre><code>apiVersion: deckhouse.io/v1alpha1
+kind: ModuleConfig
+metadata:
+  name: cert-manager
+spec:
+  version: 1
+  enabled: true
+  settings:
+    email: platform-security@example.org
+    cleanupOrphanSecrets: true</code></pre>
+          <pre><code>apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: payments-tls
+  namespace: payments
+spec:
+  secretName: payments-tls
+  issuerRef:
+    kind: ClusterIssuer
+    name: letsencrypt
+  commonName: api.example.org
+  dnsNames:
+    - api.example.org</code></pre>
+        </section>
+
+        <section class="section">
+          <h2><code>cert-manager</code> в изолированной от Интернета среде</h2>
+          <p>Это один из самых важных практических вопросов. В среде без доступа к внешним ACME-сервисам <code>cert-manager</code> не перестаёт быть полезным. Просто его роль меняется: он становится не клиентом публичного CA вроде Let’s Encrypt, а внутренним certificate lifecycle engine для корпоративной или приватной PKI.</p>
+          <p>Здесь важно аккуратно различать два слоя. Первый слой — это то, что Deckhouse даёт из коробки в своём модуле <code>cert-manager</code>, например встроенные сценарии с Let’s Encrypt и <code>selfsigned</code>. Второй слой — это стандартные возможности самого upstream <code>cert-manager</code>, которые остаются доступными внутри DKP, например <code>CA</code> issuer на основе корпоративного корневого или промежуточного сертификата.</p>
+          <div class="grid two">
+            <div class="card">
+              <h3>Что обычно недоступно в изолированной среде</h3>
+              <ul>
+                <li>ACME-проверки через внешний интернет.</li>
+                <li>Публичные DNS-provider integrations, если они требуют внешних API.</li>
+                <li>Автоматический выпуск публично доверенных сертификатов для внешних доменов.</li>
+              </ul>
+            </div>
+            <div class="card">
+              <h3>Что остаётся и становится особенно ценным</h3>
+              <ul>
+                <li>Автоматический выпуск и перевыпуск сертификатов внутри организации.</li>
+                <li>Единая issuer-модель для сервисов и ingress-ов.</li>
+                <li>Декларативное управление named certificates и wildcard certificates.</li>
+                <li>Bootstrap и поддержка внутренней PKI через <code>SelfSigned</code> и <code>CA</code> issuers.</li>
+              </ul>
+            </div>
+          </div>
+          <p>В терминах Deckhouse это означает, что в изолированной среде часто имеет смысл отключить встроенные Let’s Encrypt issuers через параметр <code>disableLetsencrypt: true</code> и перейти к одной из внутренних моделей: корпоративный CA, внутренняя CA на базе <code>CA</code> issuer или bootstrap через <code>selfsigned</code>.</p>
+          <pre><code>apiVersion: deckhouse.io/v1alpha1
+kind: ModuleConfig
+metadata:
+  name: cert-manager
+spec:
+  version: 1
+  enabled: true
+  settings:
+    disableLetsencrypt: true
+    cleanupOrphanSecrets: true</code></pre>
+        </section>
+
+        <section class="section">
+          <h2>Роль <code>cert-manager</code> при использовании корпоративного CA</h2>
+          <p>Очень важное замечание для учебной логики: <code>cert-manager</code> не обязан сам быть центром доверия. Очень часто он выступает в роли оркестратора жизненного цикла сертификатов, а реальным корнем доверия (trust root, также говорят trust anchor) остаётся корпоративный CA.</p>
+          <table>
+            <thead>
+              <tr>
+                <th>Сценарий</th>
+                <th>Роль cert-manager</th>
+                <th>Что это даёт</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Корпоративный wildcard сертификат</td>
+                <td>Управляет хранением и привязкой сертификата к Ingress/Service, если сертификат заведён в виде Secret и используется как managed artifact.</td>
+                <td>Даёт единый декларативный способ использования wildcard-сертификата в кластере.</td>
+              </tr>
+              <tr>
+                <td>Именные сертификаты от корпоративного CA</td>
+                <td>Оформляет lifecycle конкретных сертификатов через <code>Certificate</code> и соответствующий issuer.</td>
+                <td>Позволяет автоматизировать выпуск и перевыпуск отдельных сертификатов для сервисов.</td>
+              </tr>
+              <tr>
+                <td>Внутренние сертификаты Kubernetes-среды</td>
+                <td>Выступает как механизм автоматического выпуска сертификатов для внутренних сервисов, webhook-ов и внутренних HTTPS endpoints.</td>
+                <td>Убирает ручное создание внутренних cert/key пар.</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section class="section" id="pki-ssh">
+          <h2>PKI, корпоративный CA и комбинации сертификатов</h2>
+          <p>Для практики полезно разделять три класса сертификатов: внешние корпоративные, внутренние прикладные и чисто платформенные внутренние сертификаты Kubernetes. Это не конкурирующие модели, а часто вполне нормальные комбинации.</p>
+          <div class="grid two">
+            <div class="card">
+              <h3>Комбинация 1. Корпоративный wildcard снаружи, внутренние сертификаты внутри</h3>
+              <p>Внешний ingress использует корпоративный wildcard, например <code>*.corp.example.org</code>. Внутренние webhooks, service mesh, internal endpoints и служебные сертификаты живут на отдельной внутренней CA или self-managed CA внутри кластера.</p>
+              <p>Это один из самых естественных вариантов: внешнее доверие и внутреннее доверие разделены.</p>
+            </div>
+            <div class="card">
+              <h3>Комбинация 2. Корпоративный CA и для внешних, и для внутренних именных сертификатов</h3>
+              <p>Подходит организациям с сильной централизованной PKI. В этом случае <code>cert-manager</code> становится слоем оркестрации сертификатов (orchestration layer): он не является главным CA, но организует выпуск, продление и привязку сертификатов к Kubernetes-объектам. Корень доверия (trust root) остаётся единым корпоративным.</p>
+            </div>
+            <div class="card">
+              <h3>Комбинация 3. SelfSigned только для bootstrap, затем CA issuer</h3>
+              <p>Это рекомендуемая мыслительная модель по документации cert-manager: <code>SelfSigned</code> полезен для начальной загрузки собственной CA, но для устойчивой production-модели безопаснее и понятнее перейти к <code>CA</code> issuer.</p>
+            </div>
+            <div class="card">
+              <h3>Комбинация 4. Корпоративный wildcard для Ingress и отдельные named certs для чувствительных сервисов</h3>
+              <p>Иногда внешний wildcard нужен для массовых приложений, а отдельные административные или интеграционные endpoints получают собственные именные сертификаты с отдельными политиками выпуска и ротации.</p>
+            </div>
+          </div>
+          <div class="note">
+            Здесь полезно держать простой критерий выбора. Если сертификат нужен для публичного или корпоративно доверенного внешнего адреса, чаще смотрят в сторону корпоративного CA. Если сертификат нужен для внутреннего сервисного взаимодействия, webhooks или инфраструктурных endpoints, часто разумнее использовать внутреннюю CA и управлять ей внутри платформы.
+          </div>
+          <p>Stronghold как Vault-compatible хранилище при этом не конкурирует с <code>cert-manager</code>. Наоборот, они решают разные части одной задачи: <code>cert-manager</code> управляет lifecycle сертификатов, а Stronghold помогает централизовать хранение, доступ и более сложные сценарии доверия, включая PKI и SSH-механику.</p>
+        </section>
+
+        <section class="section" id="stronghold">
+          <h2>Stronghold как централизованное хранилище секретов</h2>
+          <p>Stronghold — Vault-compatible модуль Deckhouse, который выносит секреты в отдельный доверенный контур. Это особенно важно для команд, которые хотят перестать дублировать секреты по namespace, values-файлам и внутренним wiki и перейти к модели управляемой выдачи.</p>
+          <div class="grid two">
+            <div class="card">
+              <h3>Что важно из документации</h3>
+              <ul>
+                <li>Stronghold развёртывается как встроенный модуль DKP.</li>
+                <li>В automatic mode инициализация и unseal происходят автоматически.</li>
+                <li>Секрет <code>stronghold-keys</code> критичен: при его потере можно потерять доступ к данным.</li>
+                <li>Доступ возможен через UI и API, а администрирование может опираться на Dex/OIDC-группы.</li>
+              </ul>
+            </div>
+            <div class="card">
+              <h3>Что это меняет для платформенной безопасности</h3>
+              <ul>
+                <li>Секреты перестают быть обычными Kubernetes-объектами общего назначения.</li>
+                <li>Политика доступа к секретам может жить отдельно от манифестов приложений.</li>
+                <li>Появляется более естественная база для short-lived credentials, PKI и auditability.</li>
+              </ul>
+            </div>
+          </div>
+          <pre><code>apiVersion: deckhouse.io/v1alpha1
+kind: ModuleConfig
+metadata:
+  name: stronghold
+spec:
+  version: 1
+  enabled: true
+  settings:
+    management:
+      mode: Automatic
+      administrators:
+        - type: Group
+          name: admins</code></pre>
+          <div class="note">
+            Из практической точки зрения Stronghold ценен не только как хранилище. Он помогает разделить зоны ответственности: платформа отвечает за способ безопасной доставки и аутентификации, а команды приложений — за то, какие именно секреты им нужны.
+          </div>
+        </section>
+
+        <section class="section" id="delivery">
+          <h2>Доставка секретов в приложения</h2>
+          <p>Даже лучшая secret store ничего не решает, если последний участок доставки устроен плохо. Deckhouse закрывает этот вопрос модулем <code>secrets-store-integration</code>, который умеет работать с Vault-compatible store и по умолчанию автоматически обнаруживает локальный Stronghold.</p>
+          <p>Для новичка здесь полезно удерживать простую мысль: проблема не заканчивается в момент, когда секрет «где-то надёжно лежит». Самый рискованный участок часто начинается позже — в точке, где приложение должно реально получить этот секрет и использовать его в памяти, в файле или в переменной окружения.</p>
+          <pre><code>apiVersion: deckhouse.io/v1alpha1
+kind: ModuleConfig
+metadata:
+  name: secrets-store-integration
+spec:
+  version: 1
+  enabled: true</code></pre>
+          <table>
+            <thead>
+              <tr>
+                <th>Модель доставки</th>
+                <th>Как работает</th>
+                <th>Когда подходит</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Direct access</td>
+                <td>Приложение само аутентифицируется в store и читает секреты через API.</td>
+                <td>Лучший вариант, если приложение можно доработать и оно умеет работать с secret store.</td>
+              </tr>
+              <tr>
+                <td>CSI-mounted files</td>
+                <td>Секрет доставляется как файл, без хранения в Kubernetes Secret.</td>
+                <td>Хорошо подходит приложениям, ожидающим файлы сертификатов, ключей и конфигураций.</td>
+              </tr>
+              <tr>
+                <td>ENV injection</td>
+                <td>Webhook и entrypoint injection передают секрет как переменные окружения.</td>
+                <td>Подходит для legacy-приложений, которые сложно переписать.</td>
+              </tr>
+            </tbody>
+          </table>
+          <p>Из описания модуля важно отметить две детали. Во-первых, mounted secrets автоматически ротируются примерно каждые две минуты при изменении значения в store. Во-вторых, для локального Stronghold не нужна отдельная ручная конфигурация: работает режим <code>DiscoverLocalStronghold</code>.</p>
+          <p>Вариант с файлом подходит, когда приложение умеет читать токен, пароль или сертификат из файловой системы. Здесь <code>SecretsStoreImport</code> описывает, какой ключ из Stronghold взять, а <code>Deployment</code> монтирует результат как volume.</p>
+          <pre><code>apiVersion: deckhouse.io/v1alpha1
+kind: SecretsStoreImport
+metadata:
+  name: payments-secrets
+  namespace: payments
+spec:
+  type: CSI
+  role: payments-api
+  files:
+    - name: api-token
+      source:
+        path: "shop/data/payments"
+        key: "API_TOKEN"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payments-api
+  namespace: payments
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: payments-api
+  template:
+    metadata:
+      labels:
+        app: payments-api
+    spec:
+      serviceAccountName: payments-api
+      containers:
+        - name: app
+          image: registry.example.org/shop/payments-api:v1.4.2
+          volumeMounts:
+            - name: secrets
+              mountPath: /mnt/secrets
+              readOnly: true
+      volumes:
+        - name: secrets
+          csi:
+            driver: secrets-store.csi.deckhouse.io
+            volumeAttributes:
+              secretsStoreImport: "payments-secrets"</code></pre>
+          <p>Для legacy-приложения, которое умеет читать только переменные окружения, можно использовать injection. Это менее предпочтительно, чем чтение из store самим приложением или файловая доставка, но иногда это реалистичный переходный путь.</p>
+          <pre><code>apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payments-legacy
+  namespace: payments
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: payments-legacy
+  template:
+    metadata:
+      labels:
+        app: payments-legacy
+      annotations:
+        secrets-store.deckhouse.io/role: "payments-api"
+    spec:
+      serviceAccountName: payments-api
+      containers:
+        - name: app
+          image: registry.example.org/shop/payments-legacy:v1.4.2
+          env:
+            - name: API_TOKEN
+              value: secrets-store:shop/data/payments#API_TOKEN</code></pre>
+        </section>
+
+        <section class="section">
+          <h2>Мини-кейс: закрытый контур банка</h2>
+          <div class="grid two">
+            <div class="card">
+              <h3>Ситуация</h3>
+              <p>Кластер работает в изолированной сети без доступа к внешнему Интернету. У организации есть корпоративный CA, который уже используется для внутренних порталов и reverse proxy.</p>
+            </div>
+            <div class="card">
+              <h3>Разумная модель в DKP</h3>
+              <p><code>cert-manager</code> используется как engine управления сертификатами, а Let’s Encrypt отключается. Внешние ingress-ы получают сертификаты корпоративного CA, внутренние служебные endpoints — либо сертификаты той же PKI, либо отдельной внутренней CA. Stronghold используется как централизованное хранилище секретов и как основа для дальнейшего развития контура доверия.</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="section" id="pki-ssh">
+          <h2>PKI и SSH-сценарии</h2>
+          <p>Поскольку Stronghold совместим с HashiCorp Vault API, его архитектурно логично рассматривать и как базу для более продвинутых сценариев: динамической выдачи X.509 сертификатов и управляемого SSH-доступа.</p>
+          <div class="grid two">
+            <div class="card">
+              <h3>PKI</h3>
+              <p>Vault-compatible PKI engine позволяет выдавать short-lived сертификаты для внутренних сервисов и автоматизации. Это особенно полезно там, где не хочется раздавать долгоживущие статические клиентские сертификаты или хранить их в CI/CD в виде файлов.</p>
+            </div>
+            <div class="card">
+              <h3>SSH</h3>
+              <p>Vault-compatible SSH engine даёт модель signed SSH certificates и one-time passwords. Для операционной безопасности это сильно лучше, чем долгоживущие приватные ключи, размноженные по ноутбукам и jump-host-ам.</p>
+            </div>
+          </div>
+          <div class="note">
+            Здесь важно аккуратно сформулировать вывод: документация Deckhouse делает акцент на Vault-совместимости Stronghold, а официальная документация Vault описывает PKI и SSH engines как стандартные механизмы. Значит, при проектировании расширенного контура доверия их разумно учитывать как естественное направление развития платформы.
+          </div>
+        </section>
+
+        <section class="section" id="ops">
+          <h2>Операционная модель и типовые ошибки</h2>
+          <ul>
+            <li>Ошибка: держать все секреты в Kubernetes Secret просто потому, что так удобнее GitOps-пайплайну.</li>
+            <li>Ошибка: включить Stronghold, но не организовать резервное хранение <code>stronghold-keys</code>.</li>
+            <li>Ошибка: не разделять direct access, CSI и ENV injection по уровню зрелости приложений.</li>
+            <li>Ошибка: не проектировать rotation и TTL, оставляя все креды долгоживущими.</li>
+            <li>Ошибка: путать хранение сертификатов с их lifecycle management и считать задачу решённой после первого выпуска.</li>
+          </ul>
+          <p>Хорошая operational цель звучит так: приложение получает секрет самым безопасным из поддерживаемых им способов, сертификаты обновляются автоматически, а доверенные материалы не живут дольше, чем это необходимо бизнесу и платформе.</p>
+        </section>
+
+        <section class="section" id="lab">
+          <h2>Лабораторная работа</h2>
+          <div class="grid two">
+            <div class="card">
+              <h3>Задача</h3>
+              <ol>
+                <li>Для внешнего ingress и внутреннего сервиса <code>payments</code> выбрать модель certificate lifecycle и источник доверия.</li>
+                <li>Решить, какие секреты остаются в Kubernetes Secret только как адаптер, а какие должны жить в Stronghold.</li>
+                <li>Выбрать delivery pattern для двух приложений: современного сервиса и legacy-приложения.</li>
+                <li>Описать правила ротации, TTL и владельцев секретов и сертификатов.</li>
+              </ol>
+            </div>
+            <div class="card">
+              <h3>Ожидаемый результат</h3>
+              <ul>
+                <li>Схема certificate lifecycle для внешнего и внутреннего трафика.</li>
+                <li>Решение по secret delivery для приложений разной зрелости.</li>
+                <li>Краткая policy-модель: кто выпускает, кто хранит, кто ротирует и кто восстанавливает доверенные материалы.</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <section class="section" id="ownership">
+          <h2>Что DKP даёт из коробки, а что делает команда</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>DKP из коробки</th>
+                <th>Что должна сделать команда</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Даёт <code>cert-manager</code>, Stronghold и <code>secrets-store-integration</code> как основу доверенного контура.</td>
+                <td>Решить, какие материалы должны храниться централизованно, кто владелец секретов и какая модель доверия используется.</td>
+              </tr>
+              <tr>
+                <td>Даёт механизмы выпуска, хранения и доставки.</td>
+                <td>Выбрать delivery pattern для каждого приложения и убедиться, что приложение корректно переживает rotation.</td>
+              </tr>
+              <tr>
+                <td>Даёт возможность строить PKI и short-lived credentials.</td>
+                <td>Настроить TTL, backup, recovery и организационное разделение обязанностей, чтобы доверие не держалось на ручных действиях одного администратора.</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section class="section" id="review">
+          <h2>Вопросы для самопроверки</h2>
+          <ol>
+            <li>Почему удобство Kubernetes Secret не делает его достаточной production-моделью для управления доверием?</li>
+            <li>В чём разница между хранением секрета, его доставкой в приложение и его регулярной ротацией?</li>
+            <li>Когда direct access к secret store безопаснее и полезнее, чем ENV injection?</li>
+            <li>Почему <code>SelfSigned</code> полезен как bootstrap, но не всегда хорош как долговременная модель доверия?</li>
+            <li>Как вы поймёте, что приложение действительно готово к ротации секрета, а не только умеет стартовать с ним один раз?</li>
+          </ol>
+        </section>
+
+        <section class="section" id="sources">
+          <h2>Источники</h2>
+          <ol class="sources">
+            <li><a href="https://deckhouse.io/products/kubernetes-platform/documentation/v1/modules/cert-manager/configuration.html">Deckhouse: cert-manager configuration</a>.</li>
+            <li><a href="https://deckhouse.io/products/kubernetes-platform/documentation/v1/modules/cert-manager/usage.html">Deckhouse: cert-manager usage</a>.</li>
+            <li><a href="https://deckhouse.io/modules/stronghold/usage.html">Deckhouse: Stronghold usage</a>.</li>
+            <li><a href="https://deckhouse.io/modules/secrets-store-integration/">Deckhouse: secrets-store-integration overview</a>.</li>
+            <li><a href="https://deckhouse.io/modules/secrets-store-integration/usage.html">Deckhouse: secrets-store-integration usage</a>.</li>
+            <li><a href="https://cert-manager.io/docs/configuration/selfsigned/">cert-manager: SelfSigned issuer</a>.</li>
+            <li><a href="https://cert-manager.io/docs/configuration/ca/">cert-manager: CA issuer</a>.</li>
+            <li><a href="https://developer.hashicorp.com/vault/docs/secrets/pki/index">HashiCorp Vault: PKI secrets engine</a>.</li>
+            <li><a href="https://developer.hashicorp.com/vault/docs/secrets/ssh">HashiCorp Vault: SSH secrets engine</a>.</li>
+          </ol>
+        </section>
+
+        <div class="chapter-nav">
+          <div class="nav-card">
+            <small>Предыдущая глава</small>
+            <a href="../chapter_5/index.html">Глава 5. Argo CD и operator-argo</a>
+          </div>
+          <div class="nav-card">
+            <small>Следующая глава</small>
+            <a href="../chapter_7/index.html">Глава 7. Выявление уязвимостей и аудит</a>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+</body>
+</html>

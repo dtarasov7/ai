@@ -1,0 +1,585 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Эталонный пример решения capstone-кейса</title>
+  <link rel="stylesheet" href="../../styles.css">
+  <style>
+    body {
+      background: #f6f8f5;
+    }
+    .viewer-page {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 28px;
+    }
+    .markmap-viewer-page {
+      width: 100%;
+      max-width: none;
+      margin: 0;
+      padding: 12px 18px 18px;
+    }
+    .viewer-topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 18px;
+      padding: 12px 0;
+    }
+    .viewer-topbar a,
+    .markmap-actions a,
+    .markmap-actions button {
+      display: inline-flex;
+      align-items: center;
+      min-height: 34px;
+      padding: 0 12px;
+      border: 0;
+      border-radius: 6px;
+      background: #fff;
+      color: #165745;
+      text-decoration: none;
+      font: inherit;
+      cursor: pointer;
+    }
+    .markdown-body {
+      background: #fff;
+      border: 1px solid rgba(31, 46, 40, 0.14);
+      border-radius: 8px;
+      padding: 28px;
+      line-height: 1.6;
+    }
+    .markdown-body table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 18px 0;
+    }
+    .markdown-body th,
+    .markdown-body td {
+      border: 1px solid rgba(31, 46, 40, 0.2);
+      padding: 8px 10px;
+      vertical-align: top;
+    }
+    .markdown-body pre {
+      overflow-x: auto;
+      padding: 16px;
+      border-radius: 8px;
+      background: #f1f3f2;
+      color: #1f2e28;
+    }
+    .markdown-body pre code {
+      color: inherit;
+    }
+    .markmap-page {
+      min-height: calc(100vh - 80px);
+      background: #fff;
+      padding: 0;
+    }
+    .markmap-toolbar {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+      margin-bottom: 12px;
+      padding-bottom: 12px;
+    }
+    .markmap-toolbar h2 {
+      margin: 0 0 6px;
+    }
+    .markmap-toolbar p {
+      margin: 0;
+      color: #5c6b63;
+    }
+    .markmap-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      align-items: center;
+      max-width: 680px;
+    }
+    .markmap-status {
+      flex: 1 1 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-width: 260px;
+      color: #5c6b63;
+      font-size: 12px;
+      line-height: 1.35;
+      text-align: right;
+    }
+    #zoom-in,
+    #zoom-out {
+      width: 34px;
+      justify-content: center;
+      padding: 0;
+    }
+    #markmap-svg {
+      width: 100%;
+      height: calc(100vh - 160px);
+      min-height: 680px;
+    }
+    .settings-panel {
+      position: fixed;
+      top: 0;
+      right: -360px;
+      z-index: 20;
+      width: 340px;
+      max-width: calc(100vw - 28px);
+      height: 100vh;
+      background: #fff;
+      box-shadow: -8px 0 24px rgba(31, 46, 40, 0.12);
+      transition: right 0.2s ease;
+      overflow-y: auto;
+    }
+    .settings-panel.active {
+      right: 0;
+    }
+    .settings-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      padding: 16px 18px;
+      font-weight: 700;
+    }
+    .settings-content {
+      padding: 18px;
+    }
+    .setting-group {
+      margin-bottom: 18px;
+    }
+    .setting-label {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 8px;
+      color: #24352e;
+      font-size: 14px;
+      font-weight: 600;
+    }
+    .setting-value {
+      color: #165745;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    .setting-slider {
+      width: 100%;
+    }
+    .close-settings {
+      width: 34px;
+      height: 34px;
+      padding: 0;
+      border: 0;
+      border-radius: 6px;
+      background: #fff;
+      color: #165745;
+      cursor: pointer;
+      font-size: 22px;
+      line-height: 1;
+    }
+    .reset-button {
+      width: 100%;
+      min-height: 38px;
+      border: 0;
+      border-radius: 6px;
+      background: #fff;
+      color: #165745;
+      cursor: pointer;
+      font: inherit;
+    }
+    .viewer-error {
+      margin: 24px 0;
+      padding: 18px;
+      border-left: 4px solid #b3261e;
+      background: #fff1f1;
+      color: #77120c;
+    }
+    @media (max-width: 760px) {
+      .viewer-page {
+        padding: 14px;
+      }
+      .markmap-viewer-page {
+        padding: 8px;
+      }
+      .viewer-topbar,
+      .markmap-toolbar {
+        flex-direction: column;
+        align-items: stretch;
+      }
+      .markdown-body {
+        padding: 18px;
+      }
+      #markmap-svg {
+        height: calc(100vh - 220px);
+        min-height: 480px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="viewer-page">
+    <nav class="viewer-topbar">
+      <a href="../../index.html">К основному курсу</a>
+      <a href="../../capstone/reference_argocd_access_solution.md">Открыть исходный файл</a>
+    </nav>
+<main class="markdown-body">
+<h1>Эталонный пример решения capstone-кейса</h1>
+<h2>Argo CD как ограниченная точка доступа вместо прямого <code>kubectl</code> для dev/test</h2>
+<h2>Как читать этот документ</h2>
+<p>Это не “единственно правильный” ответ и не универсальный production-шаблон для любой организации. Это почти готовый эталонный ответ проверяющего: пример сильного решения, которое засчитывается по логике курса, потому что:</p>
+<ul>
+<li>снижает поверхность доступа;</li>
+<li>не ломает диагностику;</li>
+<li>не подменяет Kubernetes RBAC хаотичным доступом через UI;</li>
+<li>явно показывает остаточные риски и способы их ограничения.</li>
+</ul>
+<p>Если в вашей среде принято другое разделение обязанностей, иное именование групп или другой GitOps-процесс, это допустимо. Недопустимо другое: назвать решение “безопасным”, не показав, где именно проходят границы прав и почему они не разваливаются при первой же удобной просьбе “дайте ещё чуть-чуть”.</p>
+<h2>1. Краткий вердикт проверяющего</h2>
+<p><strong>Статус:</strong> зачтено.</p>
+<p><strong>Почему решение засчитывается:</strong></p>
+<ul>
+<li>dev/test не получают kubeconfig и не ходят напрямую в Kubernetes API;</li>
+<li>для повседневной диагностики им хватает Argo CD UI и логов;</li>
+<li><code>exec</code>, <code>override</code>, cluster-scoped ресурсы и деплой в чужие namespace не выданы по умолчанию;</li>
+<li>прямой <code>kubectl</code> остаётся только у platform/SRE и оформлен как отдельный путь;</li>
+<li>для production явно ограничены <code>auto-sync</code> и <code>self-heal</code>;</li>
+<li>GitOps-контур не используется как предлог хранить секреты в Git.</li>
+</ul>
+<p><strong>Что проверяющий всё ещё требует держать под контролем:</strong></p>
+<ul>
+<li>владелец repo credentials и Argo CD RBAC;</li>
+<li>регулярный review <code>AppProject</code> и групп в SSO;</li>
+<li>экспорт audit-событий Argo CD и Kubernetes в общий журнал;</li>
+<li>отдельный break-glass-путь на случай отказа Argo CD, Dex или Git.</li>
+</ul>
+<h2>2. Исходные допущения</h2>
+<ul>
+<li>Учебный стенд: <code>shop-demo</code>.</li>
+<li>Namespace приложений: <code>frontend</code>, <code>orders</code>, <code>payments</code>.</li>
+<li>Технический namespace платформы: <code>platform-tools</code>.</li>
+<li>Argo CD развёрнут платформенной командой и интегрирован с SSO через Dex.</li>
+<li>Манифесты приложений лежат в одном Git-репозитории платформы: <code>https://git.example.org/platform/shop-demo.git</code>.</li>
+<li>Секреты не хранятся в Git. Для секретов используется отдельный путь из главы 6: Stronghold / secrets-store / External Secrets.</li>
+<li>Речь идёт о production-подобной среде, где удобство диагностики важно, но не важнее границ доступа.</li>
+</ul>
+<h2>3. Архитектурное решение</h2>
+<h3>Выбранный принцип</h3>
+<p>Мы сознательно разделяем два разных типа доступа:</p>
+<ol>
+<li><p><strong>Доступ к приложениям для чтения и базовой диагностики.</strong><br/>
+Даётся через Argo CD.</p>
+</li>
+<li><p><strong>Доступ к платформе и Kubernetes API для администрирования.</strong><br/>
+Остаётся только у platform/SRE через прямой <code>kubectl</code>.</p>
+</li>
+</ol>
+<p>Это решение выбрано потому, что у разработчиков и тестировщиков в повседневной работе чаще всего есть четыре реальные потребности:</p>
+<ul>
+<li>увидеть, какой манифест сейчас применён;</li>
+<li>понять, что приложение в состоянии <code>Healthy</code> или <code>OutOfSync</code>;</li>
+<li>посмотреть связанные ресурсы;</li>
+<li>прочитать логи и события.</li>
+</ul>
+<p>Для этого не нужен ни <code>cluster-admin</code>, ни kubeconfig, ни <code>kubectl exec</code>.</p>
+<h3>Что сознательно не делаем</h3>
+<ul>
+<li>Не выдаём dev/test общий <code>read-only</code> в Kubernetes API “на всякий случай”.</li>
+<li>Не выдаём <code>exec</code> “иногда для отладки”.</li>
+<li>Не разрешаем синхронизацию произвольной ревизии из UI.</li>
+<li>Не разрешаем dev/test менять <code>AppProject</code>, Argo CD RBAC, настройки оператора и repo credentials.</li>
+</ul>
+<h2>4. Матрица интерфейсов доступа</h2>
+<table>
+<thead>
+<tr>
+<th>Группа</th>
+<th>Основной интерфейс</th>
+<th>Что разрешено</th>
+<th>Что запрещено по умолчанию</th>
+<th>Владелец</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>shop-dev</code></td>
+<td>Argo CD UI / CLI</td>
+<td>видеть приложения, дерево ресурсов, события, историю синхронизации, логи</td>
+<td><code>kubectl</code>, <code>exec</code>, <code>override</code>, sync в production, доступ к чужим приложениям</td>
+<td>владелец прикладной команды</td>
+</tr>
+<tr>
+<td><code>shop-test</code></td>
+<td>Argo CD UI</td>
+<td>видеть приложения, состояние rollout, логи</td>
+<td><code>kubectl</code>, <code>exec</code>, sync, доступ к чужим namespace</td>
+<td>владелец QA-функции</td>
+</tr>
+<tr>
+<td><code>shop-auditors</code></td>
+<td>Argo CD UI + dashboards</td>
+<td>read-only просмотр приложений и отчётов</td>
+<td>любые изменения, <code>exec</code>, доступ к repo credentials</td>
+<td>владелец audit-функции</td>
+</tr>
+<tr>
+<td><code>platform-sre</code></td>
+<td><code>kubectl</code> + Argo CD admin</td>
+<td>администрирование кластера, разбор инцидентов, break-glass, настройка Argo CD</td>
+<td>работа без журнала и без review временных исключений</td>
+<td>руководитель платформенной команды</td>
+</tr>
+<tr>
+<td>CI/CD</td>
+<td>Git + контролируемый merge process</td>
+<td>изменение желаемого состояния через Git</td>
+<td>прямой деплой в production через ручной <code>kubectl apply</code></td>
+<td>владелец CI/CD</td>
+</tr>
+</tbody>
+</table>
+<h2>5. Почему это сильнее, чем просто “отобрать kubectl”</h2>
+<p>Плохой вариант выглядит так: у людей забрали <code>kubectl</code>, но ничего не дали взамен. В результате они начинают просить временные исключения, общий read-only kubeconfig, доступ к логам через обходные сервисы и быстро возвращаются к старой схеме.</p>
+<p>Хороший вариант выглядит иначе:</p>
+<ul>
+<li>прямой доступ к API действительно сокращается;</li>
+<li>повседневная диагностика не страдает;</li>
+<li>команды не начинают ежедневно дергать platform/SRE ради просмотра статуса деплоя;</li>
+<li>сама модель доступа остаётся читаемой и проверяемой.</li>
+</ul>
+<p>Именно поэтому в данном кейсе Argo CD выбран не как “модный GitOps”, а как <strong>контролируемый пользовательский слой доступа к приложениям</strong>.</p>
+<h2>6. Конкретная реализация</h2>
+<h3>6.1. SSO и базовая дисциплина</h3>
+<ul>
+<li>Вход в Argo CD идёт через Dex / корпоративный IdP.</li>
+<li>Локальный <code>admin</code> используется только на bootstrap-этапе и затем отключается.</li>
+<li>Группы <code>shop-dev</code>, <code>shop-test</code>, <code>shop-auditors</code>, <code>platform-sre</code> синхронизированы из внешнего IdP.</li>
+<li><code>policy.default</code> выставлен в <code>role:none</code>.</li>
+</ul>
+<p>Это важно, потому что “широкая default role, а потом мы всё дожмём deny-правилами” — плохая идея. В реальной системе это почти всегда кончается тем, что кто-то уже имеет лишний доступ, а команда думает, что “формально всё ограничила”.</p>
+<h3>6.2. RBAC Argo CD для dev/test</h3>
+<pre><code class="language-yaml">apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-rbac-cm
+  namespace: argocd
+data:
+  policy.default: role:none
+  policy.csv: |
+    p, role:shop-dev-readonly, applications, get, shop-demo/*, allow
+    p, role:shop-dev-readonly, logs, get, shop-demo/*, allow
+    p, role:shop-auditor-readonly, applications, get, shop-demo/*, allow
+    p, role:shop-auditor-readonly, logs, get, shop-demo/*, allow
+    g, shop-dev, role:shop-dev-readonly
+    g, shop-test, role:shop-dev-readonly
+    g, shop-auditors, role:shop-auditor-readonly
+</code></pre>
+<h3>Почему это считается хорошим минимумом</h3>
+<ul>
+<li>Есть право видеть приложения.</li>
+<li>Есть право видеть логи.</li>
+<li>Нет <code>exec</code>.</li>
+<li>Нет <code>override</code>.</li>
+<li>Нет широкого доступа “всем залогиненным”.</li>
+</ul>
+<h3>Почему здесь нет <code>sync</code></h3>
+<p>Для production-подобной среды это осознанное ограничение.
+Команды разработки и тестирования видят состояние и могут диагностировать проблему, но не применяют изменения напрямую из UI. Изменение проходит через Git, review и merge.</p>
+<p>Если организации нужен ручной sync в non-prod, это можно ввести отдельной ролью только для конкретной среды. Но это должно быть именно отдельное решение, а не привычка “давайте всем, а потом разберёмся”.</p>
+<h3>6.3. <code>AppProject</code> как граница полномочий</h3>
+<pre><code class="language-yaml">apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: shop-demo
+  namespace: argocd
+spec:
+  sourceRepos:
+    - https://git.example.org/platform/shop-demo.git
+  destinations:
+    - namespace: frontend
+      server: https://kubernetes.default.svc
+    - namespace: orders
+      server: https://kubernetes.default.svc
+    - namespace: payments
+      server: https://kubernetes.default.svc
+  clusterResourceWhitelist: []
+  namespaceResourceWhitelist:
+    - group: apps
+      kind: Deployment
+    - group: ""
+      kind: Service
+    - group: ""
+      kind: ConfigMap
+    - group: networking.k8s.io
+      kind: Ingress
+  namespaceResourceBlacklist:
+    - group: ""
+      kind: Secret
+</code></pre>
+<h3>Почему это хорошо</h3>
+<ul>
+<li>Разрешён ровно один репозиторий.</li>
+<li>Разрешены только свои namespace.</li>
+<li>Cluster-scoped ресурсы не разрешены.</li>
+<li>Обычные <code>Secret</code> не разворачиваются напрямую из Git.</li>
+</ul>
+<h3>Почему это важно отдельно проговорить</h3>
+<p>Очень частая ошибка — считать <code>AppProject</code> просто папкой или организационной сущностью.
+На самом деле это часть security boundary. Если здесь разрешить лишнее, команда получит обходной путь не через <code>kubectl</code>, а через GitOps.</p>
+<h2>7. Что остаётся только у platform/SRE</h2>
+<p>Следующие действия не входят в повседневный доступ dev/test:</p>
+<ul>
+<li>прямой <code>kubectl</code> в production-кластер;</li>
+<li><code>kubectl exec</code>;</li>
+<li><code>kubectl port-forward</code>;</li>
+<li>изменение Argo CD RBAC;</li>
+<li>изменение <code>AppProject</code>;</li>
+<li>изменение repo credentials;</li>
+<li>работа с cluster-scoped ресурсами;</li>
+<li>разбор и изменение operator-level настроек;</li>
+<li>break-glass при отказе основного контура.</li>
+</ul>
+<p>Это принципиально важно. Если эти действия доступны слишком широкому кругу, то Argo CD перестаёт быть слоем ограничения и превращается в просто ещё один административный интерфейс.</p>
+<h2>8. Решение по <code>auto-sync</code> и <code>self-heal</code></h2>
+<h3>Production</h3>
+<ul>
+<li><code>auto-sync</code>: выключен.</li>
+<li><code>self-heal</code>: выключен.</li>
+<li>Применение изменений: через Git + review + ручное подтверждение sync platform/SRE.</li>
+</ul>
+<h3>Non-production</h3>
+<ul>
+<li><code>auto-sync</code>: допустим.</li>
+<li><code>self-heal</code>: допустим после проверки команды.</li>
+</ul>
+<h3>Почему так</h3>
+<p>Drift detection полезен везде. Но в production <code>auto-sync</code> и <code>self-heal</code> означают, что ошибочный merge или компрометация Git почти сразу превращаются в фактическое изменение среды. Для курса это важный критерий зрелости: команда должна не просто знать, что функция существует, а понимать цену автоматизма.</p>
+<h2>9. Секреты и чувствительные данные</h2>
+<p>Это решение <strong>не засчитывается</strong>, если команда хранит business secrets в Git и объясняет это “удобством GitOps”.</p>
+<p>Приемлемый вариант для capstone:</p>
+<ul>
+<li>секреты живут вне Git;</li>
+<li>в Git лежат только ссылки на внешний источник секрета или безопасные шаблоны;</li>
+<li>прямой ресурс <code>Secret</code> не является основным способом поставки чувствительных данных в приложение.</li>
+</ul>
+<p>Именно поэтому в reference <code>AppProject</code> показан с запретом на прямой <code>Secret</code>.</p>
+<h2>10. Проверка, которую должен увидеть проверяющий</h2>
+<h3>Проверка 1. Dev видит приложение, но не имеет kubeconfig</h3>
+<p>Ожидаемый результат:</p>
+<ul>
+<li>пользователь из <code>shop-dev</code> логинится в Argo CD;</li>
+<li>видит только приложения <code>shop-demo</code>;</li>
+<li>не получает kubeconfig и не имеет прямого доступа к API server.</li>
+</ul>
+<h3>Проверка 2. Dev видит логи, но не может сделать <code>exec</code></h3>
+<p>Ожидаемый результат:</p>
+<ul>
+<li>просмотр логов доступен;</li>
+<li>действие <code>exec</code> в UI и CLI недоступно;</li>
+<li>команда не может открыть интерактивную сессию в контейнере.</li>
+</ul>
+<h3>Проверка 3. Test не видит чужие namespace</h3>
+<p>Ожидаемый результат:</p>
+<ul>
+<li>пользователь из <code>shop-test</code> видит только разрешённые приложения;</li>
+<li>не видит чужие проекты и не может деплоить в другой namespace.</li>
+</ul>
+<h3>Проверка 4. PR с cluster-scoped ресурсом не должен пройти как нормальный путь</h3>
+<p>Ожидаемый результат:</p>
+<ul>
+<li>манифест с <code>ClusterRoleBinding</code> или другим cluster-scoped объектом не вписывается в границы <code>AppProject</code>;</li>
+<li>команда не может “тихо” расширить себе полномочия через Git.</li>
+</ul>
+<h3>Проверка 5. Production sync остаётся под контролем</h3>
+<p>Ожидаемый результат:</p>
+<ul>
+<li>dev/test не могут синхронизировать произвольную ревизию;</li>
+<li>для production есть ручная точка принятия решения.</li>
+</ul>
+<h2>11. Остаточные риски и что с ними делать</h2>
+<h3>Риск 1. Компрометация Git или repo credentials</h3>
+<p>Что делать:</p>
+<ul>
+<li>ограничить владельцев repo credentials;</li>
+<li>включить review PR;</li>
+<li>разделить production и non-production контуры;</li>
+<li>журналировать изменения и sync-события.</li>
+</ul>
+<h3>Риск 2. Ошибка в Argo CD RBAC</h3>
+<p>Что делать:</p>
+<ul>
+<li>регулярно проверять <code>policy.csv</code>;</li>
+<li>не использовать широкие default roles;</li>
+<li>отдельно тестировать негативные сценарии: “не должен видеть”, “не должен exec”, “не должен sync”.</li>
+</ul>
+<h3>Риск 3. Слишком широкий <code>AppProject</code></h3>
+<p>Что делать:</p>
+<ul>
+<li>не разрешать cluster-scoped ресурсы по умолчанию;</li>
+<li>не разрешать чужие namespace;</li>
+<li>держать whitelist ресурсов минимальным.</li>
+</ul>
+<h3>Риск 4. Зависимость от Argo CD и SSO</h3>
+<p>Что делать:</p>
+<ul>
+<li>описать break-glass;</li>
+<li>ограничить, кто может им пользоваться;</li>
+<li>периодически проверять, что аварийный путь вообще работает.</li>
+</ul>
+<h2>12. Break-glass</h2>
+<h3>Когда допускается</h3>
+<ul>
+<li>Argo CD недоступен;</li>
+<li>Dex / SSO недоступны;</li>
+<li>требуется срочное platform-level вмешательство;</li>
+<li>есть инцидент, в котором UI-путь мешает скорости реакции.</li>
+</ul>
+<h3>Кто использует</h3>
+<ul>
+<li>только <code>platform-sre</code> или дежурный on-call;</li>
+<li>с последующей фиксацией причины, времени, объёма действий и review после инцидента.</li>
+</ul>
+<h3>Что важно</h3>
+<p>Break-glass не должен быть “секретной короткой дорогой”, которую все знают и иногда используют “потому что так быстрее”. Если обычный путь неудобен настолько, что люди постоянно хотят обход, значит проблема в модели доступа, а не в пользователях.</p>
+<h2>13. Что проверяющий запишет в сильные стороны</h2>
+<ul>
+<li>Хорошо проведена граница между приложением и платформой.</li>
+<li>Убрали прямой <code>kubectl</code> у dev/test без потери наблюдаемости.</li>
+<li>Не смешали GitOps и платформенное администрирование.</li>
+<li>Показали, что <code>AppProject</code> — часть security boundary.</li>
+<li>Явно отделили production от non-production по <code>auto-sync</code>.</li>
+<li>Не забыли про break-glass и владельцев процесса.</li>
+</ul>
+<h2>14. Что проверяющий запишет в замечания, если этого нет</h2>
+<ul>
+<li>Нет явного владельца Argo CD RBAC.</li>
+<li>Нет явного владельца repo credentials.</li>
+<li>Не описан путь отзыва прав при увольнении или смене команды.</li>
+<li>Не описано, как аудиторы получают read-only доступ.</li>
+<li>Не показано, как экспортируются Argo CD и Kubernetes audit-события.</li>
+<li>Непонятно, как platform/SRE проверяет, что dev/test действительно не могут сделать <code>exec</code>.</li>
+</ul>
+<h2>15. Итоговая формулировка проверяющего</h2>
+<p>Решение засчитывается как зрелое и практически применимое. Оно не сводится к лозунгу “убрали kubectl”, а показывает полноценную инженерную модель:</p>
+<ul>
+<li>у повседневной диагностики есть удобный и ограниченный путь;</li>
+<li>у платформенного администрирования есть отдельный путь;</li>
+<li>у GitOps-контура есть явные границы;</li>
+<li>остаточные риски названы и не маскируются под “это потом настроим”.</li>
+</ul>
+<p>Если команда воспроизведёт такую логику у себя и действительно проверит запрет на <code>exec</code>, ширину <code>AppProject</code>, границы production sync и break-glass, это уже не учебная абстракция, а хороший рабочий security-паттерн.</p>
+<h2>Источники</h2>
+<ul>
+<li>Deckhouse <code>operator-argo</code>: https://deckhouse.io/modules/operator-argo/stable/</li>
+<li>Deckhouse examples: https://deckhouse.io/modules/operator-argo/examples.html</li>
+<li>Argo CD RBAC: https://argo-cd.readthedocs.io/en/stable/operator-manual/rbac/</li>
+<li>Argo CD AppProject: https://argo-cd.readthedocs.io/en/release-2.14/operator-manual/declarative-setup/</li>
+<li>Argo CD Operator managed namespaces: https://argocd-operator.readthedocs.io/en/stable/usage/custom_roles/</li>
+<li>Argo CD auto-sync: https://argo-cd.readthedocs.io/en/stable/user-guide/auto_sync/</li>
+</ul>
+
+</main>
+  </div>
+</body>
+</html>

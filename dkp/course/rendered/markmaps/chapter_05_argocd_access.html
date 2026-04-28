@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Глава 5. Argo CD и operator-argo</title>
+  <link rel="stylesheet" href="../../styles.css">
+  <style>
+    body {
+      background: #f6f8f5;
+    }
+    .viewer-page {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 28px;
+    }
+    .markmap-viewer-page {
+      width: 100%;
+      max-width: none;
+      margin: 0;
+      padding: 12px 18px 18px;
+    }
+    .viewer-topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 18px;
+      padding: 12px 0;
+    }
+    .viewer-topbar a,
+    .markmap-actions a,
+    .markmap-actions button {
+      display: inline-flex;
+      align-items: center;
+      min-height: 34px;
+      padding: 0 12px;
+      border: 0;
+      border-radius: 6px;
+      background: #fff;
+      color: #165745;
+      text-decoration: none;
+      font: inherit;
+      cursor: pointer;
+    }
+    .markdown-body {
+      background: #fff;
+      border: 1px solid rgba(31, 46, 40, 0.14);
+      border-radius: 8px;
+      padding: 28px;
+      line-height: 1.6;
+    }
+    .markdown-body table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 18px 0;
+    }
+    .markdown-body th,
+    .markdown-body td {
+      border: 1px solid rgba(31, 46, 40, 0.2);
+      padding: 8px 10px;
+      vertical-align: top;
+    }
+    .markdown-body pre {
+      overflow-x: auto;
+      padding: 16px;
+      border-radius: 8px;
+      background: #f1f3f2;
+      color: #1f2e28;
+    }
+    .markdown-body pre code {
+      color: inherit;
+    }
+    .markmap-page {
+      min-height: calc(100vh - 80px);
+      background: #fff;
+      padding: 0;
+    }
+    .markmap-toolbar {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+      margin-bottom: 12px;
+      padding-bottom: 12px;
+    }
+    .markmap-toolbar h2 {
+      margin: 0 0 6px;
+    }
+    .markmap-toolbar p {
+      margin: 0;
+      color: #5c6b63;
+    }
+    .markmap-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      align-items: center;
+      max-width: 680px;
+    }
+    .markmap-status {
+      flex: 1 1 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-width: 260px;
+      color: #5c6b63;
+      font-size: 12px;
+      line-height: 1.35;
+      text-align: right;
+    }
+    #zoom-in,
+    #zoom-out {
+      width: 34px;
+      justify-content: center;
+      padding: 0;
+    }
+    #markmap-svg {
+      width: 100%;
+      height: calc(100vh - 160px);
+      min-height: 680px;
+    }
+    .settings-panel {
+      position: fixed;
+      top: 0;
+      right: -360px;
+      z-index: 20;
+      width: 340px;
+      max-width: calc(100vw - 28px);
+      height: 100vh;
+      background: #fff;
+      box-shadow: -8px 0 24px rgba(31, 46, 40, 0.12);
+      transition: right 0.2s ease;
+      overflow-y: auto;
+    }
+    .settings-panel.active {
+      right: 0;
+    }
+    .settings-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      padding: 16px 18px;
+      font-weight: 700;
+    }
+    .settings-content {
+      padding: 18px;
+    }
+    .setting-group {
+      margin-bottom: 18px;
+    }
+    .setting-label {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 8px;
+      color: #24352e;
+      font-size: 14px;
+      font-weight: 600;
+    }
+    .setting-value {
+      color: #165745;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    .setting-slider {
+      width: 100%;
+    }
+    .close-settings {
+      width: 34px;
+      height: 34px;
+      padding: 0;
+      border: 0;
+      border-radius: 6px;
+      background: #fff;
+      color: #165745;
+      cursor: pointer;
+      font-size: 22px;
+      line-height: 1;
+    }
+    .reset-button {
+      width: 100%;
+      min-height: 38px;
+      border: 0;
+      border-radius: 6px;
+      background: #fff;
+      color: #165745;
+      cursor: pointer;
+      font: inherit;
+    }
+    .viewer-error {
+      margin: 24px 0;
+      padding: 18px;
+      border-left: 4px solid #b3261e;
+      background: #fff1f1;
+      color: #77120c;
+    }
+    @media (max-width: 760px) {
+      .viewer-page {
+        padding: 14px;
+      }
+      .markmap-viewer-page {
+        padding: 8px;
+      }
+      .viewer-topbar,
+      .markmap-toolbar {
+        flex-direction: column;
+        align-items: stretch;
+      }
+      .markdown-body {
+        padding: 18px;
+      }
+      #markmap-svg {
+        height: calc(100vh - 220px);
+        min-height: 480px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="viewer-page markmap-viewer-page">
+    <nav class="viewer-topbar">
+      <a href="../../index.html">К основному курсу</a>
+      <a href="../../markmaps/chapter_05_argocd_access.mm">Открыть исходный файл</a>
+    </nav>
+<main class="markmap-page">
+  <div class="markmap-toolbar">
+    <div>
+      <h2>Глава 5. Argo CD и operator-argo</h2>
+      <p>Карта построена из файла <code>markmaps/chapter_05_argocd_access.mm</code>.</p>
+    </div>
+    <div class="markmap-actions">
+      <div class="markmap-status">
+        <span id="fold-status">Все уровни раскрыты. 2-5 задают видимую глубину, 0 раскрывает всё</span>
+        <span id="presentation-status">Презентация выключена. M включает, N/P листают ветки</span>
+      </div>
+      <button id="zoom-in" type="button">+</button>
+      <button id="zoom-out" type="button">-</button>
+      <button id="fit-button" type="button">Вписать</button>
+      <button id="presentation-toggle" type="button">Презентация</button>
+      <button id="settings-toggle" type="button">Настройки</button>
+      <a href="../../markmaps/chapter_05_argocd_access.mm">Открыть raw</a>
+    </div>
+  </div>
+  <svg id="markmap-svg"></svg>
+  <div class="settings-panel" id="settings-panel">
+    <div class="settings-header">
+      <span>Настройки Markmap</span>
+      <button class="close-settings" id="close-settings" type="button">&times;</button>
+    </div>
+    <div class="settings-content">
+      <div class="setting-group">
+        <div class="setting-label">
+          <span>Длительность анимации</span>
+          <span class="setting-value" id="duration-value">0</span>
+        </div>
+        <input type="range" class="setting-slider" id="duration-slider" min="0" max="2000" value="0" step="100">
+      </div>
+      <div class="setting-group">
+        <div class="setting-label">
+          <span>Ширина переноса</span>
+          <span class="setting-value" id="wrapWidth-value">28</span>
+        </div>
+        <input type="range" class="setting-slider" id="wrapWidth-slider" min="4" max="150" value="28" step="1">
+      </div>
+      <div class="setting-group">
+        <div class="setting-label">
+          <span>Минимальная высота узла</span>
+          <span class="setting-value" id="nodeMinHeight-value">20</span>
+        </div>
+        <input type="range" class="setting-slider" id="nodeMinHeight-slider" min="5" max="100" value="20" step="5">
+      </div>
+      <div class="setting-group">
+        <div class="setting-label">
+          <span>Вертикальный отступ</span>
+          <span class="setting-value" id="spacingVertical-value">10</span>
+        </div>
+        <input type="range" class="setting-slider" id="spacingVertical-slider" min="0" max="100" value="10" step="5">
+      </div>
+      <div class="setting-group">
+        <div class="setting-label">
+          <span>Горизонтальный отступ</span>
+          <span class="setting-value" id="spacingHorizontal-value">70</span>
+        </div>
+        <input type="range" class="setting-slider" id="spacingHorizontal-slider" min="20" max="500" value="70" step="10">
+      </div>
+      <button class="reset-button" id="reset-settings" type="button">Сбросить настройки</button>
+    </div>
+  </div>
+</main>
+<script src="../../js/d3.min.js"></script>
+<script src="../../js/markmap-view.js"></script>
+<script src="../../js/markmap-lib.js"></script>
+<script>
+  window.courseMarkmapSource = "# Глава 5. Argo CD и operator-argo\n\n## Зачем отдельная глава\n\n### Это не только deployment\n- новый пользовательский интерфейс\n- новый слой доступа\n- новый привилегированный контур\n\n### Что меняется\n- меньше прямого kubectl\n- больше GitOps и auditability\n- новый набор рисков\n\n## operator-argo в DKP\n\n### Что даёт\n- platform-managed установка\n- интеграция с Dex / SSO\n- единый UI приложений\n\n### Что не отменяет\n- отдельный RBAC Argo CD\n- review AppProject\n- обновления и advisories\n\n## Когда Argo CD полезен\n\n### Для dev/test\n- статус приложения\n- дерево ресурсов\n- события\n- логи\n\n### Для платформы\n- меньше kubeconfig\n- меньше ad hoc kubectl\n- понятнее audit trail\n\n## Граница доступа\n\n### Argo RBAC\n- policy.default role:none\n- applications get\n- logs get\n- exec не давать по умолчанию\n- override не давать по умолчанию\n\n### AppProject\n- разрешённый repo\n- разрешённые namespace\n- разрешённые типы ресурсов\n- запрет cluster-scoped ресурсов\n\n## Риски\n\n### Что уменьшается\n- массовый прямой kubectl\n- ручной apply\n- слабая наблюдаемость drift\n\n### Что появляется\n- UI/API как новая точка атаки\n- Git и repo credentials как критичный слой\n- второй RBAC поверх Kubernetes RBAC\n\n## Auto-sync и self-heal\n\n### Production\n- обычно выключены\n- sync через review и ручное подтверждение\n\n### Non-production\n- могут быть включены\n- только после проверки границ проекта\n\n## Когда Argo CD не окупается\n\n### Признаки\n- маленькая среда\n- мало команд\n- нет зрелого GitOps\n- нет готовности сопровождать новый сервис\n\n### Альтернатива\n- узкий прямой kubectl\n- компенсирующие меры\n- явный break-glass\n\n## Практика\n\n### Артефакты\n- access matrix\n- argocd-rbac-cm\n- AppProject\n- решение по auto-sync\n- break-glass\n";
+  const source = window.courseMarkmapSource;
+
+  function showFallback(message) {
+    const svg = document.getElementById('markmap-svg');
+    svg.outerHTML = '<div class="viewer-error">' + message + '</div>';
+  }
+
+  if (false) window.addEventListener('load', () => {
+    try {
+      if (!window.markmap || !window.markmap.Transformer || !window.markmap.Markmap) {
+        showFallback('Не удалось загрузить markmap-библиотеки. Проверьте доступ к CDN или откройте исходный текст карты ниже.');
+        return;
+      }
+
+      const transformer = new window.markmap.Transformer();
+      const { root } = transformer.transform(source);
+      const svg = document.getElementById('markmap-svg');
+      const instance = window.markmap.Markmap.create(svg, {
+        duration: 0,
+        autoFit: true,
+        spacingHorizontal: 80,
+        spacingVertical: 8,
+      }, root);
+
+      document.getElementById('fit-button').addEventListener('click', () => instance.fit());
+      setTimeout(() => instance.fit(), 50);
+    } catch (error) {
+      showFallback('Ошибка построения карты: ' + error.message);
+    }
+  });
+</script>
+<script src="../../js/markmap-course-viewer.js"></script>
+  </div>
+</body>
+</html>

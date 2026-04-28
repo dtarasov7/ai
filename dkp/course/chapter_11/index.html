@@ -1,0 +1,501 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>v2. Глава 11. Модули Deckhouse как часть модели угроз</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="page">
+    <header class="hero">
+      <span class="eyebrow">Глава 11</span>
+      <h1>Модули Deckhouse как часть модели угроз</h1>
+      <p>Модуль Deckhouse нужно оценивать не только как набор возможностей. Любой модуль меняет модель угроз: закрывает одни риски, добавляет новые привилегии, новые точки входа, новые зависимости и новых владельцев процессов. В этой главе мы учимся принимать решение: включать модуль, запускать пилот, отложить или заменить более простым решением.</p>
+      <div class="meta">
+        <span class="badge">Фокус: risk-based module review</span>
+        <span class="badge">Примеры и контрпримеры</span>
+        <span class="badge">Дата сверки: 27 апреля 2026</span>
+        <span class="badge">Есть лабораторная работа</span>
+      </div>
+    </header>
+
+    <div class="layout">
+      <aside class="toc">
+        <h3>Содержание</h3>
+        <ol>
+          <li><a href="#outcomes">Что вы сможете после главы</a></li>
+          <li><a href="#principle">Главная идея</a></li>
+          <li><a href="#terms">Термины простым языком</a></li>
+          <li><a href="#template">Шаблон оценки модуля</a></li>
+          <li><a href="#istio">Istio multicluster</a></li>
+          <li><a href="#control-plane">control-plane-manager</a></li>
+          <li><a href="#deckhouse">Модуль deckhouse и обновления</a></li>
+          <li><a href="#ingress">ingress-nginx</a></li>
+          <li><a href="#registry">registry и registry-packages-proxy</a></li>
+          <li><a href="#monitoring">monitoring, Grafana и Upmeter</a></li>
+          <li><a href="#matrix">Сводная матрица</a></li>
+          <li><a href="#lab">Лабораторная работа</a></li>
+          <li><a href="#sources">Источники</a></li>
+        </ol>
+      </aside>
+
+      <main class="main">
+        <section class="section" id="outcomes">
+          <h2>Что вы сможете после главы</h2>
+          <div class="grid two">
+            <div class="card">
+              <h3>Обязательный минимум</h3>
+              <ul>
+                <li>Описывать модуль через пару: какой риск он закрывает и какой риск создаёт.</li>
+                <li>Отличать полезную автоматизацию от скрытого расширения прав и поверхности атаки.</li>
+                <li>Составлять короткую risk matrix перед включением модуля.</li>
+                <li>Формулировать guardrails: ограничения, проверки, владельцев и rollback.</li>
+              </ul>
+            </div>
+            <div class="card">
+              <h3>Углубление и применимость</h3>
+              <ul>
+                <li>Разбирать модули Deckhouse как изменение границ доверия, а не как “галочку в списке функций”.</li>
+                <li>Объяснять бизнесу и командам разработки, почему иногда хороший модуль лучше не включать сразу.</li>
+                <li>Готовить учебный, но близкий к production, ответ: включаем, пилотируем или отклоняем.</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <section class="section" id="principle">
+          <h2>Главная идея</h2>
+          <p class="lead">Модуль безопасности не делает кластер безопасным автоматически. Он переносит часть риска из одной области в другую.</p>
+          <p>Например, <code>istio</code> может дать mTLS и точные правила доступа между сервисами. Но если объединить несколько кластеров в federation без строгих границ, вы создадите новый путь lateral movement: компрометация одного сервиса может стать шагом к сервисам в другом кластере.</p>
+          <div class="diagram">
+            <pre><code>Перед включением модуля:
+  риск A есть, риска B нет
+
+После включения модуля:
+  риск A снижен
+  риск B появился
+  нужен владелец, мониторинг и порядок отката</code></pre>
+          </div>
+          <p>Поэтому правильный вопрос звучит не “что умеет модуль?”, а “какую проблему мы решаем, какую цену платим и кто будет владеть этой ценой после включения?”.</p>
+        </section>
+
+        <section class="section" id="terms">
+          <h2>Термины простым языком</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Термин</th>
+                <th>Что означает в этой главе</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Поверхность атаки</td>
+                <td>Все места, через которые на систему можно воздействовать: API, веб-интерфейс, Ingress, токен, репозиторий, контроллер, CRD.</td>
+              </tr>
+              <tr>
+                <td>Граница доверия</td>
+                <td>Линия, после которой мы перестаём считать объект “своим и безопасным по умолчанию”. Например, граница между prod и dev или между двумя кластерами.</td>
+              </tr>
+              <tr>
+                <td>Blast radius</td>
+                <td>Область ущерба. Что сломается или будет скомпрометировано, если модуль, его сервисный аккаунт или его настройки окажутся под контролем атакующего.</td>
+              </tr>
+              <tr>
+                <td>Guardrails</td>
+                <td>Ограничители: RBAC, NetworkPolicy, allow-list, ручное подтверждение, staging-проверка, alert, backup, порядок отката.</td>
+              </tr>
+              <tr>
+                <td>Supply chain</td>
+                <td>Цепочка поставки: от исходного кода и образа контейнера до registry, Helm chart, ModuleSource и обновления в кластере.</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section class="section" id="template">
+          <h2>Шаблон оценки модуля</h2>
+          <p>Используйте этот шаблон перед включением любого нового модуля. Он специально короткий: его реально заполнить на архитектурном ревью.</p>
+          <table>
+            <thead>
+              <tr>
+                <th>Вопрос</th>
+                <th>Что должно быть в ответе</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Какой риск закрываем?</td>
+                <td>Не “хотим Istio”, а “хотим шифровать service-to-service traffic и явно разрешать вызовы между критичными сервисами”.</td>
+              </tr>
+              <tr>
+                <td>Какая граница доверия меняется?</td>
+                <td>Namespace, кластер, registry, внешний endpoint, CI/CD, команда эксплуатации.</td>
+              </tr>
+              <tr>
+                <td>Какие привилегии появляются?</td>
+                <td>ServiceAccount, CRD, admission webhook, доступ к Secret, доступ к kube-apiserver, доступ к узлам.</td>
+              </tr>
+              <tr>
+                <td>Какие данные увидит модуль?</td>
+                <td>Метрики, логи, имена сервисов, заголовки HTTP, секреты, image names, audit events.</td>
+              </tr>
+              <tr>
+                <td>Что будет при компрометации?</td>
+                <td>Один namespace, весь кластер, несколько кластеров, registry, цепочка обновлений.</td>
+              </tr>
+              <tr>
+                <td>Какие guardrails обязательны?</td>
+                <td>RBAC, NetworkPolicy, allow-list, staged rollout, ручное подтверждение, alert, backup, owner.</td>
+              </tr>
+              <tr>
+                <td>Какой контрпример запрещает включение?</td>
+                <td>Ситуация, где модуль принесёт больше риска и сложности, чем пользы.</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section class="section" id="istio">
+          <h2>Istio multicluster</h2>
+          <p><code>istio</code> полезен, когда нужно управлять защищённым взаимодействием сервисов: mTLS, маршрутизация, AuthorizationPolicy, контроль east-west traffic. В multicluster-сценарии он может соединять сервисы из разных кластеров. Это мощно, но именно поэтому требует отдельного security review.</p>
+          <div class="grid two">
+            <div class="card">
+              <h3>Какие риски закрывает</h3>
+              <ul>
+                <li>Снижает риск незашифрованного service-to-service traffic.</li>
+                <li>Позволяет явно описывать, какой сервис может вызывать другой сервис.</li>
+                <li>Убирает часть ручных сетевых исключений между кластерами.</li>
+                <li>Даёт наблюдаемость: кто с кем общается и где появляются неожиданные вызовы.</li>
+              </ul>
+            </div>
+            <div class="card">
+              <h3>Какие риски создаёт</h3>
+              <ul>
+                <li>Общий trust root или обмен trust bundles связывает судьбу нескольких кластеров.</li>
+                <li>Ошибочная federation может стереть границу между dev, test и prod.</li>
+                <li>Компрометированный сервис может получить удобный путь lateral movement в другой кластер.</li>
+                <li>Диагностика становится сложнее: ошибка может быть в приложении, routing, mTLS, policy или control plane Istio.</li>
+              </ul>
+            </div>
+          </div>
+
+          <h3>Хорошее решение</h3>
+          <p>Есть два production-кластера одного контура: <code>shop-prod-a</code> и <code>shop-prod-b</code>. Они управляются одной платформенной командой, имеют непересекающиеся CIDR, одинаковые правила обновлений и понятных владельцев. Межкластерный вызов нужен только один: <code>orders-api</code> вызывает <code>payments-api</code>. Доступ описан явно и узко.</p>
+          <pre><code>apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-orders-to-payments
+  namespace: payments
+spec:
+  selector:
+    matchLabels:
+      app: payments-api
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/orders/sa/orders-api
+      to:
+        - operation:
+            methods: ["POST"]
+            paths: ["/authorize"]</code></pre>
+          <p>В этом примере важен не сам YAML, а подход: разрешён конкретный сервисный аккаунт, конкретный namespace, конкретный метод и путь. Если нужен второй вызов, он добавляется отдельным решением, а не wildcard-правилом.</p>
+
+          <h3>Контрпример</h3>
+          <p>Команда предлагает объединить dev, test и prod в одну mesh/federation “чтобы было удобно ходить в сервисы между окружениями”. Это плохое решение: граница между окружениями исчезает, тестовый сервис получает сетевой и доверительный путь к production, а инцидент в dev может стать инцидентом в prod.</p>
+          <pre><code># Плохая идея: правило выглядит удобно, но оно слишком широкое.
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-any-mesh-client
+  namespace: payments
+spec:
+  selector:
+    matchLabels:
+      app: payments-api
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals: ["*"]</code></pre>
+
+          <div class="note">
+            Для Istio multicluster минимальный security review должен включать: кто владеет trust root, какие кластеры можно объединять, какие namespace видимы между кластерами, как устроен отзыв доступа, как обнаруживается неожиданный межкластерный вызов.
+          </div>
+        </section>
+
+        <section class="section" id="control-plane">
+          <h2>control-plane-manager</h2>
+          <p><code>control-plane-manager</code> управляет компонентами Kubernetes control plane в DKP. С точки зрения ИБ это модуль про снижение ручных ошибок в самом чувствительном месте кластера.</p>
+          <table>
+            <thead>
+              <tr>
+                <th>Закрывает</th>
+                <th>Создаёт или усиливает</th>
+                <th>Guardrails</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Дрейф настроек API server, controller-manager, scheduler и сертификатов.</td>
+                <td>Высокопривилегированная автоматизация: ошибка в настройке влияет на весь кластер.</td>
+                <td>Изменения через review, staging-кластер, backup etcd, окно обслуживания.</td>
+              </tr>
+              <tr>
+                <td>Ручное управление сроками жизни сертификатов control plane.</td>
+                <td>Расширение API endpoint или SAN “для удобства” может открыть лишний путь к API server.</td>
+                <td>Минимальный список SAN, запрет временных публичных endpoint без отдельного решения.</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <h3>Хорошее решение</h3>
+          <p>Платформенная команда включает управление control plane через Deckhouse, фиксирует владельца настроек, хранит изменения в Git и меняет параметры только через review. API server доступен только по утверждённым адресам.</p>
+
+          <h3>Контрпример</h3>
+          <p>В сертификат API server добавляют несколько временных публичных DNS-имён “чтобы подрядчику было удобно подключиться”. Через месяц никто не помнит, зачем они нужны. Это не удобство, а расширение поверхности атаки управляющего API.</p>
+        </section>
+
+        <section class="section" id="deckhouse">
+          <h2>Модуль deckhouse и обновления</h2>
+          <p>Сам Deckhouse и его механизм обновлений закрывают риск “кластер годами не получает исправления”. Но автоматическое обновление платформы тоже является частью supply chain: нужно доверять источнику модулей, release channel и процессу доставки.</p>
+          <div class="grid two">
+            <div class="card">
+              <h3>Какие риски закрывает</h3>
+              <ul>
+                <li>Задержку исправлений CVE в платформенных компонентах.</li>
+                <li>Ручной, плохо повторяемый lifecycle модулей.</li>
+                <li>Разъезд версий между кластерами.</li>
+              </ul>
+            </div>
+            <div class="card">
+              <h3>Какие риски создаёт</h3>
+              <ul>
+                <li>Неправильный release channel может принести изменения быстрее, чем команда успеет проверить.</li>
+                <li>Слишком медленный канал или ручная заморозка увеличивают окно уязвимости.</li>
+                <li>ModuleSource и registry становятся частью доверенной цепочки поставки.</li>
+              </ul>
+            </div>
+          </div>
+          <p>Учебный фрагмент решения может выглядеть так: production-кластер обновляется из стабильного канала, сначала проверяется staging, затем change window, затем production.</p>
+          <pre><code>apiVersion: deckhouse.io/v1alpha1
+kind: ModuleConfig
+metadata:
+  name: deckhouse
+spec:
+  version: 1
+  settings:
+    releaseChannel: Stable
+    update:
+      mode: AutoPatch</code></pre>
+
+          <h3>Контрпример</h3>
+          <p>В production включают самый быстрый канал обновлений без staging и без владельца rollback. Это может закрыть CVE быстрее, но цена слишком высокая: регрессия платформенного компонента сразу станет production-инцидентом.</p>
+        </section>
+
+        <section class="section" id="ingress">
+          <h2>ingress-nginx</h2>
+          <p><code>ingress-nginx</code> управляет входом HTTP/HTTPS-трафика в кластер. Это одновременно удобная точка централизации TLS и одно из самых заметных мест для атаки.</p>
+          <table>
+            <thead>
+              <tr>
+                <th>Закрывает</th>
+                <th>Создаёт или усиливает</th>
+                <th>Guardrails</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Хаотичную публикацию сервисов наружу.</td>
+                <td>Единая публичная точка входа, ошибки в аннотациях, wildcard-hosts.</td>
+                <td>Отдельные ingressClass, allow-list источников, review аннотаций, TLS policy.</td>
+              </tr>
+              <tr>
+                <td>Ручное управление TLS на каждом приложении.</td>
+                <td>Неверное доверие к headers вроде <code>X-Forwarded-For</code>.</td>
+                <td>Явная настройка trusted proxies и запрет небезопасных snippet-аннотаций.</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <h3>Хорошее решение</h3>
+          <p>Для административных интерфейсов используется отдельный контроллер, доступный только из корпоративной сети или VPN. Публичные приложения идут через другой ingressClass.</p>
+          <pre><code>apiVersion: deckhouse.io/v1
+kind: IngressNginxController
+metadata:
+  name: internal
+spec:
+  ingressClass: nginx-internal
+  inlet: LoadBalancer
+  acceptRequestsFrom:
+    - 203.0.113.0/24</code></pre>
+
+          <h3>Контрпример</h3>
+          <p>Все сервисы публикуются через один публичный ingressClass, включая Argo CD, Grafana и внутренние панели. Для ускорения добавляют wildcard DNS и wildcard TLS. В результате новая внутренняя панель может оказаться доступной снаружи просто потому, что кто-то создал Ingress.</p>
+        </section>
+
+        <section class="section" id="registry">
+          <h2>registry и registry-packages-proxy</h2>
+          <p>Модули, связанные с registry и package proxy, уменьшают зависимость от внешних источников и помогают работать в закрытых контурах. Но внутренний registry быстро становится высокоценной целью: через него в кластер попадает код.</p>
+          <div class="grid two">
+            <div class="card">
+              <h3>Какие риски закрывает</h3>
+              <ul>
+                <li>Недоступность внешних registry и package repositories.</li>
+                <li>Неконтролируемое скачивание зависимостей из интернета.</li>
+                <li>Разные версии одних и тех же образов в разных кластерах.</li>
+              </ul>
+            </div>
+            <div class="card">
+              <h3>Какие риски создаёт</h3>
+              <ul>
+                <li>Компрометация внутреннего registry становится supply chain incident.</li>
+                <li>Кэш может долго хранить уязвимые образы, если нет процесса пересканирования.</li>
+                <li>Слишком широкие push-права позволяют подменить образ.</li>
+              </ul>
+            </div>
+          </div>
+
+          <h3>Хорошее решение</h3>
+          <p>Внутренний registry используется как доверенный канал доставки только вместе с digest pinning, сканированием, ограничением push-прав и отдельным процессом удаления устаревших образов.</p>
+          <pre><code>containers:
+  - name: payments-api
+    image: registry.internal.example.com/shop/payments@sha256:1111111111111111111111111111111111111111111111111111111111111111</code></pre>
+
+          <h3>Контрпример</h3>
+          <p>После появления внутреннего registry команда перестаёт сканировать образы: “они же теперь из нашего registry”. Это ошибка. Registry отвечает за доставку, а не за магическое исчезновение уязвимостей.</p>
+        </section>
+
+        <section class="section" id="monitoring">
+          <h2>monitoring, Grafana и Upmeter</h2>
+          <p>Наблюдаемость закрывает риск слепоты: без метрик и проверок доступности команда узнаёт о проблеме от пользователей. Но monitoring-плоскость тоже видит много чувствительной информации: имена сервисов, namespace, labels, адреса, иногда фрагменты бизнес-контекста.</p>
+          <table>
+            <thead>
+              <tr>
+                <th>Закрывает</th>
+                <th>Создаёт или усиливает</th>
+                <th>Guardrails</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Слепоту по состоянию узлов, DNS, API server, сетевых проверок и приложений.</td>
+                <td>Утечку внутренней структуры через dashboards и labels.</td>
+                <td>RBAC на Grafana, read-only роли, запрет секретов в labels и annotations.</td>
+              </tr>
+              <tr>
+                <td>Медленную реакцию на деградацию.</td>
+                <td>Ложное чувство безопасности: “alert молчит, значит всё хорошо”.</td>
+                <td>Проверка alert rules, владельцы алертов, регулярные fire drills.</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <h3>Хорошее решение</h3>
+          <p>Разработчики видят dashboards только своих namespace, аудиторы видят агрегированные security-панели, а администраторы управляют правилами. В labels не кладут токены, email клиентов, номера заказов и другие чувствительные данные.</p>
+
+          <h3>Контрпример</h3>
+          <p>Grafana публикуется наружу “только на время диагностики”, все пользователи получают admin, а в labels попадают customer identifiers. Даже без доступа к Kubernetes API такой dashboard может раскрыть внутреннюю структуру и чувствительные данные.</p>
+        </section>
+
+        <section class="section" id="matrix">
+          <h2>Сводная матрица</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Модуль</th>
+                <th>Когда уместен</th>
+                <th>Когда лучше остановиться</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>istio</code> multicluster</td>
+                <td>Есть конкретные межкластерные вызовы, единое владение и готовность управлять trust root.</td>
+                <td>Хотят просто “соединить всё со всем”, особенно dev/test/prod.</td>
+              </tr>
+              <tr>
+                <td><code>control-plane-manager</code></td>
+                <td>Нужен управляемый lifecycle control plane и снижение ручных ошибок.</td>
+                <td>Изменения control plane делаются без staging, backup и владельца rollback.</td>
+              </tr>
+              <tr>
+                <td><code>deckhouse</code> updates</td>
+                <td>Есть release channel, окно обновлений и staging-проверка.</td>
+                <td>Обновления либо полностью заморожены, либо летят в prod без проверки.</td>
+              </tr>
+              <tr>
+                <td><code>ingress-nginx</code></td>
+                <td>Нужно управляемо публиковать сервисы и разделять public/internal входы.</td>
+                <td>Один wildcard-вход для всего, включая административные панели.</td>
+              </tr>
+              <tr>
+                <td><code>registry</code> / proxy</td>
+                <td>Нужно контролировать цепочку поставки и работать без зависимости от внешних registry.</td>
+                <td>Внутренний registry считают достаточной заменой scanning и подписи образов.</td>
+              </tr>
+              <tr>
+                <td>monitoring / Upmeter</td>
+                <td>Нужны метрики, доступность, расследование инцидентов и доказательства работы SLO.</td>
+                <td>Dashboards раскрывают внутренние данные, а алерты никто не владеет.</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section class="section" id="lab">
+          <h2>Лабораторная работа</h2>
+          <div class="grid two">
+            <div class="card">
+              <h3>Задача</h3>
+              <ol>
+                <li>Выбрать три модуля Deckhouse для <code>shop-demo</code>.</li>
+                <li>Для каждого заполнить risk matrix: закрываемые риски, новые риски, данные, привилегии, blast radius, guardrails.</li>
+                <li>Для одного модуля написать “хорошее решение” с YAML-фрагментом.</li>
+                <li>Для одного модуля написать контрпример и объяснить, почему его нельзя принимать.</li>
+              </ol>
+            </div>
+            <div class="card">
+              <h3>Ожидаемый результат</h3>
+              <ul>
+                <li>Матрица оценки модулей.</li>
+                <li>Одно решение “включаем сейчас”.</li>
+                <li>Одно решение “только пилот”.</li>
+                <li>Одно решение “не включаем в текущих условиях”.</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <section class="section" id="sources">
+          <h2>Источники</h2>
+          <ul class="sources">
+            <li><a href="https://deckhouse.io/products/kubernetes-platform/documentation/v1/modules/istio/">Deckhouse: модуль istio</a>.</li>
+            <li><a href="https://deckhouse.io/products/kubernetes-platform/documentation/v1/modules/control-plane-manager/">Deckhouse: модуль control-plane-manager</a>.</li>
+            <li><a href="https://deckhouse.io/products/kubernetes-platform/documentation/v1/modules/deckhouse/">Deckhouse: модуль deckhouse</a>.</li>
+            <li><a href="https://deckhouse.io/products/kubernetes-platform/documentation/v1/modules/ingress-nginx/cr.html">Deckhouse: IngressNginxController</a>.</li>
+            <li><a href="https://deckhouse.io/products/kubernetes-platform/documentation/v1/modules/registry/">Deckhouse: модуль registry</a>.</li>
+            <li><a href="https://deckhouse.io/modules/registry-packages-proxy/">Deckhouse: registry-packages-proxy</a>.</li>
+            <li><a href="https://deckhouse.io/products/kubernetes-platform/documentation/v1/modules/monitoring-kubernetes/">Deckhouse: monitoring-kubernetes</a>.</li>
+            <li><a href="https://deckhouse.io/products/kubernetes-platform/documentation/v1/modules/upmeter/">Deckhouse: upmeter</a>.</li>
+          </ul>
+        </section>
+
+        <div class="chapter-nav">
+          <div class="nav-card">
+            <small>Предыдущая глава</small>
+            <a href="../chapter_10/index.html">Глава 10. NeuVector и внешние security-платформы</a>
+          </div>
+          <div class="nav-card">
+            <small>К оглавлению</small>
+            <a href="../index.html">Вернуться к курсу v2</a>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+</body>
+</html>

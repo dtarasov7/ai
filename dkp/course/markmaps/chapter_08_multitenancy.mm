@@ -1,0 +1,39 @@
+# Глава 8. Мультиарендность и безопасные проектные шаблоны
+
+- Зачем нужна мультиарендность
+  - Namespace сам по себе не равен tenant
+  - Нужны квоты, права, сетевой baseline, monitoring
+  - Нужен одинаковый способ создания проектов
+- `multitenancy-manager`
+  - Управляет `Project`
+  - Использует `ProjectTemplate`
+  - Помогает запретить хаотичные namespace
+- `Project`
+  - Имя проекта
+  - Шаблон
+  - Параметры
+    - resourceQuota
+    - networkPolicy
+    - podSecurityProfile
+    - administrators
+- Встроенные шаблоны
+  - `default`
+  - `secure`
+  - `secure-with-dedicated-nodes`
+- Custom `ProjectTemplate`
+  - Продуктовый контракт платформы
+  - Единый стартовый набор требований для команд
+  - Default deny
+  - Квоты
+  - RoleBinding
+  - Labels и logging
+- Риски
+  - Изменение шаблона влияет на проекты
+  - Нужен staged rollout
+  - Нужны владельцы шаблонов
+  - Исключения должны быть явными
+- Практика
+  - Создать `Project`
+  - Проверить созданные ресурсы
+  - Подготовить черновик `ProjectTemplate`
+  - Описать процесс обновления шаблона
