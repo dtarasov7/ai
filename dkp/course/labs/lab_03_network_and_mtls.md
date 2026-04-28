@@ -6,7 +6,13 @@
 
 ## Исходные материалы
 
-- [`shop-demo/manifests/`](../shop-demo/manifests/)
+- манифесты `shop-demo`:
+  - [`00-namespaces.yaml`](../shop-demo/manifests/00-namespaces.yaml)
+  - [`10-frontend.yaml`](../shop-demo/manifests/10-frontend.yaml)
+  - [`20-orders.yaml`](../shop-demo/manifests/20-orders.yaml)
+  - [`30-payments.yaml`](../shop-demo/manifests/30-payments.yaml)
+  - [`40-platform-tools.yaml`](../shop-demo/manifests/40-platform-tools.yaml)
+  - [`kustomization.yaml`](../shop-demo/manifests/kustomization.yaml)
 - [глава 3 курса](../chapter_3/index.html)
 - markmap [`markmaps/chapter_03_network_mtls.mm`](../markmaps/chapter_03_network_mtls.mm)
 

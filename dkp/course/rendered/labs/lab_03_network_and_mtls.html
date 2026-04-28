@@ -230,7 +230,15 @@
 <p>Ограничить east-west трафик <code>shop-demo</code>, ввести default deny и построить доверие между сервисами на основе ServiceAccount, а не IP-адреса.</p>
 <h2>Исходные материалы</h2>
 <ul>
-<li><a href="../../shop-demo/manifests"><code>shop-demo/manifests/</code></a></li>
+<li>манифесты <code>shop-demo</code>:<ul>
+<li><a href="../../shop-demo/manifests/00-namespaces.yaml"><code>00-namespaces.yaml</code></a></li>
+<li><a href="../../shop-demo/manifests/10-frontend.yaml"><code>10-frontend.yaml</code></a></li>
+<li><a href="../../shop-demo/manifests/20-orders.yaml"><code>20-orders.yaml</code></a></li>
+<li><a href="../../shop-demo/manifests/30-payments.yaml"><code>30-payments.yaml</code></a></li>
+<li><a href="../../shop-demo/manifests/40-platform-tools.yaml"><code>40-platform-tools.yaml</code></a></li>
+<li><a href="../../shop-demo/manifests/kustomization.yaml"><code>kustomization.yaml</code></a></li>
+</ul>
+</li>
 <li><a href="../../chapter_3/index.html">глава 3 курса</a></li>
 <li>markmap <a href="../markmaps/chapter_03_network_mtls.html"><code>markmaps/chapter_03_network_mtls.mm</code></a></li>
 </ul>

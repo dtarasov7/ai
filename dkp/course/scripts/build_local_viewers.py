@@ -214,6 +214,12 @@ def wrap_page(title: str, target: Path, body: str, raw_link: str, is_markmap: bo
     stylesheet = relative_href(target, stylesheet_target)
     index_link = relative_href(target, REPO_ROOT / "index.html")
     page_class = "viewer-page markmap-viewer-page" if is_markmap else "viewer-page"
+    topbar = (
+        f'<a href="{html.escape(raw_link)}">Открыть исходный файл</a>'
+        if is_teacher_target(target)
+        else f'<a href="{html.escape(index_link)}">К основному курсу</a>\n'
+             f'      <a href="{html.escape(raw_link)}">Открыть исходный файл</a>'
+    )
 
     return f"""<!doctype html>
 <html lang="ru">
@@ -438,8 +444,7 @@ def wrap_page(title: str, target: Path, body: str, raw_link: str, is_markmap: bo
 <body>
   <div class="{page_class}">
     <nav class="viewer-topbar">
-      <a href="{html.escape(index_link)}">К основному курсу</a>
-      <a href="{html.escape(raw_link)}">Открыть исходный файл</a>
+      {topbar}
     </nav>
 {body}
   </div>
