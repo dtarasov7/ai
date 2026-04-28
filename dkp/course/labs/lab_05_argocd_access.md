@@ -6,10 +6,10 @@
 
 ## Исходные материалы
 
-- `shop-demo/README.md`
-- глава 5 курса
-- markmap `markmaps/chapter_05_argocd_access.mm`
-- при желании: `capstone/reference_argocd_access_solution.md` и `capstone/reference_direct_kubectl_solution.md` как примеры сильной развилки, но не как подсказка вместо собственного решения
+- [`shop-demo/README.md`](../shop-demo/README.md)
+- [глава 5 курса](../chapter_5/index.html)
+- markmap [`markmaps/chapter_05_argocd_access.mm`](../markmaps/chapter_05_argocd_access.mm)
+- при желании: [`capstone/reference_argocd_access_solution.md`](../capstone/reference_argocd_access_solution.md) и [`capstone/reference_direct_kubectl_solution.md`](../capstone/reference_direct_kubectl_solution.md) как примеры сильной развилки, но не как подсказка вместо собственного решения
 
 ## Ожидаемое время
 

@@ -6,9 +6,9 @@
 
 ## Входные артефакты
 
-- глава 11;
-- markmap `markmaps/chapter_11_module_risk_matrix.mm`;
-- учебный стенд `shop-demo`;
+- [глава 11](../chapter_11/index.html);
+- markmap [`markmaps/chapter_11_module_risk_matrix.mm`](../markmaps/chapter_11_module_risk_matrix.mm);
+- учебный стенд [`shop-demo`](../shop-demo/README.md);
 - список модулей, которые команда хочет включить или уже использует.
 
 ## Последовательность действий

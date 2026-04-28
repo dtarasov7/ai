@@ -6,8 +6,8 @@
 
 ## Входные артефакты
 
-- глава 9;
-- markmap `markmaps/chapter_09_compliance_cse.mm`;
+- [глава 9](../chapter_9/index.html);
+- markmap [`markmaps/chapter_09_compliance_cse.mm`](../markmaps/chapter_09_compliance_cse.mm);
 - включённый или описанный `operator-trivy`;
 - namespace `payments` из предыдущих лабораторных.
 

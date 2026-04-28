@@ -6,9 +6,9 @@
 
 ## Исходные материалы
 
-- `shop-demo/README.md`
-- глава 4 курса
-- markmap `markmaps/chapter_04_access_management.mm`
+- [`shop-demo/README.md`](../shop-demo/README.md)
+- [глава 4 курса](../chapter_4/index.html)
+- markmap [`markmaps/chapter_04_access_management.mm`](../markmaps/chapter_04_access_management.mm)
 
 ## Ожидаемое время
 

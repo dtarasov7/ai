@@ -6,9 +6,9 @@
 
 ## Исходные материалы
 
-- `shop-demo/manifests/`
-- глава 3 курса
-- markmap `markmaps/chapter_03_network_mtls.mm`
+- [`shop-demo/manifests/`](../shop-demo/manifests/)
+- [глава 3 курса](../chapter_3/index.html)
+- markmap [`markmaps/chapter_03_network_mtls.mm`](../markmaps/chapter_03_network_mtls.mm)
 
 ## Ожидаемое время
 

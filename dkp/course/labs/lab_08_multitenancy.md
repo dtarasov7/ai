@@ -6,9 +6,9 @@
 
 ## Входные артефакты
 
-- глава 8;
-- markmap `markmaps/chapter_08_multitenancy.mm`;
-- учебный сценарий `shop-demo`;
+- [глава 8](../chapter_8/index.html);
+- markmap [`markmaps/chapter_08_multitenancy.mm`](../markmaps/chapter_08_multitenancy.mm);
+- учебный сценарий [`shop-demo`](../shop-demo/README.md);
 - доступ к учебному DKP-кластеру или dry-run окружению для проверки YAML.
 
 ## Последовательность действий

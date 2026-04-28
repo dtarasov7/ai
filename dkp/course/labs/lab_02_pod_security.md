@@ -6,9 +6,9 @@
 
 ## Исходные материалы
 
-- `shop-demo/manifests/`
-- глава 2 курса
-- markmap `markmaps/chapter_02_pod_security.mm`
+- [`shop-demo/manifests/`](../shop-demo/manifests/)
+- [глава 2 курса](../chapter_2/index.html)
+- markmap [`markmaps/chapter_02_pod_security.mm`](../markmaps/chapter_02_pod_security.mm)
 
 ## Ожидаемое время
 

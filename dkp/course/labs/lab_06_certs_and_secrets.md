@@ -6,9 +6,9 @@
 
 ## Исходные материалы
 
-- `shop-demo/manifests/`
-- глава 6 курса
-- markmap `markmaps/chapter_06_certs_and_secrets.mm`
+- [`shop-demo/manifests/`](../shop-demo/manifests/)
+- [глава 6 курса](../chapter_6/index.html)
+- markmap [`markmaps/chapter_06_certs_and_secrets.mm`](../markmaps/chapter_06_certs_and_secrets.mm)
 
 ## Ожидаемое время
 

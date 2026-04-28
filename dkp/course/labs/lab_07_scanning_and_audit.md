@@ -6,9 +6,9 @@
 
 ## Исходные материалы
 
-- `shop-demo/manifests/`
-- глава 7 курса
-- markmap `markmaps/chapter_07_scanning_and_audit.mm`
+- [`shop-demo/manifests/`](../shop-demo/manifests/)
+- [глава 7 курса](../chapter_7/index.html)
+- markmap [`markmaps/chapter_07_scanning_and_audit.mm`](../markmaps/chapter_07_scanning_and_audit.mm)
 
 ## Ожидаемое время
 

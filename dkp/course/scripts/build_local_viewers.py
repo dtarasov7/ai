@@ -13,6 +13,7 @@ import mistune
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RENDERED_DIR = REPO_ROOT / "rendered"
+TEACHER_DIR = REPO_ROOT / "teacher"
 MARKDOWN_RENDERER = mistune.create_markdown(plugins=["table"])
 
 
@@ -28,6 +29,7 @@ SOURCE_DIRS = [
 def main() -> None:
     shutil.rmtree(RENDERED_DIR, ignore_errors=True)
     RENDERED_DIR.mkdir(parents=True, exist_ok=True)
+    sync_teacher_stylesheet()
 
     sources = collect_sources()
     for source in sources:
@@ -49,7 +51,7 @@ def collect_sources() -> list[Path]:
 
 def render_source(source: Path) -> None:
     relative = source.relative_to(REPO_ROOT)
-    target = (RENDERED_DIR / relative).with_suffix(".html")
+    target = get_render_target(source)
     target.parent.mkdir(parents=True, exist_ok=True)
 
     raw = source.read_text(encoding="utf-8")
@@ -58,6 +60,19 @@ def render_source(source: Path) -> None:
     else:
         content = render_markdown_page(source, target, raw)
     target.write_text(content, encoding="utf-8", newline="\n")
+
+
+def sync_teacher_stylesheet() -> None:
+    if not TEACHER_DIR.exists():
+        return
+    shutil.copyfile(REPO_ROOT / "styles.css", TEACHER_DIR / "styles.css")
+
+
+def get_render_target(source: Path) -> Path:
+    relative = source.relative_to(REPO_ROOT)
+    if relative.parts and relative.parts[0] == "teacher":
+        return (REPO_ROOT / relative).with_suffix(".html")
+    return (RENDERED_DIR / relative).with_suffix(".html")
 
 
 def render_markdown_page(source: Path, target: Path, raw: str) -> str:
@@ -195,7 +210,8 @@ def render_markmap_page(source: Path, target: Path, raw: str) -> str:
 
 
 def wrap_page(title: str, target: Path, body: str, raw_link: str, is_markmap: bool = False) -> str:
-    stylesheet = relative_href(target, REPO_ROOT / "styles.css")
+    stylesheet_target = TEACHER_DIR / "styles.css" if is_teacher_target(target) else REPO_ROOT / "styles.css"
+    stylesheet = relative_href(target, stylesheet_target)
     index_link = relative_href(target, REPO_ROOT / "index.html")
     page_class = "viewer-page markmap-viewer-page" if is_markmap else "viewer-page"
 
@@ -448,6 +464,16 @@ def rewrite_links(soup: BeautifulSoup, source: Path, target: Path) -> None:
         if linked_source.suffix in {".md", ".mm"}:
             linked_target = (RENDERED_DIR / linked_source.relative_to(REPO_ROOT)).with_suffix(".html")
             anchor["href"] = relative_href(target, linked_target) + hash_part
+        elif linked_source.exists():
+            anchor["href"] = relative_href(target, linked_source) + hash_part
+
+
+def is_teacher_target(target: Path) -> bool:
+    try:
+        target.resolve().relative_to(TEACHER_DIR.resolve())
+    except ValueError:
+        return False
+    return True
 
 
 def split_href(href: str) -> tuple[str, str]:

@@ -6,8 +6,8 @@
 
 ## Входные артефакты
 
-- глава 10;
-- markmap `markmaps/chapter_10_neuvector_luntry.mm`;
+- [глава 10](../chapter_10/index.html);
+- markmap [`markmaps/chapter_10_neuvector_luntry.mm`](../markmaps/chapter_10_neuvector_luntry.mm);
 - список уже включённых DKP-механизмов: admission, RBAC, NetworkPolicy, `operator-trivy`, runtime audit, API audit, log forwarding;
 - публичные материалы NeuVector и Luntry.
 

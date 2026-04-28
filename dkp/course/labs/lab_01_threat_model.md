@@ -6,10 +6,10 @@
 
 ## Исходные материалы
 
-- `shop-demo/README.md`
-- `shop-demo/manifests/`
-- глава 1 курса
-- markmap `markmaps/chapter_01_foundations.mm`
+- [`shop-demo/README.md`](../shop-demo/README.md)
+- [`shop-demo/manifests/`](../shop-demo/manifests/)
+- [глава 1 курса](../chapter_1/index.html)
+- markmap [`markmaps/chapter_01_foundations.mm`](../markmaps/chapter_01_foundations.mm)
 
 ## Ожидаемое время
 
