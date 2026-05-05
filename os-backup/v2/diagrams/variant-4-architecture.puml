@@ -1,0 +1,43 @@
+@startuml
+title Вариант 4 - Архитектура
+left to right direction
+skinparam shadowing false
+skinparam packageStyle rectangle
+
+actor "Источники логов" as Sources
+actor "Регулятор / аналитик" as RegUser
+actor "Внешняя СРК" as Backup
+
+rectangle "Production OpenSearch 2.19" as Prod {
+  database "Online-горизонт\nhot / warm / cold" as OnlineData
+}
+
+folder "NFS\nShort-term snapshot repository" as ShortRepo
+folder "Активный годовой\nsnapshot repository" as ActiveYearRepo
+folder "Закрытые годовые\nsnapshot repository\nв backup-хранилище" as ClosedYearRepos
+
+rectangle "Archive search cluster" as SearchCluster {
+  node "search role node(s)" as SearchNode
+  database "Cache searchable snapshots" as Cache
+}
+
+Sources --> Prod : постоянная запись логов
+RegUser --> Prod : поиск по online-горизонту
+
+Prod --> ShortRepo : hourly DR snapshots
+Prod --> ActiveYearRepo : daily sealed snapshots\nтекущего года
+
+Backup --> ShortRepo : backup snapshot repository
+Backup --> ActiveYearRepo : backup snapshot repository
+Backup --> ClosedYearRepos : архивное хранение\nзакрытых годовых repository
+
+ClosedYearRepos --> SearchCluster : возврат нужного года\nна NFS при необходимости
+SearchCluster --> ClosedYearRepos : remote_snapshot /\nsearchable snapshots
+RegUser --> SearchCluster : поиск по архивным годам
+
+note bottom of SearchCluster
+Локальный диск нужен в основном
+под cache и metadata, а не под
+полную копию архивных индексов.
+end note
+@enduml

@@ -1,0 +1,40 @@
+@startuml
+title Вариант 2 - Архитектура
+left to right direction
+skinparam shadowing false
+skinparam packageStyle rectangle
+
+actor "Источники логов" as Sources
+actor "Регулятор / аналитик" as RegUser
+actor "Внешняя СРК" as Backup
+
+rectangle "Production OpenSearch 2.19" as Prod {
+  node "Hot tier" as Hot
+  node "Warm/Worm tier" as Warm
+  node "Cold tier" as Cold
+  database "Текущие write-индексы\nfw-2026.05.05\nproxy-2026.05.05\nauth-2026.05.05\nos-2026.05.05\napp-2026.05.05" as CurrentDay
+  database "Закрытые дневные индексы\nза предыдущие дни" as SealedDays
+}
+
+folder "NFS\nrepo-v2-hourly\n(hourly DR snapshot repository)" as HourlyRepo
+folder "NFS\nrepo-v2-sealed\n(daily sealed snapshot repository)" as SealedRepo
+rectangle "Recovery cluster" as Recovery
+
+Sources --> Prod : постоянная запись логов
+RegUser --> Prod : поиск по всем 5 годам\nчерез alias / patterns
+
+Prod --> HourlyRepo : hourly snapshots\nтекущих write-индексов
+Prod --> SealedRepo : daily snapshots\nзакрытых дневных индексов
+
+Backup --> HourlyRepo : backup snapshot repository
+Backup --> SealedRepo : backup snapshot repository
+
+HourlyRepo --> Recovery : быстрое восстановление\nтекущих данных
+SealedRepo --> Recovery : восстановление истории
+
+note bottom of Prod
+Все 5 лет остаются онлайн,
+но snapshot-логика разделена:
+текущий день и закрытые дни.
+end note
+@enduml

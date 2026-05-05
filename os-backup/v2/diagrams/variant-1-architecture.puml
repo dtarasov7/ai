@@ -1,0 +1,39 @@
+@startuml
+title Вариант 1 - Архитектура
+left to right direction
+skinparam shadowing false
+skinparam packageStyle rectangle
+
+actor "Источники логов" as Sources
+actor "Регулятор / аналитик" as RegUser
+actor "Внешняя СРК" as Backup
+
+rectangle "Production OpenSearch 2.19" as Prod {
+  node "Hot tier" as Hot
+  node "Warm/Worm tier" as Warm
+  node "Cold tier" as Cold
+  database "Семейства индексов\nfw-*\nproxy-*\nauth-*\nos-*\napp-*\naudit-*" as Idx
+}
+
+folder "NFS\nАктивный snapshot repository" as SnapRepo
+rectangle "Recovery cluster" as Recovery
+
+Sources --> Prod : постоянная запись логов
+Prod --> Idx
+RegUser --> Prod : поиск по всем 5 годам\nчерез alias / patterns
+
+Prod --> SnapRepo : регулярные snapshots\nвсего кластера
+Backup --> SnapRepo : backup файловой системы\nsnapshot repository
+
+SnapRepo --> Recovery : restore критичных индексов\nи затем полной истории
+
+note bottom of Prod
+Все 5 лет данных остаются онлайн
+в production-кластере.
+end note
+
+note bottom of SnapRepo
+Один активный snapshot repository
+на общем NFS для всего кластера.
+end note
+@enduml

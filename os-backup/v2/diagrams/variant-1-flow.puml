@@ -1,0 +1,31 @@
+@startuml
+title Вариант 1 - Последовательность DR-восстановления
+skinparam shadowing false
+
+actor "Операции / SRE" as Ops
+participant "Production cluster" as Prod
+participant "NFS snapshot repository" as Repo
+participant "Внешняя СРК" as Backup
+participant "Recovery cluster" as Rec
+
+Prod -> Repo : Создание регулярных snapshots\nвсего кластера
+Backup -> Repo : Backup snapshot repository\nпосле завершения snapshot-окна
+
+== Авария ==
+Ops -> Prod : Фиксация потери кластера / данных
+
+alt Потерян только production-кластер
+  Ops -> Rec : Развернуть recovery cluster
+  Ops -> Repo : Смонтировать snapshot repository
+else Потерян и production-кластер,\nи snapshot repository
+  Ops -> Backup : Восстановить snapshot repository\nна NFS
+  Backup --> Repo : Возврат snapshot repository
+  Ops -> Rec : Развернуть recovery cluster
+end
+
+Ops -> Rec : Зарегистрировать snapshot repository
+Rec -> Repo : Читать metadata и snapshot data
+Ops -> Rec : Сначала восстановить\nкритичные свежие индексы
+Ops -> Rec : Затем восстановить\nостальную историю
+Ops -> Rec : Вернуть прием логов и поиск
+@enduml
