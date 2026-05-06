@@ -1,0 +1,40 @@
+@startuml
+title Вариант 3 - Архитектура
+left to right direction
+skinparam shadowing false
+skinparam packageStyle rectangle
+
+actor "Источники логов" as Sources
+actor "Регулятор / аналитик" as RegUser
+actor "Внешняя СРК" as Backup
+
+rectangle "Production OpenSearch 2.19" as Prod {
+  database "Online-горизонт\nhot / warm / cold" as OnlineData
+}
+
+folder "NFS\nShort-term snapshot repository" as ShortRepo
+folder "NFS / backup\nАрхивные snapshot repository\nпо годам или кварталам" as ArchiveRepos
+rectangle "Recovery cluster\nобычный local restore" as Recovery
+
+Sources --> Prod : постоянная запись логов
+RegUser --> Prod : поиск по online-горизонту
+
+Prod --> ShortRepo : hourly DR snapshots\nтекущих write-индексов
+Prod --> ArchiveRepos : финальные snapshots\nзакрытых исторических индексов
+
+Backup --> ShortRepo : backup snapshot repository
+Backup --> ArchiveRepos : backup snapshot repository
+
+ArchiveRepos --> Recovery : local restore\nнужных периодов
+RegUser --> Recovery : поиск по архивным периодам
+
+note bottom of Prod
+Старшие периоды удаляются из production
+после архивирования.
+end note
+
+note bottom of Recovery
+Поиск по архиву требует места
+под восстановленные индексы.
+end note
+@enduml

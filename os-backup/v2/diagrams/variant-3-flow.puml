@@ -1,0 +1,32 @@
+@startuml
+title Вариант 3 - Поиск без даты по всем 5 годам
+skinparam shadowing false
+
+actor "Регулятор" as Reg
+participant "Операции / аналитик" as Ops
+participant "Production cluster" as Prod
+participant "Внешняя СРК" as Backup
+participant "NFS архивный snapshot repository" as Repo
+participant "Recovery cluster" as Rec
+
+Reg -> Ops : Объект поиска без даты
+Ops -> Prod : Поиск по online-горизонту
+
+loop Для каждого архивного года / периода
+  alt snapshot repository отсутствует на NFS
+    Ops -> Backup : Восстановить нужный snapshot repository
+    Backup --> Repo : Возврат на NFS
+  end
+
+  Ops -> Rec : Развернуть / использовать recovery cluster
+  Ops -> Rec : Зарегистрировать snapshot repository
+  Rec -> Repo : Читать snapshot metadata
+  Ops -> Rec : Restore нужных семейств индексов\nлокально на диск
+  Ops -> Rec : Выполнить поиск по периоду
+  Ops -> Rec : Выгрузить результаты
+  Ops -> Rec : Очистить восстановленные индексы
+end
+
+Ops -> Ops : Объединить результаты\nи убрать дубликаты
+Ops --> Reg : Подготовить единый ответ
+@enduml

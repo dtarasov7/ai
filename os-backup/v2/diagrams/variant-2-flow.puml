@@ -1,0 +1,25 @@
+@startuml
+title Вариант 2 - Суточный цикл и DR-защита
+skinparam shadowing false
+
+participant "Production cluster" as Prod
+participant "repo-v2-hourly" as Hourly
+participant "repo-v2-sealed" as Sealed
+participant "Внешняя СРК" as Backup
+
+loop Каждые 30-60 минут
+  Prod -> Hourly : Snapshot всех текущих write-индексов\nпо семействам логов
+end
+
+== Смена суток ==
+Prod -> Prod : Создать новые индексы текущего дня
+Prod -> Prod : Поставить write block\nна вчерашние индексы
+Prod -> Sealed : Daily sealed snapshot\nвчерашних индексов
+
+Backup -> Hourly : Backup hourly snapshot repository
+Backup -> Sealed : Backup sealed snapshot repository
+
+== При аварии ==
+Prod -> Hourly : Restore актуальных write-индексов
+Prod -> Sealed : Restore закрытых дней\nпо мере необходимости
+@enduml

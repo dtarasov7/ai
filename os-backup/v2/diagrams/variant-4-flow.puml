@@ -1,0 +1,32 @@
+@startuml
+title Вариант 4 - Поиск без даты через searchable snapshots
+skinparam shadowing false
+
+actor "Регулятор" as Reg
+participant "Операции / аналитик" as Ops
+participant "Production cluster" as Prod
+participant "Внешняя СРК" as Backup
+participant "NFS годовой snapshot repository" as Repo
+participant "Archive search cluster\n(search role)" as Search
+
+Reg -> Ops : Объект поиска без даты
+Ops -> Prod : Поиск по online-горизонту
+
+loop Для каждого архивного года
+  alt Годовой snapshot repository отсутствует на NFS
+    Ops -> Backup : Восстановить нужный годовой snapshot repository
+    Backup --> Repo : Возврат на NFS
+  end
+
+  Ops -> Search : Зарегистрировать snapshot repository\nкак readonly
+  Ops -> Search : Restore с storage_type=remote_snapshot
+  Search -> Repo : Читать данные по требованию
+  Ops -> Search : Выполнить поиск по нужным семействам индексов
+  Ops -> Search : Выгрузить результаты
+  Ops -> Search : Удалить searchable snapshot indices
+  Ops -> Search : При необходимости отключить repository
+end
+
+Ops -> Ops : Объединить результаты\nи убрать дубликаты
+Ops --> Reg : Подготовить единый ответ
+@enduml
