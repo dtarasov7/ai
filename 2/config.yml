@@ -1,0 +1,537 @@
+apiVersion: deckhouse.io/v1
+kind: InitConfiguration
+deckhouse:
+  imagesRepo: harbor.architects.foxtrot-dev.ru/ash-jet-rvision/cse
+  # строку с данными аутентификации в хранилище можно получить командой:
+  # echo '{"auths": {"<REGISTRY_HOST>": {"auth": "'$(echo -n '<REGISTRY_USER>:<REGISTRY_PASSWORD>' | base64 -w0)'"}}}' | base64 -w0
+  registryDockerCfg: 
+  registryScheme: HTTPS
+  # devBranch: v1.73.0
+  # registryCA: |
+  #   -----BEGIN CERTIFICATE-----
+  
+  #   -----END CERTIFICATE-----
+---
+apiVersion: deckhouse.io/v1
+kind: ClusterConfiguration
+# Адресное пространство подов кластера.
+podSubnetCIDR: 10.111.0.0/16
+# Адресное пространство сервисов кластера.
+serviceSubnetCIDR: 10.222.0.0/16
+# Версия control plane кластера Kubernetes.
+kubernetesVersion: "Automatic"
+# Домен кластера (используется для маршрутизации внутри кластера).
+# Не должен совпадать с доменом, указанным
+# в глобальном параметре publicDomainTemplate.
+clusterDomain: cluster.local
+clusterType: Static
+# defaultCRI: ContainerdV2
+# При использовании Containerd v1 режим контроля подписи Enforce
+# применяется только после предварительного включения режима Migrate и проведения 
+# миграций (см. п. 4.16).
+---
+apiVersion: deckhouse.io/v1
+kind: StaticClusterConfiguration
+internalNetworkCIDRs:
+# TODO: change to the actual network
+- 10.66.10.0/24
+---
+apiVersion: deckhouse.io/v1alpha1
+kind: ModuleConfig
+metadata:
+  name: deckhouse
+spec:
+  version: 1
+  enabled: true
+  settings:
+    releaseChannel: LTS
+    logLevel: Info
+    bundle: Default
+---
+apiVersion: deckhouse.io/v1alpha1
+kind: ModuleConfig
+metadata:
+  name: cert-manager
+spec:
+  version: 1
+  enabled: true
+  settings:
+    disableLetsencrypt: true
+---
+apiVersion: deckhouse.io/v1alpha1
+kind: ModuleConfig
+metadata:
+  name: control-plane-manager
+spec:
+  version: 2
+  enabled: true
+  settings:
+    apiserver:
+      signature: Enforce
+# При использовании Containerd v1 режим контроля подписи Enforce
+# применяется только после предварительного включения режима Migrate и проведения 
+# миграций (см. раздел 4.16).
+      encryptionEnabled: true
+      auditPolicyEnabled: true
+---
+apiVersion: v1
+data:
+# TODO: change to the actual certificate and key in base64 format. cat crt/wildcard-dkp.crt | base64 -w0
+  tls.crt: 
+  tls.key: 
+kind: Secret
+metadata:
+  name: internal-ca-key-pair
+  namespace: d8-cert-manager
+type: Opaque
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: internal-ca
+spec:
+  ca:
+    secretName: internal-ca-key-pair
+---
+apiVersion: deckhouse.io/v1alpha1
+kind: ModuleConfig
+metadata:
+  name: global
+spec:
+  version: 2
+  enabled: true
+  settings:
+    modules:
+      https:
+        # mode: CustomCertificate
+        # customCertificate:
+        #   secretName: example-com-tls
+        mode: CertManager
+        certManager:
+        # Указывается имя ClusterIssuer,
+        # который будет использоваться для выпуска сертификатов.
+          clusterIssuerName: internal-ca
+      # Укажите шаблон DNS-имен кластера
+      publicDomainTemplate: "%s.cse.example.com"
+    defaultClusterStorageClass: local-path
+---
+apiVersion: deckhouse.io/v1alpha1
+kind: ModuleConfig
+metadata:
+  name: cni-cilium
+spec:
+  version: 1
+  enabled: true
+  settings:
+    tunnelMode: VXLAN
+    policyAuditMode: false
+---
+apiVersion: deckhouse.io/v1alpha1
+kind: ModuleConfig
+metadata:
+  name: cilium-hubble
+spec:
+  version: 2
+  enabled: true
+  settings:
+    auth:
+      allowedUserGroups:
+      - admins
+---
+apiVersion: deckhouse.io/v1alpha1
+kind: ModuleConfig
+metadata:
+  name: runtime-audit-engine
+spec:
+  version: 1
+  enabled: true
+---
+apiVersion: deckhouse.io/v1alpha1
+kind: ModuleConfig
+metadata:
+  name: gost-integrity-controller
+spec:
+  version: 1
+  enabled: true
+---
+apiVersion: deckhouse.io/v1alpha1
+kind: ModuleConfig
+metadata:
+  name: admission-policy-engine
+spec:
+  version: 1
+  enabled: true
+  settings:
+    podSecurityStandards:
+      enforcementAction: Deny
+      defaultPolicy: Baseline
+    denyVulnerableImages:
+      enabled: true
+---
+apiVersion: deckhouse.io/v1alpha1
+kind: ModuleConfig
+metadata:
+  name: operator-trivy
+spec:
+  version: 1
+  enabled: true
+  settings:
+    linkCVEtoBDU: true
+    severities:
+      - UNKNOWN
+      - LOW
+      - MEDIUM
+      - HIGH
+      - CRITICAL
+---
+apiVersion: deckhouse.io/v1alpha1
+kind: ModuleConfig
+metadata:
+  name: operator-prometheus
+spec:
+  version: 1
+  enabled: true
+---
+apiVersion: deckhouse.io/v1alpha1
+kind: ModuleConfig
+metadata:
+  name: log-shipper
+spec:
+  version: 1
+  enabled: true
+---
+apiVersion: deckhouse.io/v1alpha1
+kind: ModuleConfig
+metadata:
+  name: ingress-nginx
+spec:
+  version: 1
+  enabled: true
+---
+apiVersion: deckhouse.io/v1alpha1
+kind: ModuleConfig
+metadata:
+  name: monitoring-kubernetes
+spec:
+  version: 1
+  enabled: true
+---
+apiVersion: deckhouse.io/v1alpha1
+kind: ModuleConfig
+metadata:
+  name: node-manager
+spec:
+  enabled: true
+  version: 2
+  settings:
+    earlyOomEnabled: false
+---
+apiVersion: deckhouse.io/v1alpha1
+kind: ModuleConfig
+metadata:
+  name: kube-dns
+spec:
+  enabled: true
+  version: 1
+  settings:
+    enableLogs: true
+---
+apiVersion: deckhouse.io/v1alpha1
+kind: ModuleConfig
+metadata:
+  name: loki
+spec:
+  enabled: true
+  settings:
+    storageClass: local-path
+    retentionPeriodHours: 24
+    storeSystemLogs: true
+  version: 1
+---
+apiVersion: deckhouse.io/v1alpha1
+kind: ModuleConfig
+metadata:
+  name: prometheus
+spec:
+  enabled: true
+  settings:
+    auth:
+      allowedUserGroups:
+        - admins
+    storageClass: local-path
+    longtermStorageClass: local-path
+  version: 2
+---
+apiVersion: deckhouse.io/v1alpha1
+kind: ModuleConfig
+metadata:
+  name: user-authz
+spec:
+  enabled: true
+  settings:
+    enableMultiTenancy: true
+  version: 1
+---
+apiVersion: deckhouse.io/v1alpha1
+kind: ModuleConfig
+metadata:
+  name: console
+spec:
+  version: 1
+  enabled: true
+  settings:
+    auth:
+      allowedUserGroups:
+        - admins
+---
+apiVersion: deckhouse.io/v1alpha1
+kind: ModuleConfig
+metadata:
+  annotations:
+  name: user-authn
+spec:
+  enabled: true
+  settings:
+    controlPlaneConfigurator:
+      dexCAMode: FromIngressSecret
+    publishAPI:
+      enabled: true
+  version: 2
+---
+apiVersion: deckhouse.io/v1alpha1
+kind: ModuleConfig
+metadata:
+  name: chrony
+spec:
+  enabled: true
+  # settings:
+  #   ntpServers:
+  #     - <NTP_SERVER.1>
+  #     - <NTP_SERVER.2>
+  #     - <NTP_SERVER.3>
+  # version: 1
+---
+apiVersion: deckhouse.io/v1alpha1
+kind: ModuleConfig
+metadata:
+  name: istio
+spec:
+  version: 3
+  enabled: true
+  settings:
+    auth:
+      allowedUserGroups:
+        - admins
+---
+apiVersion: v1
+data:
+  audit-policy.yaml: YXBpVmVyc2lvbjogYXVkaXQuazhzLmlvL3YxICMgVGhpcyBpcyByZXF1aXJlZC4Ka2luZDogUG9saWN5CiMgRG9uJ3QgZ2VuZXJhdGUgYXVkaXQgZXZlbnRzIGZvciBhbGwgcmVxdWVzdHMgaW4gUmVxdWVzdFJlY2VpdmVkIHN0YWdlLgpvbWl0U3RhZ2VzOgogIC0gIlJlcXVlc3RSZWNlaXZlZCIKcnVsZXM6CiAgIyBBIGNhdGNoLWFsbCBydWxlIHRvIGxvZyBhbGwgb3RoZXIgcmVxdWVzdHMgYXQgdGhlIE1ldGFkYXRhIGxldmVsLgogIC0gbGV2ZWw6IE1ldGFkYXRhCiAgICAjIExvbmctcnVubmluZyByZXF1ZXN0cyBsaWtlIHdhdGNoZXMgdGhhdCBmYWxsIHVuZGVyIHRoaXMgcnVsZSB3aWxsIG5vdAogICAgIyBnZW5lcmF0ZSBhbiBhdWRpdCBldmVudCBpbiBSZXF1ZXN0UmVjZWl2ZWQuCiAgICBvbWl0U3RhZ2VzOgogICAgICAtICJSZXF1ZXN0UmVjZWl2ZWQiCgo=
+kind: Secret
+metadata:
+  name: audit-policy
+  namespace: kube-system
+type: Opaque
+---
+apiVersion: deckhouse.io/v1alpha1
+kind: NodeGroupConfiguration
+metadata:
+  name: sysctl-tune-fstec
+spec:
+  weight: 100
+  bundles:
+  - "*"
+  nodeGroups:
+  - "*"
+  content: |
+    sysctl -w kernel.dmesg_restrict=1
+    sysctl -w kernel.kptr_restrict=2
+    sysctl -w net.core.bpf_jit_harden=2
+    sysctl -w kernel.perf_event_paranoid=3
+    sysctl -w kernel.kexec_load_disabled=1
+    sysctl -w user.max_user_namespaces=0
+    sysctl -w kernel.unprivileged_bpf_disabled=1
+    sysctl -w vm.unprivileged_userfaultfd=0
+    sysctl -w dev.tty.ldisc_autoload=0
+    sysctl -w vm.mmap_min_addr=4096
+    sysctl -w kernel.randomize_va_space=2
+    sysctl -w kernel.yama.ptrace_scope=3
+    sysctl -w fs.protected_symlinks=1
+    sysctl -w fs.protected_hardlinks=1
+    sysctl -w fs.protected_fifos=2
+    sysctl -w fs.protected_regular=2
+    sysctl -w fs.suid_dumpable=0
+---
+# Настройки Ingress-контроллера.
+# Измените согласно требованиям вашей инфраструктуры.
+apiVersion: deckhouse.io/v1
+kind: IngressNginxController
+metadata:
+  name: main
+spec:
+  ingressClass: nginx
+  inlet: HostWithFailover
+  nodeSelector:
+    node-role.kubernetes.io/master: ""
+  tolerations:
+  - effect: NoSchedule
+    operator: Exists
+  maxReplicas: 2
+  minReplicas: 1
+---
+apiVersion: deckhouse.io/v1alpha1
+kind: LocalPathProvisioner
+metadata:
+  name: local-path
+spec:
+  # В зависимости от конфигурации ОС путь может быть изменён.
+  path: "/opt/local-path-provisioner" 
+  reclaimPolicy: Delete
+---
+apiVersion: deckhouse.io/v1
+kind: User
+metadata:
+  name: admin
+spec:
+  email: admin@deckhouse.ru
+  # echo "12345678" | htpasswd -BinC 10 "" | cut -d: -f2 | base64 -w0
+  password: JDJ5JDEwJGpKV3ZUem5TU2RKMEpYMUNVeVhuWk93NkdnYjdUdUhKbnp3VTcvRm9ZWkN4WnRodWtNaEouCgo=
+---
+apiVersion: deckhouse.io/v1alpha1
+kind: Group
+metadata:
+  name: admins
+spec:
+  name: admins
+  members:
+    - kind: User
+      name: admin
+---
+apiVersion: deckhouse.io/v1
+kind: ClusterAuthorizationRule
+metadata:
+  name: admin
+spec:
+  subjects:
+    - kind: Group
+      name: admins
+  accessLevel: SuperAdmin
+  portForwarding: true
+  namespaceSelector:
+    matchAny: true
+---
+apiVersion: deckhouse.io/v1
+kind: NodeGroup
+metadata:
+  name: master
+spec:
+  nodeTemplate:
+    labels:
+      node-role.kubernetes.io/control-plane: ""
+      node-role.kubernetes.io/master: ""
+      node-role.deckhouse.io/system: ""
+    taints:
+    - effect: NoExecute
+      key: dedicated.deckhouse.io
+      value: system
+  nodeType: Static
+  disruptions:
+    approvalMode: Manual
+  kubelet:
+    containerLogMaxFiles: 4
+    containerLogMaxSize: 50Mi
+  staticInstances:
+    count: 2
+    labelSelector:
+      matchLabels:
+        role: master
+---
+apiVersion: deckhouse.io/v1
+kind: NodeGroup
+metadata:
+  name: worker
+spec:
+  nodeType: Static
+  disruptions:
+    approvalMode: Manual
+  kubelet:
+    containerLogMaxFiles: 4
+    containerLogMaxSize: 50Mi
+  staticInstances:
+    count: 2
+    labelSelector:
+      matchLabels:
+        role: worker
+--- 
+apiVersion: deckhouse.io/v1alpha1
+kind: SSHCredentials
+metadata:
+  name: ssh-credentials
+spec:
+  user: caps
+  privateSSHKey: # нужно указать приватный ключ в виде строки в формате PEM, закодированный в base64
+---
+apiVersion: deckhouse.io/v1alpha1
+kind: StaticInstance
+metadata:
+  name: cse-master-2
+  labels:
+    role: master
+spec:
+  address: 10.66.10.28
+  credentialsRef:
+    kind: SSHCredentials
+    name: ssh-credentials
+---
+apiVersion: deckhouse.io/v1alpha1
+kind: StaticInstance
+metadata:
+  name: cse-master-3
+  labels:
+    role: master
+spec:
+  address: 10.66.10.29
+  credentialsRef:
+    kind: SSHCredentials
+    name: ssh-credentials
+---
+apiVersion: deckhouse.io/v1alpha1
+kind: StaticInstance
+metadata:
+  name: cse-worker-1
+  labels:
+    role: worker
+spec:
+  address: 10.66.10.32
+  credentialsRef:
+    kind: SSHCredentials
+    name: ssh-credentials
+---
+apiVersion: deckhouse.io/v1alpha1
+kind: StaticInstance
+metadata:
+  name: cse-worker-2
+  labels:
+    role: worker
+spec:
+  address: 10.66.10.30
+  credentialsRef:
+    kind: SSHCredentials
+    name: ssh-credentials
+---
+apiVersion: deckhouse.io/v1
+kind: CustomPrometheusRules
+metadata:
+  name: falco-critical-alerts
+spec:
+  groups:
+  - name: falco-critical-alerts
+    rules:
+    - alert: FalcoCriticalAlertsAreFiring
+      for: 1m
+      annotations:
+        description: |
+          There is a suspicious activity on a node {{ $labels.node }}.
+          Check you events journal for more details.
+        summary: Falco detects a critical security incident
+      expr: |
+        sum by (node) (rate(falco_events{priority=~"error|critical|warning|notice"}[5m]) > 0)
