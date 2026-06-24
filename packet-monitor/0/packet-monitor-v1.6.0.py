@@ -8,10 +8,10 @@ import urwid
 import sys
 import signal
 import argparse
+from collections import defaultdict
 import os
-import traceback
 from datetime import datetime
-from scapy.utils import wrpcap, PcapWriter, hexdump
+from scapy.utils import wrpcap, PcapWriter
 import io
 import json
 from scapy.all import Packet
@@ -21,26 +21,20 @@ from scapy.layers.dns import DNS, DNSQR, DNSRR
 from scapy.layers.inet6 import IPv6, ICMPv6EchoRequest, ICMPv6EchoReply
 from scapy.all import rdpcap
 from scapy.all import sniff, conf, get_if_list
-from scapy.packet import Raw
 import re
 from collections import defaultdict
 from collections import Counter
+from datetime import datetime
 from collections import deque
 import threading
 import time
 import binascii
 import hashlib
+import re
 from typing import Optional
 
-try:
-    from cryptography import x509
-    from cryptography.hazmat.backends import default_backend
-except Exception:
-    x509 = None
-    default_backend = None
-
 __version__="1.6.0"
-__author__ = "Tarasov Dmitry"
+
 
 def sanitize_tui_text(s: str, max_len: int = 5000) -> str:
     if s is None:
@@ -363,7 +357,8 @@ def tls_summarize_stream(data: bytes) -> list[str]:
         elif rtype == 0x17:
             out.append("ApplicationData (encrypted)")
         else:
-            out.append(f"Record type=0x{rtype:02x} ver={_tls_version_name(rver)} len={len(body)}")
+            # можно добавить, если хочешь:
+            # out.append(f"Record type=0x{rtype:02x} ver={_tls_version_name(rver)} len={len(body)}")
             pass
 
         if len(out) >= 200:
@@ -386,6 +381,27 @@ def extract_tcp_payload_from_raw(frame: bytes) -> bytes:
         eth_type = int.from_bytes(frame[12:14], "big")
         off = 14  # Ethernet header
 
+        # IPv4
+        # if eth_type == 0x0800:
+        #     if len(frame) < off + 20:
+        #         return b""
+        #     ihl = (frame[off] & 0x0F) * 4
+        #     proto = frame[off + 9]
+        #     if proto != 6:  # TCP
+        #         return b""
+        #
+        #     total_len = int.from_bytes(frame[off + 2:off + 4], "big")
+        #     ip_off = off + ihl
+        #     if len(frame) < ip_off + 20:
+        #         return b""
+        #
+        #     tcp_hlen = ((frame[ip_off + 12] >> 4) & 0x0F) * 4
+        #     payload_off = ip_off + tcp_hlen
+        #
+        #     end = min(off + total_len, len(frame))
+        #     if payload_off >= end:
+        #         return b""
+        #     return frame[payload_off:end]
         # IPv4
         if eth_type == 0x0800:
             # минимум IPv4 header
@@ -423,6 +439,26 @@ def extract_tcp_payload_from_raw(frame: bytes) -> bytes:
                 return b""
             return frame[payload_off:end]
 
+        # IPv6 (без extension headers)
+        # if eth_type == 0x86DD:
+        #     if len(frame) < off + 40:
+        #         return b""
+        #     next_hdr = frame[off + 6]
+        #     if next_hdr != 6:  # TCP (без ext headers)
+        #         return b""
+        #
+        #     payload_len = int.from_bytes(frame[off + 4:off + 6], "big")
+        #     ip_off = off + 40
+        #     if len(frame) < ip_off + 20:
+        #         return b""
+        #
+        #     tcp_hlen = ((frame[ip_off + 12] >> 4) & 0x0F) * 4
+        #     payload_off = ip_off + tcp_hlen
+        #
+        #     end = min(ip_off + payload_len, len(frame))
+        #     if payload_off >= end:
+        #         return b""
+        #     return frame[payload_off:end]
         # IPv6 (без extension headers)
         if eth_type == 0x86DD:
             if len(frame) < off + 40:
@@ -871,11 +907,8 @@ class PacketExporter:
             # Извлекаем raw пакеты из packet_info
             raw_packets = []
             for pkt_info in packets:
-                raw_packet = pkt_info.get('raw_packet')
-                if raw_packet is None:
-                    raw_packet = pkt_info.get('raw')
-                if raw_packet is not None:
-                    raw_packets.append(raw_packet)
+                if pkt_info.get('raw_packet') is not None:
+                    raw_packets.append(pkt_info['raw_packet'])
 
             if len(raw_packets) == 0:
                 return False, "", "No valid packets to save"
@@ -916,11 +949,8 @@ class PacketExporter:
             # Извлекаем raw пакеты
             raw_packets = []
             for pkt_info in packets:
-                raw_packet = pkt_info.get('raw_packet')
-                if raw_packet is None:
-                    raw_packet = pkt_info.get('raw')
-                if raw_packet is not None:
-                    raw_packets.append(raw_packet)
+                if pkt_info.get('raw_packet') is not None:
+                    raw_packets.append(pkt_info['raw_packet'])
 
             if len(raw_packets) == 0:
                 return False, "", "No valid packets to save"
@@ -1381,6 +1411,7 @@ class FlowDetailView(urwid.WidgetWrap):
         bps = (total_bytes * 8) / duration
 
         # top ports
+        from collections import Counter
         sp = Counter()
         dp = Counter()
         for p in self.packets:
@@ -1483,29 +1514,6 @@ class PacketDetailView(urwid.WidgetWrap):
             f"Protocol:       {self.packet_info['proto']}",
         ]
 
-        src_ip = self.packet_info.get('src_ip')
-        dst_ip = self.packet_info.get('dst_ip')
-        src_port = self.packet_info.get('src_port')
-        dst_port = self.packet_info.get('dst_port')
-
-        if src_ip or dst_ip:
-            src_ep = str(src_ip) if src_ip is not None else "?"
-            dst_ep = str(dst_ip) if dst_ip is not None else "?"
-            if src_port is not None:
-                src_ep += f":{src_port}"
-            if dst_port is not None:
-                dst_ep += f":{dst_port}"
-            summary_text.append(f"Endpoints:      {src_ep} -> {dst_ep}")
-
-        if self.packet_info.get('tcp_flags'):
-            summary_text.append(f"TCP Flags:      {self.packet_info['tcp_flags']}")
-        if self.packet_info.get('tcp_seq') is not None:
-            summary_text.append(f"TCP Seq:        {self.packet_info['tcp_seq']}")
-        if self.packet_info.get('tcp_acknum') is not None:
-            summary_text.append(f"TCP Ack:        {self.packet_info['tcp_acknum']}")
-        if self.packet_info.get('info_long'):
-            summary_text.append(f"Info:           {self.packet_info['info_long']}")
-
         if self.packet_info.get('vlan'):
             summary_text.append(f"VLAN ID:        {self.packet_info['vlan']}")
 
@@ -1516,13 +1524,13 @@ class PacketDetailView(urwid.WidgetWrap):
         widgets.append(urwid.Divider())
 
         # === Секция 2: Детали протоколов (разбор слоев) ===
-        # Предпочитаем исходный Scapy packet, чтобы сохранить корректный link-layer
-        # (например, CookedLinux/SLL/SLL2 для capture с tcpdump -i any).
+        # Пытаемся восстановить Scapy packet из raw данных
         raw_packet = self.packet_info.get('raw_packet')
 
         if not raw_packet and self.packet_info.get('raw'):
-            # Fallback для старых packet_info без исходного объекта пакета.
+            # Пытаемся создать Scapy packet из raw bytes
             try:
+                from scapy.all import Ether
                 raw_packet = Ether(self.packet_info['raw'])
             except:
                 raw_packet = None
@@ -1676,7 +1684,6 @@ class PacketDetailView(urwid.WidgetWrap):
             # TCP Layer
             if packet.haslayer(TCP):
                 tcp = packet[TCP]
-                payload_len = len(bytes(tcp.payload)) if tcp.payload is not None else 0
                 output.append("### TCP (Transmission Control Protocol)")
                 output.append(f"  Source Port:     {tcp.sport}")
                 output.append(f"  Destination Port:{tcp.dport}")
@@ -1699,14 +1706,6 @@ class PacketDetailView(urwid.WidgetWrap):
                 output.append(f"  Window Size:     {tcp.window}")
                 output.append(f"  Checksum:        0x{tcp.chksum:04x}")
                 output.append(f"  Urgent Pointer:  {tcp.urgptr}")
-                output.append(f"  Payload Length:  {payload_len}")
-                if getattr(tcp, 'options', None):
-                    output.append("  Options:")
-                    for name, value in tcp.options:
-                        if name in ("NOP", "EOL"):
-                            output.append(f"    {name}")
-                        else:
-                            output.append(f"    {name}: {value}")
                 output.append("")
 
             # UDP Layer
@@ -1763,6 +1762,7 @@ class PacketDetailView(urwid.WidgetWrap):
 
             # Raw payload
             if packet.haslayer('Raw'):
+                from scapy.packet import Raw
                 raw = packet[Raw]
                 payload = bytes(raw.load)
 
@@ -1810,6 +1810,7 @@ class PacketDetailView(urwid.WidgetWrap):
                 old_stdout = sys.stdout
                 sys.stdout = io.StringIO()
 
+                from scapy.utils import hexdump
                 hexdump(packet)
 
                 result = sys.stdout.getvalue()
@@ -2494,6 +2495,8 @@ class PacketCapture:
     def _detect_packet_loss(self, packet_info, pkt):
         """Улучшенная детекция потери пакетов"""
         try:
+            from scapy.layers.inet import TCP
+
             if not pkt.haslayer(TCP):
                 return
 
@@ -2534,7 +2537,7 @@ class PacketCapture:
         """Измерение latency"""
         try:
             if hasattr(pkt, 'time'):
-                capture_time = float(pkt.time)
+                capture_time = pkt.time
                 current_time = time.time()
 
                 latency_us = (current_time - capture_time) * 1000000
@@ -2549,47 +2552,6 @@ class PacketCapture:
             return b[:limit].decode("utf-8", errors="replace")
         except Exception:
             return ""
-
-    def _format_tcp_options(self, tcp) -> list[str]:
-        out = []
-        try:
-            for name, value in getattr(tcp, "options", []) or []:
-                if name == "MSS" and value is not None:
-                    out.append(f"MSS={value}")
-                elif name == "SAckOK":
-                    out.append("SACK_PERM")
-                elif name == "Timestamp" and isinstance(value, tuple) and len(value) >= 2:
-                    out.append(f"TSval={value[0]}")
-                    out.append(f"TSecr={value[1]}")
-                elif name == "WScale" and value is not None:
-                    out.append(f"WS={value}")
-                elif name in ("NOP", "EOL"):
-                    continue
-                elif value is None:
-                    out.append(str(name))
-                else:
-                    out.append(f"{name}={value}")
-        except Exception:
-            return []
-        return out
-
-    def _build_tcp_info_summary(self, pkt, flag_str: str) -> str:
-        try:
-            tcp = pkt[TCP]
-            payload_len = len(bytes(tcp.payload)) if tcp.payload is not None else 0
-            parts = [f"[{flag_str or 'NONE'}]", f"Seq={int(tcp.seq)}"]
-            if bool(tcp.flags & 0x10):
-                parts.append(f"Ack={int(tcp.ack)}")
-            parts.append(f"Win={int(tcp.window)}")
-            parts.append(f"Len={payload_len}")
-
-            options = self._format_tcp_options(tcp)
-            if options:
-                parts.extend(options[:6])
-
-            return " ".join(parts)
-        except Exception:
-            return f"Len={len(pkt[TCP]):>5}"
 
     def _get_tcp_payload_bytes(self, pkt) -> bytes:
         try:
@@ -2670,42 +2632,25 @@ class PacketCapture:
         }.get(v, f"0x{v:04x}")
 
     def _tls_alert_desc(self, d: int) -> str:
-        # неполная таблица 
+        # неполная таблица (достаточно для пользы)
         m = {
             0: "close_notify",
             10: "unexpected_message",
             20: "bad_record_mac",
-            21: "decryption_failed",
-            22: "record_overflow",
-            30: "decompression_failure",
             40: "handshake_failure",
-            41: "no_certificate",
             42: "bad_certificate",
-            43: "unsupported_certificate",
-            44: "certificate_revoked",
-            45: "certificate_expired",
             46: "certificate_unknown",
             47: "illegal_parameter",
             48: "unknown_ca",
             49: "access_denied",
             50: "decode_error",
             51: "decrypt_error",
-            60: "export_restriction",
             70: "protocol_version",
             71: "insufficient_security",
             80: "internal_error",
-            86: "inappropriate_fallback",
             90: "user_canceled",
-            100: "no_renegotiation",
             109: "missing_extension",
-            110: "unsupported_extension",
-            111: "certificate_unobtainable",
             112: "unrecognized_name",  # SNI
-            113: "bad_certificate_status_response",
-            114: "bad_certificate_hash_value",
-            115: "unknown_psk_identity",
-            116: "certificate_required",
-            120: "no_application_protocol",
         }
         return m.get(d, f"desc_{d}")
 
@@ -3247,7 +3192,10 @@ class PacketCapture:
             if len(cert_der) < 16:
                 return None
 
-            if x509 is None or default_backend is None:
+            try:
+                from cryptography import x509
+                from cryptography.hazmat.backends import default_backend
+            except Exception:
                 return "TLS Certificate"
 
             cert = x509.load_der_x509_certificate(cert_der, default_backend())
@@ -3497,7 +3445,7 @@ class PacketCapture:
             """
 
         packet_info = {
-            'timestamp': datetime.fromtimestamp(float(pkt.time)),
+            'timestamp': datetime.fromtimestamp(pkt.time),
             'proto': 'UNKNOWN',
             'src': '',
             'dst': '',
@@ -3509,7 +3457,6 @@ class PacketCapture:
             'info_short': '',
             'info_long': '',
             'size': len(pkt),
-            'raw_packet': pkt,
             'raw': bytes(pkt),
             'interface': None,
             'packet_loss': False,
@@ -3579,8 +3526,11 @@ class PacketCapture:
                 if packet_info['tcp_rst']: parts.append("RST")
                 packet_info['tcp_flags'] = ",".join(parts)
 
+                # short: только длина (и, опционально, 1-2 флага)
                 info_short = f"Len={len(pkt[TCP]):>5}"
-                info_long = self._build_tcp_info_summary(pkt, flag_str)
+
+                # long: как сейчас
+                info_long = f"Len={len(pkt[TCP]):>5} [{flag_str:8}] Seq={pkt[TCP].seq}"
 
                 http = self._try_parse_http_summary(pkt)
                 if http:
@@ -3658,7 +3608,7 @@ class PacketCapture:
                 packet_info['tcp_flags'] = ",".join(parts)
 
                 info_short = f"Len={len(pkt[TCP]):>5}"
-                info_long = self._build_tcp_info_summary(pkt, flag_str)
+                info_long = f"Len={len(pkt[TCP]):>5} [{flag_str:8}] Seq={pkt[TCP].seq}"
 
                 http = self._try_parse_http_summary(pkt)
                 if http:
@@ -6357,6 +6307,7 @@ class MainApplication:
             if self.packet_capture.log_file:
                 try:
                     with open(self.packet_capture.log_file, 'a') as f:
+                        import traceback
                         f.write(f"[ERROR in refresh_display] {e}\n{traceback.format_exc()}\n")
                 except:
                     pass
@@ -6428,13 +6379,19 @@ def main():
     print(f"Packet Monitor v{__version__}")
     print("=" * 70)
     
+    try:
+        import urwid
+    except ImportError as e:
+        print(f"\n[ERROR] Import failed: {e}")
+        sys.exit(1)
+    
     print("\nInitializing...")
     
     offline_mode = args.read is not None
     
     if offline_mode:
         print(f"  Reading {args.read}...")
-        capture = PacketCapture(interface='offline', log_file='./packet_monitor.log')
+        capture = PacketCapture(interface='offline', log_file='/tmp/packet_monitor.log')
         capture.running = False
         
         try:
@@ -6461,7 +6418,7 @@ def main():
         capture = PacketCapture(
             interface=interface,
             packet_limit=50000,
-            log_file='./packet_monitor.log'
+            log_file='/tmp/packet_monitor.log'
         )
         
         print(f"  ✓ Interface: {capture.interface}")
@@ -6473,7 +6430,7 @@ def main():
     exporter = PacketExporter()
     
     print("  ✓ Components initialized")
-    print(f"  ✓ Log file: ./packet_monitor.log")
+    print(f"  ✓ Log file: /tmp/packet_monitor.log")
     
     if args.ipv6:
         print("  ✓ IPv6 statistics: ENABLED")
@@ -6520,7 +6477,7 @@ def main():
                 
                 print(f"  [{pkt['num']}] {iface_str:<8} {proto_str:<8} {src_ip_str} -> {dst_ip_str}")
         
-        print("\nCheck log: tail -f ./packet_monitor.log")
+        print("\nCheck log: tail -f /tmp/packet_monitor.log")
         print("\nGoodbye!")
 
 

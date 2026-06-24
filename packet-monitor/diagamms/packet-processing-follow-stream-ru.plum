@@ -1,0 +1,23 @@
+@startuml
+top to bottom direction
+skinparam shadowing false
+
+start
+:Выбран пакет или flow;
+if ("Протокол") then ("TCP")
+  :Собрать пакеты 4-tuple;
+  :Определить client/server;
+  :Reassembly по seq;
+  if ("Похоже на TLS?") then ("Да")
+    :TLS handshake summary;
+  else ("Нет")
+    :Показать текст с fallback в hex;
+  endif
+  :Экспорт текста/raw по запросу;
+elseif ("UDP")
+  :Применить быстрый 4-tuple фильтр;
+else ("Other")
+  :Нет реконструкции потока;
+endif
+stop
+@enduml

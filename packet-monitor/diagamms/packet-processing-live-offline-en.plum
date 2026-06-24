@@ -1,0 +1,32 @@
+@startuml
+top to bottom direction
+skinparam shadowing false
+
+start
+if ("Live or Offline?") then ("Live")
+  :Parse CLI / UI choices;
+  :Optional BPF filter;
+  :Scapy sniff callback;
+else ("Offline")
+  :rdpcap file;
+endif
+
+:_parse_packet;
+:Store packet_info + raw_packet;
+:Update stats / latency / loss;
+:TLS hello buffering;
+:Apply UI filters/exclusions;
+:Render packet list;
+:Build/update flows;
+:Save filtered packets;
+
+fork
+  :Packet details;
+fork again
+  :Follow stream;
+fork again
+  :Flow details;
+end fork
+
+stop
+@enduml

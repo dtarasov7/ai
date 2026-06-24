@@ -1,0 +1,45 @@
+@startuml
+left to right direction
+skinparam shadowing false
+skinparam packageStyle rectangle
+
+rectangle "PacketCapture" as CAP
+rectangle "PacketFilter" as FIL
+rectangle "FlowListBox" as FLW
+rectangle "Follow Stream" as FSTR
+rectangle "PacketExporter" as EXP
+
+rectangle "Парсинг пакетов" as A
+rectangle "Буферы TLS hello" as B
+rectangle "Оценка потерь и latency" as C
+rectangle "UI фильтры" as D
+rectangle "Поиск по payload" as E
+rectangle "Исключения" as F
+rectangle "Агрегация по 5-tuple" as G
+rectangle "Сортировка по bytes/pkts/rate" as H
+rectangle "Drill-down к пакетам" as I
+rectangle "TCP reassembly" as J
+rectangle "TLS summary" as K
+rectangle "Экспорт потока" as L
+rectangle "Сохранение всех пакетов" as M
+rectangle "Сохранение filtered-пакетов" as N
+
+CAP --> A
+CAP --> B
+CAP --> C
+
+FIL --> D
+FIL --> E
+FIL --> F
+
+FLW --> G
+FLW --> H
+FLW --> I
+
+FSTR --> J
+FSTR --> K
+FSTR --> L
+
+EXP --> M
+EXP --> N
+@enduml

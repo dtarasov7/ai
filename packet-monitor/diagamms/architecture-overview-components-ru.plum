@@ -1,0 +1,60 @@
+@startuml
+top to bottom direction
+skinparam shadowing false
+skinparam packageStyle rectangle
+
+actor "Пользователь" as User
+
+rectangle "CLI параметры" as CLI
+rectangle "Urwid TUI" as UI
+rectangle "MainApplication" as APP
+rectangle "PacketCapture" as CAP
+rectangle "PacketFilter" as FIL
+rectangle "PacketExporter" as EXP
+rectangle "PacketListBox" as PKT
+rectangle "FlowListBox" as FLW
+rectangle "StatisticsPanel" as ST
+rectangle "StatusBar" as SB
+rectangle "Live capture через Scapy sniff" as LIVE
+rectangle "Offline чтение через rdpcap" as OFF
+rectangle "Кольцевой буфер / хранилище пакетов" as BUF
+rectangle "PacketDetailView" as DET
+rectangle "FollowStream / TLS Views" as FSTR
+rectangle "FlowDetailView" as FDET
+database "pcap/pcapng файлы" as FS
+database "~/.packet-monitor/config.json" as CFG
+
+User --> CLI
+User --> UI
+CLI --> APP
+UI --> APP
+
+APP --> CAP
+APP --> FIL
+APP --> EXP
+APP --> PKT
+APP --> FLW
+APP --> ST
+APP --> SB
+
+CAP --> LIVE
+CAP --> OFF
+CAP --> BUF
+
+BUF --> FIL
+BUF --> PKT
+BUF --> FLW
+BUF --> ST
+
+FIL --> PKT
+FIL --> FLW
+FIL --> EXP
+
+PKT --> DET
+PKT --> FSTR
+FLW --> FDET
+FLW --> FSTR
+
+EXP --> FS
+APP --> CFG
+@enduml

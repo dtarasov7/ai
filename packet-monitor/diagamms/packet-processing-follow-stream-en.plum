@@ -1,0 +1,23 @@
+@startuml
+top to bottom direction
+skinparam shadowing false
+
+start
+:Selected packet or flow;
+if ("Protocol") then ("TCP")
+  :Collect packets in 4-tuple;
+  :Guess client/server;
+  :Reassemble by seq;
+  if ("Looks like TLS?") then ("Yes")
+    :TLS handshake summary;
+  else ("No")
+    :Render text with hex fallback;
+  endif
+  :Export text/raw if requested;
+elseif ("UDP")
+  :Apply quick 4-tuple filter;
+else ("Other")
+  :No stream reconstruction;
+endif
+stop
+@enduml

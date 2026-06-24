@@ -1,0 +1,60 @@
+@startuml
+top to bottom direction
+skinparam shadowing false
+skinparam packageStyle rectangle
+
+actor User
+
+rectangle "CLI Arguments" as CLI
+rectangle "Urwid TUI" as UI
+rectangle "MainApplication" as APP
+rectangle "PacketCapture" as CAP
+rectangle "PacketFilter" as FIL
+rectangle "PacketExporter" as EXP
+rectangle "PacketListBox" as PKT
+rectangle "FlowListBox" as FLW
+rectangle "StatisticsPanel" as ST
+rectangle "StatusBar" as SB
+rectangle "Live Capture via Scapy sniff" as LIVE
+rectangle "Offline Read via rdpcap" as OFF
+rectangle "Ring Buffer / Packet Store" as BUF
+rectangle "PacketDetailView" as DET
+rectangle "FollowStream / TLS Views" as FSTR
+rectangle "FlowDetailView" as FDET
+database "pcap/pcapng files" as FS
+database "~/.packet-monitor/config.json" as CFG
+
+User --> CLI
+User --> UI
+CLI --> APP
+UI --> APP
+
+APP --> CAP
+APP --> FIL
+APP --> EXP
+APP --> PKT
+APP --> FLW
+APP --> ST
+APP --> SB
+
+CAP --> LIVE
+CAP --> OFF
+CAP --> BUF
+
+BUF --> FIL
+BUF --> PKT
+BUF --> FLW
+BUF --> ST
+
+FIL --> PKT
+FIL --> FLW
+FIL --> EXP
+
+PKT --> DET
+PKT --> FSTR
+FLW --> FDET
+FLW --> FSTR
+
+EXP --> FS
+APP --> CFG
+@enduml
