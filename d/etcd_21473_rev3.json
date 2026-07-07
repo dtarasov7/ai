@@ -3755,12 +3755,11 @@
           "type": "prometheus",
           "uid": "$datasource"
         },
-        "allValue": ".*",
         "definition": "label_values(etcd_cluster_version{job=~\"$job\",env=~\"$env\"}, group)",
         "hide": 0,
-        "includeAll": true,
+        "includeAll": false,
         "label": "Group",
-        "multi": true,
+        "multi": false,
         "name": "group",
         "options": [],
         "query": {
@@ -3910,7 +3909,7 @@
     ]
   },
   "timezone": "browser",
-  "title": "Etcd Cluster Overview",
+  "title": "Etcd Cluster Overview v2.0.0",
   "uid": "etcd_cluster",
   "version": 3,
   "weekStart": ""
