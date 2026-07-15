@@ -1,0 +1,358 @@
+{
+  "__inputs": [],
+  "__requires": [
+    { "type": "grafana", "id": "grafana", "name": "Grafana", "version": "12.0.0" },
+    { "type": "datasource", "id": "prometheus", "name": "Prometheus", "version": "1.0.0" },
+    { "type": "panel", "id": "table", "name": "Table", "version": "" },
+    { "type": "panel", "id": "timeseries", "name": "Time series", "version": "" }
+  ],
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "datasource", "uid": "grafana" },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "target": { "limit": 100, "matchAny": false, "tags": [], "type": "dashboard" },
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "redis_exporter overview for multiple Redis instances",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "datasource": { "type": "prometheus", "uid": "$datasource" },
+      "description": "One row per selected Redis instance.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "custom": { "align": "auto", "cellOptions": { "type": "auto" }, "inspect": false },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "State" },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  { "options": { "0": { "color": "red", "index": 1, "text": "DOWN" }, "1": { "color": "green", "index": 0, "text": "UP" } }, "type": "value" }
+                ]
+              },
+              { "id": "custom.cellOptions", "value": { "mode": "basic", "type": "color-background" } }
+            ]
+          },
+          { "matcher": { "id": "byName", "options": "Uptime" }, "properties": [{ "id": "unit", "value": "s" }] },
+          { "matcher": { "id": "byName", "options": "Ops/sec" }, "properties": [{ "id": "unit", "value": "ops" }, { "id": "decimals", "value": 1 }] },
+          { "matcher": { "id": "byName", "options": "Memory used" }, "properties": [{ "id": "unit", "value": "bytes" }] },
+          { "matcher": { "id": "byName", "options": "Hit rate" }, "properties": [{ "id": "unit", "value": "percent" }, { "id": "min", "value": 0 }, { "id": "max", "value": 100 }, { "id": "decimals", "value": 1 }] },
+          { "matcher": { "id": "byName", "options": "Evictions/sec" }, "properties": [{ "id": "unit", "value": "ops" }, { "id": "decimals", "value": 2 }] }
+        ]
+      },
+      "gridPos": { "h": 11, "w": 24, "x": 0, "y": 0 },
+      "id": 1,
+      "options": {
+        "cellHeight": "sm",
+        "footer": { "countRows": false, "fields": "", "reducer": ["sum"], "show": false },
+        "showHeader": true,
+        "sortBy": [{ "desc": false, "displayName": "Instance" }]
+      },
+      "pluginVersion": "12.0.0",
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "$datasource" }, "editorMode": "code", "expr": "max by (instance, role, redis_version, maxmemory_policy) (redis_instance_info{instance=~\"$instance\"})", "format": "table", "instant": true, "legendFormat": "__auto", "range": false, "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "$datasource" }, "editorMode": "code", "expr": "max by (instance) (redis_up{instance=~\"$instance\"})", "format": "table", "instant": true, "legendFormat": "__auto", "range": false, "refId": "B" },
+        { "datasource": { "type": "prometheus", "uid": "$datasource" }, "editorMode": "code", "expr": "max by (instance) (redis_uptime_in_seconds{instance=~\"$instance\"})", "format": "table", "instant": true, "legendFormat": "__auto", "range": false, "refId": "C" },
+        { "datasource": { "type": "prometheus", "uid": "$datasource" }, "editorMode": "code", "expr": "sum by (instance) (rate(redis_commands_processed_total{instance=~\"$instance\"}[$interval]))", "format": "table", "instant": true, "legendFormat": "__auto", "range": false, "refId": "D" },
+        { "datasource": { "type": "prometheus", "uid": "$datasource" }, "editorMode": "code", "expr": "max by (instance) (redis_connected_clients{instance=~\"$instance\"})", "format": "table", "instant": true, "legendFormat": "__auto", "range": false, "refId": "E" },
+        { "datasource": { "type": "prometheus", "uid": "$datasource" }, "editorMode": "code", "expr": "sum by (instance) (redis_db_keys{instance=~\"$instance\"})", "format": "table", "instant": true, "legendFormat": "__auto", "range": false, "refId": "F" },
+        { "datasource": { "type": "prometheus", "uid": "$datasource" }, "editorMode": "code", "expr": "max by (instance) (redis_memory_used_bytes{instance=~\"$instance\"})", "format": "table", "instant": true, "legendFormat": "__auto", "range": false, "refId": "G" },
+        { "datasource": { "type": "prometheus", "uid": "$datasource" }, "editorMode": "code", "expr": "100 * sum by (instance) (rate(redis_keyspace_hits_total{instance=~\"$instance\"}[$interval])) / clamp_min(sum by (instance) (rate(redis_keyspace_hits_total{instance=~\"$instance\"}[$interval])) + sum by (instance) (rate(redis_keyspace_misses_total{instance=~\"$instance\"}[$interval])), 1e-9)", "format": "table", "instant": true, "legendFormat": "__auto", "range": false, "refId": "H" },
+        { "datasource": { "type": "prometheus", "uid": "$datasource" }, "editorMode": "code", "expr": "sum by (instance) (rate(redis_evicted_keys_total{instance=~\"$instance\"}[$interval]))", "format": "table", "instant": true, "legendFormat": "__auto", "range": false, "refId": "I" },
+        { "datasource": { "type": "prometheus", "uid": "$datasource" }, "editorMode": "code", "expr": "max by (instance) (redis_config_maxclients{instance=~\"$instance\"})", "format": "table", "instant": true, "legendFormat": "__auto", "range": false, "refId": "J" }
+      ],
+      "title": "Redis instances overview",
+      "transformations": [
+        { "id": "joinByField", "options": { "byField": "instance", "mode": "outerTabular" } },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": { "Time": true, "Time 1": true, "Time 2": true, "Time 3": true, "Time 4": true, "Time 5": true, "Time 6": true, "Time 7": true, "Time 8": true, "Time 9": true, "Value #A": true },
+            "indexByName": { "instance": 0, "Value #B": 1, "role": 2, "redis_version": 3, "maxmemory_policy": 4, "Value #C": 5, "Value #D": 6, "Value #E": 7, "Value #J": 8, "Value #F": 9, "Value #G": 10, "Value #H": 11, "Value #I": 12 },
+            "renameByName": { "instance": "Instance", "Value #B": "State", "role": "Role", "redis_version": "Version", "maxmemory_policy": "Maxmemory policy", "Value #C": "Uptime", "Value #D": "Ops/sec", "Value #E": "Clients", "Value #J": "Max clients", "Value #F": "Keys", "Value #G": "Memory used", "Value #H": "Hit rate", "Value #I": "Evictions/sec" }
+          }
+        }
+      ],
+      "type": "table"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "$datasource" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "axisCenteredZero": false, "axisColorMode": "text", "axisLabel": "", "axisPlacement": "auto", "barAlignment": 0, "drawStyle": "line", "fillOpacity": 10, "gradientMode": "none", "hideFrom": { "legend": false, "tooltip": false, "viz": false }, "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5, "scaleDistribution": { "type": "linear" }, "showPoints": "never", "spanNulls": false, "stacking": { "group": "A", "mode": "none" }, "thresholdsStyle": { "mode": "off" } }, "mappings": [], "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }, "unit": "ops" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 11 },
+      "id": 2,
+      "options": { "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "right", "showLegend": true, "sortBy": "Max", "sortDesc": true }, "tooltip": { "hideZeros": false, "mode": "multi", "sort": "desc" } },
+      "targets": [{ "datasource": { "type": "prometheus", "uid": "$datasource" }, "editorMode": "code", "expr": "sum by (instance) (rate(redis_commands_processed_total{instance=~\"$instance\"}[$interval]))", "legendFormat": "{{instance}}", "range": true, "refId": "A" }],
+      "title": "Operations per second",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "$datasource" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "axisCenteredZero": false, "axisColorMode": "text", "axisLabel": "", "axisPlacement": "auto", "barAlignment": 0, "drawStyle": "line", "fillOpacity": 10, "gradientMode": "none", "hideFrom": { "legend": false, "tooltip": false, "viz": false }, "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5, "scaleDistribution": { "type": "linear" }, "showPoints": "never", "spanNulls": false, "stacking": { "group": "A", "mode": "none" }, "thresholdsStyle": { "mode": "off" } }, "mappings": [], "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }, "unit": "bytes" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 11 },
+      "id": 3,
+      "options": { "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "right", "showLegend": true, "sortBy": "Max", "sortDesc": true }, "tooltip": { "hideZeros": false, "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "$datasource" }, "editorMode": "code", "expr": "redis_memory_used_bytes{instance=~\"$instance\"}", "legendFormat": "{{instance}} used", "range": true, "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "$datasource" }, "editorMode": "code", "expr": "redis_memory_used_rss_bytes{instance=~\"$instance\"}", "legendFormat": "{{instance}} RSS", "range": true, "refId": "B" }
+      ],
+      "title": "Memory usage",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "$datasource" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "axisCenteredZero": false, "axisColorMode": "text", "axisLabel": "", "axisPlacement": "auto", "barAlignment": 0, "drawStyle": "line", "fillOpacity": 10, "gradientMode": "none", "hideFrom": { "legend": false, "tooltip": false, "viz": false }, "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5, "scaleDistribution": { "type": "linear" }, "showPoints": "never", "spanNulls": false, "stacking": { "group": "A", "mode": "none" }, "thresholdsStyle": { "mode": "off" } }, "mappings": [], "max": 100, "min": 0, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }, "unit": "percent" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 19 },
+      "id": 4,
+      "options": { "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "right", "showLegend": true, "sortBy": "Max", "sortDesc": true }, "tooltip": { "hideZeros": false, "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "$datasource" }, "editorMode": "code", "expr": "100 * (rate(redis_cpu_sys_children_seconds_total{instance=~\"$instance\"}[$interval]) + rate(redis_cpu_sys_seconds_total{instance=~\"$instance\"}[$interval]))", "legendFormat": "{{instance}} system", "range": true, "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "$datasource" }, "editorMode": "code", "expr": "100 * (rate(redis_cpu_user_children_seconds_total{instance=~\"$instance\"}[$interval]) + rate(redis_cpu_user_seconds_total{instance=~\"$instance\"}[$interval]))", "legendFormat": "{{instance}} user", "range": true, "refId": "B" }
+      ],
+      "title": "CPU utilization",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "$datasource" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "axisCenteredZero": false, "axisColorMode": "text", "axisLabel": "", "axisPlacement": "auto", "barAlignment": 0, "drawStyle": "line", "fillOpacity": 10, "gradientMode": "none", "hideFrom": { "legend": false, "tooltip": false, "viz": false }, "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5, "scaleDistribution": { "type": "linear" }, "showPoints": "never", "spanNulls": false, "stacking": { "group": "A", "mode": "none" }, "thresholdsStyle": { "mode": "off" } }, "mappings": [], "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }, "unit": "Bps" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 19 },
+      "id": 5,
+      "options": { "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "right", "showLegend": true, "sortBy": "Max", "sortDesc": true }, "tooltip": { "hideZeros": false, "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "$datasource" }, "editorMode": "code", "expr": "rate(redis_net_input_bytes_total{instance=~\"$instance\"}[$interval])", "legendFormat": "{{instance}} inbound", "range": true, "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "$datasource" }, "editorMode": "code", "expr": "rate(redis_net_output_bytes_total{instance=~\"$instance\"}[$interval])", "legendFormat": "{{instance}} outbound", "range": true, "refId": "B" }
+      ],
+      "title": "Network throughput",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "$datasource" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "axisCenteredZero": false, "axisColorMode": "text", "axisLabel": "", "axisPlacement": "auto", "barAlignment": 0, "drawStyle": "line", "fillOpacity": 10, "gradientMode": "none", "hideFrom": { "legend": false, "tooltip": false, "viz": false }, "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5, "scaleDistribution": { "type": "linear" }, "showPoints": "never", "spanNulls": false, "stacking": { "group": "A", "mode": "none" }, "thresholdsStyle": { "mode": "off" } }, "mappings": [], "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }, "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 27 },
+      "id": 6,
+      "options": { "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "right", "showLegend": true, "sortBy": "Max", "sortDesc": true }, "tooltip": { "hideZeros": false, "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "$datasource" }, "editorMode": "code", "expr": "redis_connected_clients{instance=~\"$instance\"}", "legendFormat": "{{instance}} connected", "range": true, "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "$datasource" }, "editorMode": "code", "expr": "redis_blocked_clients{instance=~\"$instance\"}", "legendFormat": "{{instance}} blocked", "range": true, "refId": "B" },
+        { "datasource": { "type": "prometheus", "uid": "$datasource" }, "editorMode": "code", "expr": "rate(redis_rejected_connections_total{instance=~\"$instance\"}[$interval])", "legendFormat": "{{instance}} rejected/sec", "range": true, "refId": "C" },
+        { "datasource": { "type": "prometheus", "uid": "$datasource" }, "editorMode": "code", "expr": "redis_config_maxclients{instance=~\"$instance\"}", "legendFormat": "{{instance}} max clients", "range": true, "refId": "D" }
+      ],
+      "title": "Clients and rejected connections",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "$datasource" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "axisCenteredZero": false, "axisColorMode": "text", "axisLabel": "", "axisPlacement": "auto", "barAlignment": 0, "drawStyle": "line", "fillOpacity": 10, "gradientMode": "none", "hideFrom": { "legend": false, "tooltip": false, "viz": false }, "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5, "scaleDistribution": { "type": "linear" }, "showPoints": "never", "spanNulls": false, "stacking": { "group": "A", "mode": "none" }, "thresholdsStyle": { "mode": "off" } }, "mappings": [], "max": 100, "min": 0, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }, "unit": "percent" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 27 },
+      "id": 7,
+      "options": { "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "right", "showLegend": true, "sortBy": "Max", "sortDesc": true }, "tooltip": { "hideZeros": false, "mode": "multi", "sort": "desc" } },
+      "targets": [{ "datasource": { "type": "prometheus", "uid": "$datasource" }, "editorMode": "code", "expr": "100 * sum by (instance) (rate(redis_keyspace_hits_total{instance=~\"$instance\"}[$interval])) / clamp_min(sum by (instance) (rate(redis_keyspace_hits_total{instance=~\"$instance\"}[$interval])) + sum by (instance) (rate(redis_keyspace_misses_total{instance=~\"$instance\"}[$interval])), 1e-9)", "legendFormat": "{{instance}}", "range": true, "refId": "A" }],
+      "title": "Keyspace hit rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "$datasource" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "axisCenteredZero": false, "axisColorMode": "text", "axisLabel": "", "axisPlacement": "auto", "barAlignment": 0, "drawStyle": "line", "fillOpacity": 10, "gradientMode": "none", "hideFrom": { "legend": false, "tooltip": false, "viz": false }, "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5, "scaleDistribution": { "type": "linear" }, "showPoints": "never", "spanNulls": false, "stacking": { "group": "A", "mode": "none" }, "thresholdsStyle": { "mode": "off" } }, "mappings": [], "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }, "unit": "ops" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 35 },
+      "id": 8,
+      "options": { "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "right", "showLegend": true, "sortBy": "Max", "sortDesc": true }, "tooltip": { "hideZeros": false, "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "$datasource" }, "editorMode": "code", "expr": "rate(redis_expired_keys_total{instance=~\"$instance\"}[$interval])", "legendFormat": "{{instance}} expired", "range": true, "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "$datasource" }, "editorMode": "code", "expr": "rate(redis_evicted_keys_total{instance=~\"$instance\"}[$interval])", "legendFormat": "{{instance}} evicted", "range": true, "refId": "B" }
+      ],
+      "title": "Expired and evicted keys",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "$datasource" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "axisCenteredZero": false, "axisColorMode": "text", "axisLabel": "", "axisPlacement": "auto", "barAlignment": 0, "drawStyle": "line", "fillOpacity": 10, "gradientMode": "none", "hideFrom": { "legend": false, "tooltip": false, "viz": false }, "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5, "scaleDistribution": { "type": "linear" }, "showPoints": "never", "spanNulls": false, "stacking": { "group": "A", "mode": "none" }, "thresholdsStyle": { "mode": "off" } }, "mappings": [], "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }, "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 35 },
+      "id": 9,
+      "options": { "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "right", "showLegend": true, "sortBy": "Max", "sortDesc": true }, "tooltip": { "hideZeros": false, "mode": "multi", "sort": "desc" } },
+      "targets": [{ "datasource": { "type": "prometheus", "uid": "$datasource" }, "editorMode": "code", "expr": "redis_db_keys{instance=~\"$instance\"}", "legendFormat": "{{instance}} {{db}}", "range": true, "refId": "A" }],
+      "title": "Keys per database",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "$datasource" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "axisCenteredZero": false, "axisColorMode": "text", "axisLabel": "", "axisPlacement": "auto", "barAlignment": 0, "drawStyle": "line", "fillOpacity": 10, "gradientMode": "none", "hideFrom": { "legend": false, "tooltip": false, "viz": false }, "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5, "scaleDistribution": { "type": "linear" }, "showPoints": "never", "spanNulls": false, "stacking": { "group": "A", "mode": "none" }, "thresholdsStyle": { "mode": "off" } }, "mappings": [], "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }, "unit": "ops" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 43 },
+      "id": 10,
+      "options": { "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "right", "showLegend": true, "sortBy": "Max", "sortDesc": true }, "tooltip": { "hideZeros": false, "mode": "multi", "sort": "desc" } },
+      "targets": [{ "datasource": { "type": "prometheus", "uid": "$datasource" }, "editorMode": "code", "expr": "topk(10, sum by (instance, cmd) (rate(redis_commands_total{instance=~\"$instance\"}[$interval])))", "legendFormat": "{{instance}} {{cmd}}", "range": true, "refId": "A" }],
+      "title": "Top commands",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "$datasource" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "axisCenteredZero": false, "axisColorMode": "text", "axisLabel": "", "axisPlacement": "auto", "barAlignment": 0, "drawStyle": "line", "fillOpacity": 10, "gradientMode": "none", "hideFrom": { "legend": false, "tooltip": false, "viz": false }, "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5, "scaleDistribution": { "type": "linear" }, "showPoints": "never", "spanNulls": false, "stacking": { "group": "A", "mode": "none" }, "thresholdsStyle": { "mode": "off" } }, "mappings": [], "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }, "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 43 },
+      "id": 11,
+      "options": { "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "right", "showLegend": true, "sortBy": "Max", "sortDesc": true }, "tooltip": { "hideZeros": false, "mode": "multi", "sort": "desc" } },
+      "targets": [{ "datasource": { "type": "prometheus", "uid": "$datasource" }, "editorMode": "code", "expr": "sum by (instance) (rate(redis_commands_duration_seconds_total{instance=~\"$instance\"}[$interval])) / clamp_min(sum by (instance) (rate(redis_commands_processed_total{instance=~\"$instance\"}[$interval])), 1e-9)", "legendFormat": "{{instance}}", "range": true, "refId": "A" }],
+      "title": "Average command response time",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "$datasource" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "axisCenteredZero": false, "axisColorMode": "text", "axisLabel": "", "axisPlacement": "auto", "barAlignment": 0, "drawStyle": "line", "fillOpacity": 10, "gradientMode": "none", "hideFrom": { "legend": false, "tooltip": false, "viz": false }, "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5, "scaleDistribution": { "type": "linear" }, "showPoints": "never", "spanNulls": false, "stacking": { "group": "A", "mode": "none" }, "thresholdsStyle": { "mode": "off" } }, "mappings": [], "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }, "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 51 },
+      "id": 13,
+      "options": { "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "right", "showLegend": true, "sortBy": "Max", "sortDesc": true }, "tooltip": { "hideZeros": false, "mode": "multi", "sort": "desc" } },
+      "targets": [{ "datasource": { "type": "prometheus", "uid": "$datasource" }, "editorMode": "code", "expr": "redis_db_avg_ttl_seconds{instance=~\"$instance\"}", "legendFormat": "{{instance}} {{db}}", "range": true, "refId": "A" }],
+      "title": "Average TTL per database",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "$datasource" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "axisCenteredZero": false, "axisColorMode": "text", "axisLabel": "", "axisPlacement": "auto", "barAlignment": 0, "drawStyle": "line", "fillOpacity": 10, "gradientMode": "none", "hideFrom": { "legend": false, "tooltip": false, "viz": false }, "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5, "scaleDistribution": { "type": "linear" }, "showPoints": "never", "spanNulls": false, "stacking": { "group": "A", "mode": "none" }, "thresholdsStyle": { "mode": "off" } }, "mappings": [], "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }, "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 51 },
+      "id": 12,
+      "options": { "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "right", "showLegend": true, "sortBy": "Max", "sortDesc": true }, "tooltip": { "hideZeros": false, "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "$datasource" }, "editorMode": "code", "expr": "rate(redis_connections_received_total{instance=~\"$instance\"}[$interval])", "legendFormat": "{{instance}} connections/sec", "range": true, "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "$datasource" }, "editorMode": "code", "expr": "redis_slowlog_length{instance=~\"$instance\"}", "legendFormat": "{{instance}} slowlog length", "range": true, "refId": "B" }
+      ],
+      "title": "Connections and slowlog",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "1m",
+  "schemaVersion": 41,
+  "tags": ["redis", "multi-instance"],
+  "templating": {
+    "list": [
+      {
+        "current": { "selected": false, "text": "prometheus", "value": "prometheus" },
+        "hide": 0,
+        "includeAll": false,
+        "label": "Datasource",
+        "multi": false,
+        "name": "datasource",
+        "options": [],
+        "query": "prometheus",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "datasource"
+      },
+      {
+        "allValue": ".*",
+        "current": {},
+        "datasource": { "type": "prometheus", "uid": "$datasource" },
+        "definition": "label_values(redis_commands_processed_total, job)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "job",
+        "multi": true,
+        "name": "job",
+        "options": [],
+        "query": { "query": "label_values(redis_commands_processed_total, job)", "refId": "StandardVariableQuery" },
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "allValue": ".*",
+        "current": {},
+        "datasource": { "type": "prometheus", "uid": "$datasource" },
+        "definition": "label_values(redis_commands_processed_total{job=~\"$job\"}, env)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "env",
+        "multi": true,
+        "name": "env",
+        "options": [],
+        "query": { "query": "label_values(redis_commands_processed_total{job=~\"$job\"}, env)", "refId": "StandardVariableQuery" },
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "allValue": ".*",
+        "current": {},
+        "datasource": { "type": "prometheus", "uid": "$datasource" },
+        "definition": "label_values(redis_commands_processed_total{job=~\"$job\",env=~\"$env\"}, group)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "group",
+        "multi": true,
+        "name": "group",
+        "options": [],
+        "query": { "query": "label_values(redis_commands_processed_total{job=~\"$job\",env=~\"$env\"}, group)", "refId": "StandardVariableQuery" },
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "current": {},
+        "datasource": { "type": "prometheus", "uid": "$datasource" },
+        "definition": "label_values(redis_commands_processed_total{job=~\"$job\",env=~\"$env\",group=~\"$group\"}, instance)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "instance",
+        "multi": true,
+        "name": "instance",
+        "options": [],
+        "query": { "query": "label_values(redis_commands_processed_total{job=~\"$job\",env=~\"$env\",group=~\"$group\"}, instance)", "refId": "StandardVariableQuery" },
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "current": { "selected": true, "text": "5m", "value": "5m" },
+        "datasource": { "type": "prometheus", "uid": "$datasource" },
+        "hide": 0,
+        "includeAll": false,
+        "label": "Interval",
+        "multi": false,
+        "name": "interval",
+        "options": [
+          { "selected": false, "text": "1m", "value": "1m" },
+          { "selected": false, "text": "2m", "value": "2m" },
+          { "selected": true, "text": "5m", "value": "5m" },
+          { "selected": false, "text": "15m", "value": "15m" },
+          { "selected": false, "text": "1h", "value": "1h" },
+          { "selected": false, "text": "6h", "value": "6h" },
+          { "selected": false, "text": "1d", "value": "1d" }
+        ],
+        "query": "1m, 2m, 5m, 15m, 1h, 6h, 1d",
+        "queryValue": "",
+        "skipUrlSync": false,
+        "type": "custom"
+      }
+    ]
+  },
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Redis Multi Overview v1.0.0",
+  "uid": "redis-multi-overview",
+  "version": 1,
+  "weekStart": ""
+}

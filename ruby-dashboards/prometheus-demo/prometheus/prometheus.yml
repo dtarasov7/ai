@@ -1,0 +1,12 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: ruby-prometheus-demo
+    static_configs:
+      - targets:
+          - prometheus-exporter:9394
+        labels:
+          env: test
+          group: common

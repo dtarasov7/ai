@@ -1,0 +1,145 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: prometheus_demo
+      POSTGRES_PASSWORD: prometheus_demo
+      POSTGRES_USER: prometheus_demo
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U prometheus_demo -d prometheus_demo"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7.2-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  prometheus-exporter:
+    image: rails-prometheus-demo:local
+    pull_policy: never
+    command:
+      - bundle
+      - exec
+      - prometheus_exporter
+      - --bind
+      - 0.0.0.0
+      - --port
+      - "9394"
+      - --histogram
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:9394/ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    ports:
+      - "9394:9394"
+
+  app:
+    build: .
+    image: rails-prometheus-demo:local
+    command: ["sh", "-c", "bundle exec rails db:prepare && bundle exec rails db:seed && bundle exec rails server -b 0.0.0.0 -p 3000"]
+    environment: &app-environment
+      DATABASE_URL: postgres://prometheus_demo:prometheus_demo@postgres:5432/prometheus_demo
+      PROMETHEUS_EXPORTER_HOST: prometheus-exporter
+      PROMETHEUS_EXPORTER_PORT: "9394"
+      RAILS_ENV: production
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY_BASE: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+    depends_on:
+      postgres:
+        condition: service_healthy
+      prometheus-exporter:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:3000/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    ports:
+      - "3000:3000"
+
+  sidekiq:
+    image: rails-prometheus-demo:local
+    pull_policy: never
+    command: ["bundle", "exec", "sidekiq", "-C", "config/sidekiq.yml"]
+    environment: *app-environment
+    depends_on:
+      app:
+        condition: service_healthy
+      prometheus-exporter:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  traffic:
+    image: rails-prometheus-demo:local
+    pull_policy: never
+    command:
+      - sh
+      - -ec
+      - |
+        i=0
+        while true; do
+          curl --fail --silent http://app:3000/fast >/dev/null
+          curl --fail --silent http://app:3000/slow >/dev/null
+          curl --silent http://app:3000/error >/dev/null
+          curl --fail --silent --request POST http://app:3000/jobs >/dev/null
+          i=$$((i + 1))
+          if [ $$((i % 5)) -eq 0 ]; then
+            curl --fail --silent --request POST 'http://app:3000/jobs?fail=1' >/dev/null
+          fi
+          sleep 1
+        done
+    depends_on:
+      app:
+        condition: service_healthy
+      sidekiq:
+        condition: service_started
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=24h
+    depends_on:
+      prometheus-exporter:
+        condition: service_healthy
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+
+  grafana:
+    image: grafana/grafana:12.0.2
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_SECURITY_ADMIN_USER: admin
+    depends_on:
+      - prometheus
+    ports:
+      - "3001:3000"
+    volumes:
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ../dashboards/Ruby On Rails Prometheus Overview.json:/var/lib/grafana/dashboards/rails-overview.json:ro
+      - ../dashboards/Ruby On Rails Prometheus Actions.json:/var/lib/grafana/dashboards/rails-actions.json:ro
+      - ../dashboards/Ruby On Rails Prometheus Sidekiq.json:/var/lib/grafana/dashboards/rails-sidekiq.json:ro
+      - grafana-data:/var/lib/grafana
+
+volumes:
+  grafana-data:
+  postgres-data:
+  prometheus-data:

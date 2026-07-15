@@ -1,0 +1,14 @@
+task default: %w[prepare]
+
+# rubocop:disable Layout/LineLength
+task :prepare do
+  sh "cat 'Ruby On Rails Performance.json' | sed 's/${DS_INFLUXDB-RAILS}/InfluxDB/g' > provisioning/performance.json"
+  sh "cat 'Ruby On Rails Performance per Request.json' | sed 's/${DS_INFLUXDB-RAILS}/InfluxDB/g' > provisioning/performance-request.json"
+  sh "cat 'Ruby On Rails Performance per Action.json' | sed 's/${DS_INFLUXDB-RAILS}/InfluxDB/g' > provisioning/performance-action.json"
+  sh "cat 'Ruby On Rails ActiveJob.json' | sed 's/${DS_INFLUXDB-RAILS}/InfluxDB/g' > provisioning/activejob.json"
+  sh "cat 'Ruby On Rails Requests.json' | sed 's/${DS_INFLUXDB-RAILS}/InfluxDB/g' > provisioning/requests.json"
+  sh "cat 'Ruby On Rails Slowlog by Action.json' | sed 's/${DS_INFLUXDB-RAILS}/InfluxDB/g' > provisioning/slowlog-action.json"
+  sh "cat 'Ruby On Rails Slowlog by Request.json' | sed 's/${DS_INFLUXDB-RAILS}/InfluxDB/g' > provisioning/slowlog-requests.json"
+  sh "cat 'Ruby On Rails Slowlog by SQL.json' | sed 's/${DS_INFLUXDB-RAILS}/InfluxDB/g' > provisioning/slowlog-sql.json"
+end
+# rubocop:enable Layout/LineLength

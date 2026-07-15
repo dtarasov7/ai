@@ -1,0 +1,121 @@
+inherit_from: .rubocop_todo.yml
+
+require:
+  - rubocop-rspec
+  - rubocop-rake
+
+AllCops:
+  Include:
+  - 'Rakefile'
+  - '*.gemspec'
+  - 'lib/**/*.rb'
+  - 'spec/**/*.rb'
+  Exclude:
+  - 'bin/**/*'
+  - 'smoke/**/*'
+  - 'Gemfile'
+  - 'vendor/bundle/**/*'
+  DisplayCopNames: true
+  StyleGuideCopsOnly: false
+  TargetRubyVersion: 3.0
+  NewCops: enable
+
+Gemspec/DevelopmentDependencies:
+  EnforcedStyle: gemspec
+
+Layout/EmptyLinesAroundArguments:
+  Enabled: false
+
+Layout/SpaceBeforeBlockBraces:
+  EnforcedStyleForEmptyBraces: space
+
+Layout/HashAlignment:
+  EnforcedColonStyle: table
+  EnforcedHashRocketStyle: table
+
+Metrics/AbcSize:
+  Max: 20
+
+Metrics/BlockLength:
+  Exclude:
+  - 'spec/**/*.rb'
+  - 'influxdb-rails.gemspec'
+
+Layout/LineLength:
+  Max: 100
+  Exclude:
+  - 'spec/**/*.rb'
+
+Metrics/ModuleLength:
+  CountComments: false  # count full line comments?
+  Max: 120
+
+Metrics/ParameterLists:
+  Max: 6
+
+Naming/MethodParameterName:
+  AllowedNames: [io, id, db, ex]
+
+Naming/FileName:
+  Exclude:
+  - lib/influxdb-rails.rb
+  - sample-dashboard/Rakefile
+
+Style/Documentation:
+  Enabled: false
+
+Style/FormatStringToken:
+  Enabled: false
+
+Style/FrozenStringLiteralComment:
+  Enabled: false
+
+Style/NumericPredicate:
+  Enabled: false
+
+Style/RescueModifier:
+  Enabled: false
+
+Style/StringLiterals:
+  EnforcedStyle: double_quotes
+
+Style/TrailingCommaInArrayLiteral:
+  EnforcedStyleForMultiline: comma
+  Exclude:
+  - "spec/**/*.rb"
+
+Style/TrailingCommaInHashLiteral:
+  EnforcedStyleForMultiline: comma
+  Exclude:
+  - "spec/**/*.rb"
+
+Lint/DuplicateBranch:
+  Enabled: true
+Lint/DuplicateRegexpCharacterClassElement:
+  Enabled: true
+Lint/EmptyBlock:
+  Enabled: true
+Lint/EmptyClass:
+  Enabled: true
+Lint/NoReturnInBeginEndBlocks:
+  Enabled: true
+Lint/ToEnumArguments:
+  Enabled: true
+Lint/UnexpectedBlockArity:
+  Enabled: true
+Lint/UnmodifiedReduceAccumulator:
+  Enabled: true
+Style/ArgumentsForwarding:
+  Enabled: true
+Style/CollectionCompact:
+  Enabled: true
+Style/DocumentDynamicEvalDefinition:
+  Enabled: true
+Style/NegatedIfElseCondition:
+  Enabled: true
+Style/NilLambda:
+  Enabled: true
+Style/RedundantArgument:
+  Enabled: true
+Style/SwapValues:
+  Enabled: true

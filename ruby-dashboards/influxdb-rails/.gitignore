@@ -1,0 +1,11 @@
+.bundle
+.rvmrc
+*.gem
+Gemfile.lock
+Gemfile.local
+gemfiles/*.lock
+pkg/*
+spec/support/rails*/log/*
+.ruby-*
+vendor/bundle
+tmp
