@@ -15,7 +15,7 @@
       }
     ]
   },
-  "description": "Ruby on Rails HTTP overview for the standard prometheus_exporter Rails metrics. Percentile panels support both histogram and summary modes. Kubernetes edition filtered by namespace and pod target labels.",
+  "description": "Kubernetes dashboard for AnyCable RPC metrics exported by yabeda-anycable. Filters follow datasource → job → namespace → service → pod.",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -71,7 +71,7 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 4,
+        "w": 6,
         "x": 0,
         "y": 0
       },
@@ -98,10 +98,9 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "count(count by (namespace, pod) (ruby_http_requests_total{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\"}))",
-          "instant": true,
+          "expr": "count(count by (namespace, pod) (anycable_rpc_call_count{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",method=~\"$method\",command=~\"$command\",status=~\"$status\"}))",
           "legendFormat": "Pods",
-          "range": false,
+          "range": true,
           "refId": "A"
         }
       ],
@@ -134,8 +133,8 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 4,
-        "x": 4,
+        "w": 6,
+        "x": 6,
         "y": 0
       },
       "id": 2,
@@ -161,14 +160,13 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "sum(increase(ruby_http_requests_total{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\"}[$__range]))",
-          "instant": true,
-          "legendFormat": "Requests",
-          "range": false,
+          "expr": "sum(increase(anycable_rpc_call_count{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",method=~\"$method\",command=~\"$command\",status=~\"$status\"}[$__range]))",
+          "legendFormat": "Calls",
+          "range": true,
           "refId": "A"
         }
       ],
-      "title": "Requests in range",
+      "title": "RPC calls in range",
       "type": "stat"
     },
     {
@@ -207,8 +205,8 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 4,
-        "x": 8,
+        "w": 6,
+        "x": 12,
         "y": 0
       },
       "id": 3,
@@ -234,85 +232,13 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "100 * sum(increase(ruby_http_requests_total{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",status=~\"5..\"}[$__range])) / clamp_min(sum(increase(ruby_http_requests_total{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\"}[$__range])), 1)",
-          "instant": true,
-          "legendFormat": "5xx",
-          "range": false,
+          "expr": "100 * sum(increase(anycable_rpc_call_count{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",method=~\"$method\",command=~\"$command\",status=~\"FAILURE|ERROR\"}[$__range])) / clamp_min(sum(increase(anycable_rpc_call_count{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",method=~\"$method\",command=~\"$command\"}[$__range])), 1)",
+          "legendFormat": "Errors",
+          "range": true,
           "refId": "A"
         }
       ],
-      "title": "Server error rate",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$datasource"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 0.5
-              },
-              {
-                "color": "red",
-                "value": 1
-              }
-            ]
-          },
-          "unit": "s"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 4,
-        "x": 12,
-        "y": 0
-      },
-      "id": 4,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto",
-        "wideLayout": true
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$datasource"
-          },
-          "editorMode": "code",
-          "expr": "sum(rate(ruby_http_request_duration_seconds_sum{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\"}[$__rate_interval])) / clamp_min(sum(rate(ruby_http_request_duration_seconds_count{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\"}[$__rate_interval])), 1e-9)",
-          "instant": true,
-          "legendFormat": "Average",
-          "range": false,
-          "refId": "A"
-        }
-      ],
-      "title": "Average request duration",
+      "title": "RPC error rate",
       "type": "stat"
     },
     {
@@ -349,11 +275,11 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 4,
-        "x": 16,
+        "w": 6,
+        "x": 18,
         "y": 0
       },
-      "id": 5,
+      "id": 4,
       "options": {
         "colorMode": "value",
         "graphMode": "area",
@@ -376,86 +302,13 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(ruby_http_request_duration_seconds_bucket{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\"}[$__rate_interval]))) or max(ruby_http_request_duration_seconds{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",quantile=\"0.95\"})",
-          "instant": true,
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(anycable_rpc_call_runtime_seconds_bucket{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",method=~\"$method\",command=~\"$command\",status=~\"$status\"}[$__rate_interval])))",
           "legendFormat": "P95",
-          "range": false,
+          "range": true,
           "refId": "A"
         }
       ],
-      "title": "P95 request duration",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$datasource"
-      },
-      "description": "Available when prometheus_exporter SQL instrumentation is active.",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 0.25
-              },
-              {
-                "color": "red",
-                "value": 0.5
-              }
-            ]
-          },
-          "unit": "s"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 4,
-        "x": 20,
-        "y": 0
-      },
-      "id": 6,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto",
-        "wideLayout": true
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$datasource"
-          },
-          "editorMode": "code",
-          "expr": "sum(rate(ruby_http_request_sql_duration_seconds_sum{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\"}[$__rate_interval])) / clamp_min(sum(rate(ruby_http_request_sql_duration_seconds_count{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\"}[$__rate_interval])), 1e-9)",
-          "instant": true,
-          "legendFormat": "SQL average",
-          "range": false,
-          "refId": "A"
-        }
-      ],
-      "title": "Average SQL duration",
+      "title": "P95 RPC runtime",
       "type": "stat"
     },
     {
@@ -468,7 +321,7 @@
           "color": {
             "mode": "palette-classic"
           },
-          "unit": "reqps"
+          "unit": "ops"
         },
         "overrides": []
       },
@@ -477,6 +330,138 @@
         "w": 12,
         "x": 0,
         "y": 4
+      },
+      "id": 5,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "sortBy": "Max",
+          "sortDesc": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "editorMode": "code",
+          "expr": "sum by (method, command, status) (rate(anycable_rpc_call_count{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",method=~\"$method\",command=~\"$command\",status=~\"$status\"}[$__rate_interval]))",
+          "legendFormat": "{{method}} {{command}} {{status}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "RPC throughput by status",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 4
+      },
+      "id": 6,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "sortBy": "Max",
+          "sortDesc": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.50, sum by (le, method, command) (rate(anycable_rpc_call_runtime_seconds_bucket{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",method=~\"$method\",command=~\"$command\",status=~\"$status\"}[$__rate_interval])))",
+          "legendFormat": "P50 {{method}} {{command}}",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.95, sum by (le, method, command) (rate(anycable_rpc_call_runtime_seconds_bucket{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",method=~\"$method\",command=~\"$command\",status=~\"$status\"}[$__rate_interval])))",
+          "legendFormat": "P95 {{method}} {{command}}",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.99, sum by (le, method, command) (rate(anycable_rpc_call_runtime_seconds_bucket{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",method=~\"$method\",command=~\"$command\",status=~\"$status\"}[$__rate_interval])))",
+          "legendFormat": "P99 {{method}} {{command}}",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "RPC runtime percentiles",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 12
       },
       "id": 7,
       "options": {
@@ -504,298 +489,23 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "sum(rate(ruby_http_requests_total{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",status=~\"2..|3..\"}[$__rate_interval]))",
-          "legendFormat": "2xx/3xx",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$datasource"
-          },
-          "editorMode": "code",
-          "expr": "sum(rate(ruby_http_requests_total{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",status=~\"4..\"}[$__rate_interval]))",
-          "legendFormat": "4xx",
-          "range": true,
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$datasource"
-          },
-          "editorMode": "code",
-          "expr": "sum(rate(ruby_http_requests_total{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",status=~\"5..\"}[$__rate_interval]))",
-          "legendFormat": "5xx",
-          "range": true,
-          "refId": "C"
-        }
-      ],
-      "title": "Request rate by response class",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$datasource"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "unit": "s"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 4
-      },
-      "id": 8,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true,
-          "sortBy": "Max",
-          "sortDesc": true
-        },
-        "tooltip": {
-          "hideZeros": false,
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$datasource"
-          },
-          "editorMode": "code",
-          "expr": "histogram_quantile(0.50, sum by (le) (rate(ruby_http_request_duration_seconds_bucket{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\"}[$__rate_interval]))) or max(ruby_http_request_duration_seconds{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",quantile=\"0.5\"})",
-          "legendFormat": "P50",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$datasource"
-          },
-          "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(ruby_http_request_duration_seconds_bucket{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\"}[$__rate_interval]))) or max(ruby_http_request_duration_seconds{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",quantile=\"0.95\"})",
-          "legendFormat": "P95",
-          "range": true,
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$datasource"
-          },
-          "editorMode": "code",
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(ruby_http_request_duration_seconds_bucket{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\"}[$__rate_interval]))) or max(ruby_http_request_duration_seconds{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",quantile=\"0.99\"})",
-          "legendFormat": "P99",
-          "range": true,
-          "refId": "C"
-        }
-      ],
-      "title": "Request duration percentiles",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$datasource"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "unit": "s"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 12
-      },
-      "id": 9,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true,
-          "sortBy": "Max",
-          "sortDesc": true
-        },
-        "tooltip": {
-          "hideZeros": false,
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$datasource"
-          },
-          "editorMode": "code",
-          "expr": "sum(rate(ruby_http_request_duration_seconds_sum{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\"}[$__rate_interval])) / clamp_min(sum(rate(ruby_http_request_duration_seconds_count{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\"}[$__rate_interval])), 1e-9)",
-          "legendFormat": "Request",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$datasource"
-          },
-          "editorMode": "code",
-          "expr": "sum(rate(ruby_http_request_sql_duration_seconds_sum{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\"}[$__rate_interval])) / clamp_min(sum(rate(ruby_http_request_sql_duration_seconds_count{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\"}[$__rate_interval])), 1e-9)",
-          "legendFormat": "SQL",
-          "range": true,
-          "refId": "B"
-        }
-      ],
-      "title": "Average request and SQL duration",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$datasource"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "unit": "reqps"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 12
-      },
-      "id": 10,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true,
-          "sortBy": "Max",
-          "sortDesc": true
-        },
-        "tooltip": {
-          "hideZeros": false,
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$datasource"
-          },
-          "editorMode": "code",
-          "expr": "topk(10, sum by (controller, action) (rate(ruby_http_requests_total{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\"}[$interval])))",
-          "legendFormat": "{{controller}}#{{action}}",
+          "expr": "topk(15, sum by (method, command) (rate(anycable_rpc_call_count{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",method=~\"$method\",command=~\"$command\",status=~\"$status\"}[$interval])))",
+          "legendFormat": "{{method}} {{command}}",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Busiest controller actions over $interval",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$datasource"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "unit": "reqps"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 24,
-        "x": 0,
-        "y": 20
-      },
-      "id": 11,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true,
-          "sortBy": "Max",
-          "sortDesc": true
-        },
-        "tooltip": {
-          "hideZeros": false,
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$datasource"
-          },
-          "editorMode": "code",
-          "expr": "topk(10, sum by (controller, action, status) (rate(ruby_http_requests_total{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",status=~\"5..\"}[$interval])))",
-          "legendFormat": "{{controller}}#{{action}} HTTP {{status}}",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "Server errors by action over $interval",
+      "title": "Top RPC commands over $interval",
       "type": "timeseries"
     }
   ],
   "refresh": "30s",
   "schemaVersion": 41,
   "tags": [
+    "AnyCable",
     "Kubernetes",
     "Prometheus",
-    "Ruby on Rails",
-    "prometheus_exporter"
+    "Yabeda"
   ],
   "templating": {
     "list": [
@@ -832,14 +542,14 @@
           "type": "prometheus",
           "uid": "$datasource"
         },
-        "definition": "label_values(ruby_http_requests_total, job)",
+        "definition": "label_values(anycable_rpc_call_count, job)",
         "hide": 0,
         "includeAll": true,
         "label": "Job",
         "multi": true,
         "name": "job",
         "options": [],
-        "query": "label_values(ruby_http_requests_total, job)",
+        "query": "label_values(anycable_rpc_call_count, job)",
         "refresh": 1,
         "regex": "",
         "skipUrlSync": false,
@@ -861,14 +571,14 @@
           "type": "prometheus",
           "uid": "$datasource"
         },
-        "definition": "label_values(ruby_http_requests_total{job=~\"$job\"}, namespace)",
+        "definition": "label_values(anycable_rpc_call_count{job=~\"$job\"}, namespace)",
         "hide": 0,
         "includeAll": true,
         "label": "Namespace",
         "multi": true,
         "name": "namespace",
         "options": [],
-        "query": "label_values(ruby_http_requests_total{job=~\"$job\"}, namespace)",
+        "query": "label_values(anycable_rpc_call_count{job=~\"$job\"}, namespace)",
         "refresh": 1,
         "regex": "",
         "skipUrlSync": false,
@@ -890,14 +600,14 @@
           "type": "prometheus",
           "uid": "$datasource"
         },
-        "definition": "label_values(ruby_http_requests_total{job=~\"$job\",namespace=~\"$namespace\"}, service)",
+        "definition": "label_values(anycable_rpc_call_count{job=~\"$job\",namespace=~\"$namespace\"}, service)",
         "hide": 0,
         "includeAll": true,
         "label": "Service",
         "multi": true,
         "name": "service",
         "options": [],
-        "query": "label_values(ruby_http_requests_total{job=~\"$job\",namespace=~\"$namespace\"}, service)",
+        "query": "label_values(anycable_rpc_call_count{job=~\"$job\",namespace=~\"$namespace\"}, service)",
         "refresh": 1,
         "regex": "",
         "skipUrlSync": false,
@@ -918,14 +628,101 @@
           "type": "prometheus",
           "uid": "$datasource"
         },
-        "definition": "label_values(ruby_http_requests_total{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\"}, pod)",
+        "definition": "label_values(anycable_rpc_call_count{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\"}, pod)",
         "hide": 0,
         "includeAll": true,
         "label": "Pod",
         "multi": true,
         "name": "pod",
         "options": [],
-        "query": "label_values(ruby_http_requests_total{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\"}, pod)",
+        "query": "label_values(anycable_rpc_call_count{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\"}, pod)",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "$datasource"
+        },
+        "definition": "label_values(anycable_rpc_call_count{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\"}, method)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Method",
+        "multi": true,
+        "name": "method",
+        "options": [],
+        "query": "label_values(anycable_rpc_call_count{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\"}, method)",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "$datasource"
+        },
+        "definition": "label_values(anycable_rpc_call_count{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",method=~\"$method\"}, command)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Command",
+        "multi": true,
+        "name": "command",
+        "options": [],
+        "query": "label_values(anycable_rpc_call_count{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",method=~\"$method\"}, command)",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "$datasource"
+        },
+        "definition": "label_values(anycable_rpc_call_count{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",method=~\"$method\",command=~\"$command\"}, status)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Status",
+        "multi": true,
+        "name": "status",
+        "options": [],
+        "query": "label_values(anycable_rpc_call_count{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",method=~\"$method\",command=~\"$command\"}, status)",
         "refresh": 1,
         "regex": "",
         "skipUrlSync": false,
@@ -996,8 +793,8 @@
   },
   "timepicker": {},
   "timezone": "browser",
-  "title": "Ruby on Rails Kubernetes Prometheus Overview",
-  "uid": "rails-kubernetes-prometheus-overview",
+  "title": "Yabeda AnyCable Kubernetes",
+  "uid": "yabeda-anycable-kubernetes",
   "version": 1,
   "weekStart": ""
 }

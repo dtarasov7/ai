@@ -4,5 +4,6 @@ threads threads_count, threads_count
 port ENV.fetch("PORT", 3000)
 environment ENV.fetch("RAILS_ENV", "production")
 
+activate_control_app
+plugin :yabeda
 plugin :tmp_restart
-

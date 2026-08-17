@@ -15,7 +15,7 @@
       }
     ]
   },
-  "description": "Sidekiq overview for prometheus_exporter instrumentation: jobs, failures, duration, queues, and worker utilization. Kubernetes edition filtered by namespace and pod target labels.",
+  "description": "Kubernetes dashboard for Yabeda Rails metrics scraped by Prometheus. Filters follow datasource → job → namespace → service → pod.",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -28,9 +28,9 @@
       "keepTime": true,
       "tags": [],
       "targetBlank": false,
-      "title": "HTTP Overview",
+      "title": "Controller Actions",
       "type": "link",
-      "url": "/d/rails-prometheus-overview"
+      "url": "/d/rails-prometheus-actions"
     },
     {
       "asDropdown": false,
@@ -39,9 +39,9 @@
       "keepTime": true,
       "tags": [],
       "targetBlank": false,
-      "title": "Controller Actions",
+      "title": "Sidekiq",
       "type": "link",
-      "url": "/d/rails-prometheus-actions"
+      "url": "/d/rails-prometheus-sidekiq"
     }
   ],
   "panels": [
@@ -78,7 +78,7 @@
       "id": 1,
       "options": {
         "colorMode": "value",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
@@ -98,14 +98,14 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "sum(increase(ruby_sidekiq_jobs_total{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",queue=~\"$queue\",job_name=~\"$job_name\"}[$__range]))",
+          "expr": "count(count by (namespace, pod) (rails_requests_total{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\"}))",
           "instant": true,
-          "legendFormat": "Jobs",
+          "legendFormat": "Pods",
           "range": false,
           "refId": "A"
         }
       ],
-      "title": "Jobs completed in range",
+      "title": "Active pods",
       "type": "stat"
     },
     {
@@ -125,10 +125,6 @@
               {
                 "color": "green",
                 "value": null
-              },
-              {
-                "color": "red",
-                "value": 1
               }
             ]
           },
@@ -165,14 +161,14 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "sum(increase(ruby_sidekiq_failed_jobs_total{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",queue=~\"$queue\",job_name=~\"$job_name\"}[$__range]))",
+          "expr": "sum(increase(rails_requests_total{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\"}[$__range]))",
           "instant": true,
-          "legendFormat": "Failed",
+          "legendFormat": "Requests",
           "range": false,
           "refId": "A"
         }
       ],
-      "title": "Failed jobs in range",
+      "title": "Requests in range",
       "type": "stat"
     },
     {
@@ -238,14 +234,14 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "100 * sum(increase(ruby_sidekiq_failed_jobs_total{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",queue=~\"$queue\",job_name=~\"$job_name\"}[$__range])) / clamp_min(sum(increase(ruby_sidekiq_jobs_total{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",queue=~\"$queue\",job_name=~\"$job_name\"}[$__range])), 1)",
+          "expr": "100 * sum(increase(rails_requests_total{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",status=~\"5..\"}[$__range])) / clamp_min(sum(increase(rails_requests_total{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\"}[$__range])), 1)",
           "instant": true,
-          "legendFormat": "Failed",
+          "legendFormat": "5xx",
           "range": false,
           "refId": "A"
         }
       ],
-      "title": "Job failure rate",
+      "title": "Server error rate",
       "type": "stat"
     },
     {
@@ -253,7 +249,6 @@
         "type": "prometheus",
         "uid": "$datasource"
       },
-      "description": "Uses max per queue because the same Sidekiq queue gauge can be emitted by multiple processes.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -269,15 +264,15 @@
               },
               {
                 "color": "yellow",
-                "value": 100
+                "value": 0.5
               },
               {
                 "color": "red",
-                "value": 1000
+                "value": 1
               }
             ]
           },
-          "unit": "short"
+          "unit": "s"
         },
         "overrides": []
       },
@@ -310,14 +305,14 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "sum(max by (queue) (ruby_sidekiq_queue_backlog{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",queue=~\"$queue\"}))",
+          "expr": "sum(rate(rails_request_duration_seconds_sum{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\"}[$__rate_interval])) / clamp_min(sum(rate(rails_request_duration_seconds_count{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\"}[$__rate_interval])), 1e-9)",
           "instant": true,
-          "legendFormat": "Backlog",
+          "legendFormat": "Average",
           "range": false,
           "refId": "A"
         }
       ],
-      "title": "Queue backlog",
+      "title": "Average request duration",
       "type": "stat"
     },
     {
@@ -340,11 +335,11 @@
               },
               {
                 "color": "yellow",
-                "value": 60
+                "value": 1
               },
               {
                 "color": "red",
-                "value": 300
+                "value": 2
               }
             ]
           },
@@ -381,14 +376,14 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "max(ruby_sidekiq_queue_latency_seconds{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",queue=~\"$queue\"})",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(rails_request_duration_seconds_bucket{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\"}[$__rate_interval])))",
           "instant": true,
-          "legendFormat": "Latency",
+          "legendFormat": "P95",
           "range": false,
           "refId": "A"
         }
       ],
-      "title": "Max queue latency",
+      "title": "P95 request duration",
       "type": "stat"
     },
     {
@@ -396,15 +391,13 @@
         "type": "prometheus",
         "uid": "$datasource"
       },
-      "description": "Worker process metrics are filtered by pod; Sidekiq process metrics do not have the queue label.",
+      "description": "Available when prometheus_exporter DB instrumentation is active.",
       "fieldConfig": {
         "defaults": {
           "color": {
             "mode": "thresholds"
           },
           "mappings": [],
-          "max": 100,
-          "min": 0,
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -414,15 +407,15 @@
               },
               {
                 "color": "yellow",
-                "value": 75
+                "value": 0.25
               },
               {
                 "color": "red",
-                "value": 90
+                "value": 0.5
               }
             ]
           },
-          "unit": "percent"
+          "unit": "s"
         },
         "overrides": []
       },
@@ -455,14 +448,14 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "100 * sum(ruby_sidekiq_process_busy{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\"}) / clamp_min(sum(ruby_sidekiq_process_concurrency{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\"}), 1)",
+          "expr": "sum(rate(rails_db_runtime_seconds_sum{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\"}[$__rate_interval])) / clamp_min(sum(rate(rails_db_runtime_seconds_count{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\"}[$__rate_interval])), 1e-9)",
           "instant": true,
-          "legendFormat": "Busy",
+          "legendFormat": "DB average",
           "range": false,
           "refId": "A"
         }
       ],
-      "title": "Worker utilization",
+      "title": "Average DB duration",
       "type": "stat"
     },
     {
@@ -475,7 +468,7 @@
           "color": {
             "mode": "palette-classic"
           },
-          "unit": "ops"
+          "unit": "reqps"
         },
         "overrides": []
       },
@@ -511,13 +504,35 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "sum by (queue) (rate(ruby_sidekiq_jobs_total{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",queue=~\"$queue\",job_name=~\"$job_name\"}[$__rate_interval]))",
-          "legendFormat": "{{queue}}",
+          "expr": "sum(rate(rails_requests_total{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",status=~\"2..|3..\"}[$__rate_interval]))",
+          "legendFormat": "2xx/3xx",
           "range": true,
           "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "editorMode": "code",
+          "expr": "sum(rate(rails_requests_total{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",status=~\"4..\"}[$__rate_interval]))",
+          "legendFormat": "4xx",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "editorMode": "code",
+          "expr": "sum(rate(rails_requests_total{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",status=~\"5..\"}[$__rate_interval]))",
+          "legendFormat": "5xx",
+          "range": true,
+          "refId": "C"
         }
       ],
-      "title": "Job throughput by queue",
+      "title": "Request rate by response class",
       "type": "timeseries"
     },
     {
@@ -525,13 +540,12 @@
         "type": "prometheus",
         "uid": "$datasource"
       },
-      "description": "Dead jobs require the prometheus_exporter Sidekiq death handler.",
       "fieldConfig": {
         "defaults": {
           "color": {
             "mode": "palette-classic"
           },
-          "unit": "ops"
+          "unit": "s"
         },
         "overrides": []
       },
@@ -567,8 +581,8 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "sum(rate(ruby_sidekiq_failed_jobs_total{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",queue=~\"$queue\",job_name=~\"$job_name\"}[$__rate_interval]))",
-          "legendFormat": "Failed",
+          "expr": "histogram_quantile(0.50, sum by (le) (job_namespace_service_pod_le:rails_request_duration_seconds_bucket:rate5m{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\"}))",
+          "legendFormat": "P50",
           "range": true,
           "refId": "A"
         },
@@ -578,8 +592,8 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "sum(rate(ruby_sidekiq_restarted_jobs_total{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",queue=~\"$queue\",job_name=~\"$job_name\"}[$__rate_interval]))",
-          "legendFormat": "Restarted",
+          "expr": "histogram_quantile(0.95, sum by (le) (job_namespace_service_pod_le:rails_request_duration_seconds_bucket:rate5m{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\"}))",
+          "legendFormat": "P95",
           "range": true,
           "refId": "B"
         },
@@ -589,14 +603,17 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "sum(rate(ruby_sidekiq_dead_jobs_total{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",job_name=~\"$job_name\"}[$__rate_interval]))",
-          "legendFormat": "Dead",
+          "expr": "histogram_quantile(0.99, sum by (le) (job_namespace_service_pod_le:rails_request_duration_seconds_bucket:rate5m{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\"}))",
+          "legendFormat": "P99",
           "range": true,
           "refId": "C"
         }
       ],
-      "title": "Failed, restarted, and dead jobs",
-      "type": "timeseries"
+      "title": "Request duration percentiles",
+      "type": "timeseries",
+      "description": "Uses the pre-aggregated 5-minute Rails histogram bucket recording rule.",
+      "interval": "1m",
+      "maxDataPoints": 600
     },
     {
       "datasource": {
@@ -644,8 +661,8 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.50, sum by (le) (rate(ruby_sidekiq_job_duration_seconds_bucket{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",queue=~\"$queue\",job_name=~\"$job_name\"}[$__rate_interval]))) or max(ruby_sidekiq_job_duration_seconds{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",queue=~\"$queue\",job_name=~\"$job_name\",quantile=\"0.5\"})",
-          "legendFormat": "P50",
+          "expr": "sum(rate(rails_request_duration_seconds_sum{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\"}[$__rate_interval])) / clamp_min(sum(rate(rails_request_duration_seconds_count{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\"}[$__rate_interval])), 1e-9)",
+          "legendFormat": "Request",
           "range": true,
           "refId": "A"
         },
@@ -655,24 +672,13 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(ruby_sidekiq_job_duration_seconds_bucket{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",queue=~\"$queue\",job_name=~\"$job_name\"}[$__rate_interval]))) or max(ruby_sidekiq_job_duration_seconds{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",queue=~\"$queue\",job_name=~\"$job_name\",quantile=\"0.95\"})",
-          "legendFormat": "P95",
+          "expr": "sum(rate(rails_db_runtime_seconds_sum{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\"}[$__rate_interval])) / clamp_min(sum(rate(rails_db_runtime_seconds_count{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\"}[$__rate_interval])), 1e-9)",
+          "legendFormat": "DB",
           "range": true,
           "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$datasource"
-          },
-          "editorMode": "code",
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(ruby_sidekiq_job_duration_seconds_bucket{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",queue=~\"$queue\",job_name=~\"$job_name\"}[$__rate_interval]))) or max(ruby_sidekiq_job_duration_seconds{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",queue=~\"$queue\",job_name=~\"$job_name\",quantile=\"0.99\"})",
-          "legendFormat": "P99",
-          "range": true,
-          "refId": "C"
         }
       ],
-      "title": "Job duration percentiles",
+      "title": "Average request and DB duration",
       "type": "timeseries"
     },
     {
@@ -680,13 +686,12 @@
         "type": "prometheus",
         "uid": "$datasource"
       },
-      "description": "Uses max per queue to deduplicate gauges emitted by multiple Sidekiq processes.",
       "fieldConfig": {
         "defaults": {
           "color": {
             "mode": "palette-classic"
           },
-          "unit": "short"
+          "unit": "reqps"
         },
         "overrides": []
       },
@@ -722,13 +727,13 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "max by (queue) (ruby_sidekiq_queue_backlog{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",queue=~\"$queue\"})",
-          "legendFormat": "{{queue}}",
+          "expr": "topk(10, sum by (controller, action) (rate(rails_requests_total{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\"}[$interval])))",
+          "legendFormat": "{{controller}}#{{action}}",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Queue backlog",
+      "title": "Busiest controller actions over $interval",
       "type": "timeseries"
     },
     {
@@ -736,19 +741,18 @@
         "type": "prometheus",
         "uid": "$datasource"
       },
-      "description": "Uses max per queue to deduplicate gauges emitted by multiple Sidekiq processes.",
       "fieldConfig": {
         "defaults": {
           "color": {
             "mode": "palette-classic"
           },
-          "unit": "s"
+          "unit": "reqps"
         },
         "overrides": []
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
+        "w": 24,
         "x": 0,
         "y": 20
       },
@@ -778,13 +782,13 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "max by (queue) (ruby_sidekiq_queue_latency_seconds{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",queue=~\"$queue\"})",
-          "legendFormat": "{{queue}}",
+          "expr": "topk(10, sum by (controller, action, status) (rate(rails_requests_total{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",status=~\"5..\"}[$interval])))",
+          "legendFormat": "{{controller}}#{{action}} HTTP {{status}}",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Queue latency",
+      "title": "Server errors by action over $interval",
       "type": "timeseries"
     },
     {
@@ -797,15 +801,15 @@
           "color": {
             "mode": "palette-classic"
           },
-          "unit": "short"
+          "unit": "ops"
         },
         "overrides": []
       },
       "gridPos": {
         "h": 8,
         "w": 12,
-        "x": 12,
-        "y": 20
+        "x": 0,
+        "y": 28
       },
       "id": 12,
       "options": {
@@ -833,24 +837,13 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "sum(ruby_sidekiq_process_busy{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\"})",
-          "legendFormat": "Busy",
+          "expr": "sum by (namespace, pod, config, kind) (rate(activerecord_queries_total{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\"}[$__rate_interval]))",
+          "legendFormat": "{{namespace}}/{{pod}} {{config}} {{kind}}",
           "range": true,
           "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$datasource"
-          },
-          "editorMode": "code",
-          "expr": "sum(ruby_sidekiq_process_concurrency{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\"})",
-          "legendFormat": "Concurrency",
-          "range": true,
-          "refId": "B"
         }
       ],
-      "title": "Worker capacity",
+      "title": "Active Record query rate",
       "type": "timeseries"
     },
     {
@@ -861,92 +854,36 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "continuous-GrYlRd"
-          },
-          "unit": "ops"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 9,
-        "w": 8,
-        "x": 0,
-        "y": 28
-      },
-      "id": 13,
-      "options": {
-        "displayMode": "gradient",
-        "maxVizHeight": 300,
-        "minVizHeight": 16,
-        "minVizWidth": 8,
-        "namePlacement": "auto",
-        "orientation": "horizontal",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "showUnfilled": true,
-        "sizing": "auto",
-        "valueMode": "color"
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$datasource"
-          },
-          "editorMode": "code",
-          "expr": "topk(15, sum by (job_name, queue) (rate(ruby_sidekiq_jobs_total{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",queue=~\"$queue\",job_name=~\"$job_name\"}[$interval])))",
-          "instant": true,
-          "legendFormat": "{{job_name}} [{{queue}}]",
-          "range": false,
-          "refId": "A"
-        }
-      ],
-      "title": "Top throughput over $interval",
-      "type": "bargauge"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$datasource"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "continuous-GrYlRd"
+            "mode": "palette-classic"
           },
           "unit": "s"
         },
         "overrides": []
       },
       "gridPos": {
-        "h": 9,
-        "w": 8,
-        "x": 8,
+        "h": 8,
+        "w": 12,
+        "x": 12,
         "y": 28
       },
-      "id": 14,
+      "id": 13,
       "options": {
-        "displayMode": "gradient",
-        "maxVizHeight": 300,
-        "minVizHeight": 16,
-        "minVizWidth": 8,
-        "namePlacement": "auto",
-        "orientation": "horizontal",
-        "reduceOptions": {
+        "legend": {
           "calcs": [
-            "lastNotNull"
+            "lastNotNull",
+            "max"
           ],
-          "fields": "",
-          "values": false
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "sortBy": "Max",
+          "sortDesc": true
         },
-        "showUnfilled": true,
-        "sizing": "auto",
-        "valueMode": "color"
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "multi",
+          "sort": "desc"
+        }
       },
       "targets": [
         {
@@ -955,15 +892,17 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "topk(15, histogram_quantile(0.95, sum by (le, job_name, queue) (rate(ruby_sidekiq_job_duration_seconds_bucket{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",queue=~\"$queue\",job_name=~\"$job_name\"}[$interval]))) or max by (job_name, queue) (ruby_sidekiq_job_duration_seconds{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",queue=~\"$queue\",job_name=~\"$job_name\",quantile=\"0.95\"}))",
-          "instant": true,
-          "legendFormat": "{{job_name}} [{{queue}}]",
-          "range": false,
+          "expr": "histogram_quantile(0.95, sum by (le, namespace, pod, config) (job_namespace_service_pod_config_le:activerecord_query_duration_seconds_bucket:rate5m{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\"}))",
+          "legendFormat": "{{namespace}}/{{pod}} {{config}}",
+          "range": true,
           "refId": "A"
         }
       ],
-      "title": "Slowest P95 jobs over $interval",
-      "type": "bargauge"
+      "title": "Active Record P95 query duration",
+      "type": "timeseries",
+      "description": "Uses the pre-aggregated 5-minute ActiveRecord histogram bucket recording rule. Query kinds are aggregated to control cardinality.",
+      "interval": "1m",
+      "maxDataPoints": 600
     },
     {
       "datasource": {
@@ -973,38 +912,36 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "continuous-GrYlRd"
+            "mode": "palette-classic"
           },
-          "max": 100,
-          "min": 0,
-          "unit": "percent"
+          "unit": "short"
         },
         "overrides": []
       },
       "gridPos": {
-        "h": 9,
-        "w": 8,
-        "x": 16,
-        "y": 28
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 36
       },
-      "id": 15,
+      "id": 14,
       "options": {
-        "displayMode": "gradient",
-        "maxVizHeight": 300,
-        "minVizHeight": 16,
-        "minVizWidth": 8,
-        "namePlacement": "auto",
-        "orientation": "horizontal",
-        "reduceOptions": {
+        "legend": {
           "calcs": [
-            "lastNotNull"
+            "lastNotNull",
+            "max"
           ],
-          "fields": "",
-          "values": false
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "sortBy": "Max",
+          "sortDesc": true
         },
-        "showUnfilled": true,
-        "sizing": "auto",
-        "valueMode": "color"
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "multi",
+          "sort": "desc"
+        }
       },
       "targets": [
         {
@@ -1013,15 +950,113 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "topk(15, 100 * sum by (job_name, queue) (rate(ruby_sidekiq_failed_jobs_total{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",queue=~\"$queue\",job_name=~\"$job_name\"}[$interval])) / clamp_min(sum by (job_name, queue) (rate(ruby_sidekiq_jobs_total{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",queue=~\"$queue\",job_name=~\"$job_name\"}[$interval])), 1e-9))",
-          "instant": true,
-          "legendFormat": "{{job_name}} [{{queue}}]",
-          "range": false,
+          "expr": "sum by (namespace, pod, config) (activerecord_connection_pool_busy{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\"})",
+          "legendFormat": "{{namespace}}/{{pod}} {{config}} busy",
+          "range": true,
           "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "editorMode": "code",
+          "expr": "sum by (namespace, pod, config) (activerecord_connection_pool_size{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\"})",
+          "legendFormat": "{{namespace}}/{{pod}} {{config}} size",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "editorMode": "code",
+          "expr": "sum by (namespace, pod, config) (activerecord_connection_pool_waiting{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\"})",
+          "legendFormat": "{{namespace}}/{{pod}} {{config}} waiting",
+          "range": true,
+          "refId": "C"
         }
       ],
-      "title": "Highest failure rate over $interval",
-      "type": "bargauge"
+      "title": "Active Record connection pool",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 36
+      },
+      "id": 15,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "sortBy": "Max",
+          "sortDesc": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "editorMode": "code",
+          "expr": "sum by (namespace, pod) (puma_running{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\"})",
+          "legendFormat": "{{namespace}}/{{pod}} running",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "editorMode": "code",
+          "expr": "sum by (namespace, pod) (puma_pool_capacity{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\"})",
+          "legendFormat": "{{namespace}}/{{pod}} capacity",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "editorMode": "code",
+          "expr": "sum by (namespace, pod) (puma_max_threads{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\"})",
+          "legendFormat": "{{namespace}}/{{pod}} max",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "Puma threads",
+      "type": "timeseries"
     }
   ],
   "refresh": "30s",
@@ -1030,8 +1065,7 @@
     "Kubernetes",
     "Prometheus",
     "Ruby on Rails",
-    "Sidekiq",
-    "prometheus_exporter"
+    "Yabeda"
   ],
   "templating": {
     "list": [
@@ -1068,14 +1102,14 @@
           "type": "prometheus",
           "uid": "$datasource"
         },
-        "definition": "label_values(ruby_sidekiq_jobs_total, job)",
+        "definition": "label_values(rails_requests_total, job)",
         "hide": 0,
         "includeAll": true,
         "label": "Job",
         "multi": true,
         "name": "job",
         "options": [],
-        "query": "label_values(ruby_sidekiq_jobs_total, job)",
+        "query": "label_values(rails_requests_total, job)",
         "refresh": 1,
         "regex": "",
         "skipUrlSync": false,
@@ -1097,14 +1131,14 @@
           "type": "prometheus",
           "uid": "$datasource"
         },
-        "definition": "label_values(ruby_sidekiq_jobs_total{job=~\"$job\"}, namespace)",
+        "definition": "label_values(rails_requests_total{job=~\"$job\"}, namespace)",
         "hide": 0,
         "includeAll": true,
         "label": "Namespace",
         "multi": true,
         "name": "namespace",
         "options": [],
-        "query": "label_values(ruby_sidekiq_jobs_total{job=~\"$job\"}, namespace)",
+        "query": "label_values(rails_requests_total{job=~\"$job\"}, namespace)",
         "refresh": 1,
         "regex": "",
         "skipUrlSync": false,
@@ -1126,14 +1160,14 @@
           "type": "prometheus",
           "uid": "$datasource"
         },
-        "definition": "label_values(ruby_sidekiq_jobs_total{job=~\"$job\",namespace=~\"$namespace\"}, service)",
+        "definition": "label_values(rails_requests_total{job=~\"$job\",namespace=~\"$namespace\"}, service)",
         "hide": 0,
         "includeAll": true,
         "label": "Service",
         "multi": true,
         "name": "service",
         "options": [],
-        "query": "label_values(ruby_sidekiq_jobs_total{job=~\"$job\",namespace=~\"$namespace\"}, service)",
+        "query": "label_values(rails_requests_total{job=~\"$job\",namespace=~\"$namespace\"}, service)",
         "refresh": 1,
         "regex": "",
         "skipUrlSync": false,
@@ -1154,72 +1188,14 @@
           "type": "prometheus",
           "uid": "$datasource"
         },
-        "definition": "label_values(ruby_sidekiq_jobs_total{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\"}, pod)",
+        "definition": "label_values(rails_requests_total{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\"}, pod)",
         "hide": 0,
         "includeAll": true,
         "label": "Pod",
         "multi": true,
         "name": "pod",
         "options": [],
-        "query": "label_values(ruby_sidekiq_jobs_total{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\"}, pod)",
-        "refresh": 1,
-        "regex": "",
-        "skipUrlSync": false,
-        "sort": 1,
-        "type": "query"
-      },
-      {
-        "allValue": ".*",
-        "current": {
-          "selected": true,
-          "text": [
-            "All"
-          ],
-          "value": [
-            "$__all"
-          ]
-        },
-        "datasource": {
-          "type": "prometheus",
-          "uid": "$datasource"
-        },
-        "definition": "label_values(ruby_sidekiq_jobs_total{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\"}, queue)",
-        "hide": 0,
-        "includeAll": true,
-        "label": "Queue",
-        "multi": true,
-        "name": "queue",
-        "options": [],
-        "query": "label_values(ruby_sidekiq_jobs_total{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\"}, queue)",
-        "refresh": 1,
-        "regex": "",
-        "skipUrlSync": false,
-        "sort": 1,
-        "type": "query"
-      },
-      {
-        "allValue": ".*",
-        "current": {
-          "selected": true,
-          "text": [
-            "All"
-          ],
-          "value": [
-            "$__all"
-          ]
-        },
-        "datasource": {
-          "type": "prometheus",
-          "uid": "$datasource"
-        },
-        "definition": "label_values(ruby_sidekiq_jobs_total{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",queue=~\"$queue\"}, job_name)",
-        "hide": 0,
-        "includeAll": true,
-        "label": "Job class",
-        "multi": true,
-        "name": "job_name",
-        "options": [],
-        "query": "label_values(ruby_sidekiq_jobs_total{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",queue=~\"$queue\"}, job_name)",
+        "query": "label_values(rails_requests_total{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\"}, pod)",
         "refresh": 1,
         "regex": "",
         "skipUrlSync": false,
@@ -1290,8 +1266,8 @@
   },
   "timepicker": {},
   "timezone": "browser",
-  "title": "Ruby on Rails Kubernetes Prometheus Sidekiq",
-  "uid": "rails-kubernetes-prometheus-sidekiq",
-  "version": 1,
+  "title": "Yabeda Rails Kubernetes Overview",
+  "uid": "yabeda-rails-kubernetes-overview",
+  "version": 2,
   "weekStart": ""
 }

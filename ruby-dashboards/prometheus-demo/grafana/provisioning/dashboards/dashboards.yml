@@ -1,13 +1,12 @@
 apiVersion: 1
 
 providers:
-  - name: rails-prometheus-demo
+  - name: yabeda-demo
     orgId: 1
-    folder: Rails Prometheus Demo
+    folder: Yabeda Demo
     type: file
     disableDeletion: false
     updateIntervalSeconds: 10
     allowUiUpdates: true
     options:
-      path: /var/lib/grafana/dashboards
-
+      path: /etc/grafana/provisioned-dashboards

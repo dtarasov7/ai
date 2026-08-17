@@ -1,0 +1,29 @@
+groups:
+  - name: yabeda-dashboard-recording
+    interval: 1m
+    rules:
+      - record: job_namespace_service_pod_le:rails_request_duration_seconds_bucket:rate5m
+        expr: |
+          sum by (job, namespace, service, pod, le) (
+            rate(rails_request_duration_seconds_bucket[5m])
+          )
+
+      - record: job_namespace_service_pod_controller_action_le:rails_request_duration_seconds_bucket:rate5m
+        expr: |
+          sum by (
+            job,
+            namespace,
+            service,
+            pod,
+            controller,
+            action,
+            le
+          ) (
+            rate(rails_request_duration_seconds_bucket[5m])
+          )
+
+      - record: job_namespace_service_pod_config_le:activerecord_query_duration_seconds_bucket:rate5m
+        expr: |
+          sum by (job, namespace, service, pod, config, le) (
+            rate(activerecord_query_duration_seconds_bucket[5m])
+          )

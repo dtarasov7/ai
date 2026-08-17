@@ -1,4 +1,6 @@
 class DemoController < ApplicationController
+  around_action :record_simulated_anycable_rpc, only: %i[fast slow error]
+
   def index
     render json: {
       service: "rails-prometheus-demo",
@@ -32,5 +34,16 @@ class DemoController < ApplicationController
     Widget.limit(1).pick(:id)
     render plain: "ok"
   end
-end
 
+  private
+
+  def record_simulated_anycable_rpc
+    status = action_name == "error" ? "ERROR" : "SUCCESS"
+    tags = { method: "CommandHandler", command: action_name, status: status }
+
+    Yabeda.anycable_rpc.call_runtime.measure(tags) do
+      yield
+    end
+    Yabeda.anycable_rpc.call_count.increment(tags)
+  end
+end

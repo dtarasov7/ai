@@ -1,4 +1,6 @@
 Rails.application.routes.draw do
+  mount Yabeda::Prometheus::Exporter => "/metrics"
+
   get "/", to: "demo#index"
   get "/fast", to: "demo#fast"
   get "/slow", to: "demo#slow"
@@ -6,4 +8,3 @@ Rails.application.routes.draw do
   post "/jobs", to: "demo#enqueue"
   get "/health", to: "demo#health"
 end
-

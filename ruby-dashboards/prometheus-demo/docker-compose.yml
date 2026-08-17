@@ -21,41 +21,17 @@ services:
       timeout: 3s
       retries: 20
 
-  prometheus-exporter:
-    image: rails-prometheus-demo:local
-    pull_policy: never
-    command:
-      - bundle
-      - exec
-      - prometheus_exporter
-      - --bind
-      - 0.0.0.0
-      - --port
-      - "9394"
-      - --histogram
-    healthcheck:
-      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:9394/ping"]
-      interval: 3s
-      timeout: 3s
-      retries: 20
-    ports:
-      - "9394:9394"
-
   app:
     build: .
     image: rails-prometheus-demo:local
     command: ["sh", "-c", "bundle exec rails db:prepare && bundle exec rails db:seed && bundle exec rails server -b 0.0.0.0 -p 3000"]
     environment: &app-environment
       DATABASE_URL: postgres://prometheus_demo:prometheus_demo@postgres:5432/prometheus_demo
-      PROMETHEUS_EXPORTER_HOST: prometheus-exporter
-      PROMETHEUS_EXPORTER_PORT: "9394"
       RAILS_ENV: production
       REDIS_URL: redis://redis:6379/0
       SECRET_KEY_BASE: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
     depends_on:
       postgres:
-        condition: service_healthy
-      prometheus-exporter:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -70,15 +46,28 @@ services:
   sidekiq:
     image: rails-prometheus-demo:local
     pull_policy: never
-    command: ["bundle", "exec", "sidekiq", "-C", "config/sidekiq.yml"]
-    environment: *app-environment
+    command:
+      - sh
+      - -ec
+      - |
+        until ruby -rsocket -e 'TCPSocket.new("redis", 6379).close'; do sleep 1; done
+        exec bundle exec sidekiq -C config/sidekiq.yml
+    restart: on-failure
+    environment:
+      <<: *app-environment
+      PROMETHEUS_EXPORTER_PORT: "9394"
     depends_on:
       app:
         condition: service_healthy
-      prometheus-exporter:
-        condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:9394/metrics"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    ports:
+      - "9394:9394"
 
   traffic:
     image: rails-prometheus-demo:local
@@ -112,12 +101,15 @@ services:
       - --storage.tsdb.path=/prometheus
       - --storage.tsdb.retention.time=24h
     depends_on:
-      prometheus-exporter:
+      app:
+        condition: service_healthy
+      sidekiq:
         condition: service_healthy
     ports:
       - "9090:9090"
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../prometheus-rules:/etc/prometheus/rules:ro
       - prometheus-data:/prometheus
 
   grafana:
@@ -134,9 +126,10 @@ services:
     volumes:
       - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
       - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
-      - ../dashboards/Ruby On Rails Prometheus Overview.json:/var/lib/grafana/dashboards/rails-overview.json:ro
-      - ../dashboards/Ruby On Rails Prometheus Actions.json:/var/lib/grafana/dashboards/rails-actions.json:ro
-      - ../dashboards/Ruby On Rails Prometheus Sidekiq.json:/var/lib/grafana/dashboards/rails-sidekiq.json:ro
+      - ../dashboards/Yabeda Rails Kubernetes Overview.json:/etc/grafana/provisioned-dashboards/yabeda-rails-overview.json:ro
+      - ../dashboards/Yabeda Rails Kubernetes Actions.json:/etc/grafana/provisioned-dashboards/yabeda-rails-actions.json:ro
+      - ../dashboards/Yabeda Sidekiq Kubernetes.json:/etc/grafana/provisioned-dashboards/yabeda-sidekiq.json:ro
+      - ../dashboards/Yabeda AnyCable Kubernetes.json:/etc/grafana/provisioned-dashboards/yabeda-anycable.json:ro
       - grafana-data:/var/lib/grafana
 
 volumes:

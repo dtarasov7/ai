@@ -16,6 +16,44 @@ The corresponding Kubernetes variants are:
 - `Ruby On Rails Kubernetes Prometheus Actions.json`
 - `Ruby On Rails Kubernetes Prometheus Sidekiq.json`
 
+The dashboards intended for applications instrumented with Yabeda are:
+
+- `Yabeda Rails Kubernetes Overview.json` — Rails requests plus
+  ActiveRecord query/pool and Puma thread metrics.
+- `Yabeda Rails Kubernetes Actions.json` — controller/action drill-down for
+  Yabeda Rails request metrics.
+- `Yabeda Sidekiq Kubernetes.json` — worker and queue metrics from
+  `yabeda-sidekiq`.
+- `Yabeda AnyCable Kubernetes.json` — RPC traffic, failures, and runtime from
+  `yabeda-anycable`.
+
+All four Yabeda dashboards use the dependent hierarchy
+`datasource` → `job` → `namespace` → `service` → `pod`. Domain-specific
+filters follow it: controller/action, queue/worker, or
+method/command/status. They are the recommended dashboards for the metric
+names shown by the Yabeda samples in this repository.
+
+The hierarchy limits the values offered by each downstream variable; it does
+not automatically scope PromQL selectors. Kubernetes dashboards therefore
+keep explicit `job`, `namespace`, `service`, and `pod` matchers in panel
+queries. Panels that split or count pods use the pair `namespace`, `pod`, so
+pods with the same name in different namespaces are not merged.
+
+The Rails Overview and Rails Actions dashboards require the recording rules
+from [`prometheus-rules/yabeda-dashboard.rules.yml`](../prometheus-rules/yabeda-dashboard.rules.yml).
+They pre-aggregate five-minute histogram bucket rates while retaining
+`job`, `namespace`, `service`, and `pod`. This prevents six-hour dashboard
+queries across large deployments from repeatedly loading every raw Rails and
+ActiveRecord histogram series. Configure Prometheus to load the file through
+`rule_files` before importing these two dashboards. Ready manifests and
+installation steps for vanilla Kubernetes, Prometheus Operator, and Deckhouse
+are available in the
+[`prometheus-rules` installation guide](../prometheus-rules/README.md).
+
+Prometheus does not backfill recording rules. After enabling the file, these
+percentile panels initially show data only from the first successful rule
+evaluation onward; the selected historical window fills gradually.
+
 They replace the `env` → `group` → `instance` target hierarchy with
 `job` → `namespace` → `service` → `pod`. The `job` label distinguishes scrape
 jobs or applications, while the remaining labels select Kubernetes targets.

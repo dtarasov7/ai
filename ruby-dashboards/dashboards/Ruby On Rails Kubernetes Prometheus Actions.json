@@ -98,7 +98,7 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "count(count by (controller, action) (ruby_http_requests_total{pod=~\"$pod\",controller=~\"$controller\",action=~\"$action\"}))",
+          "expr": "count(count by (controller, action) (ruby_http_requests_total{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",controller=~\"$controller\",action=~\"$action\"}))",
           "instant": true,
           "legendFormat": "Actions",
           "range": false,
@@ -161,7 +161,7 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "sum(increase(ruby_http_requests_total{pod=~\"$pod\",controller=~\"$controller\",action=~\"$action\"}[$__range]))",
+          "expr": "sum(increase(ruby_http_requests_total{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",controller=~\"$controller\",action=~\"$action\"}[$__range]))",
           "instant": true,
           "legendFormat": "Requests",
           "range": false,
@@ -234,7 +234,7 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "100 * sum(increase(ruby_http_requests_total{pod=~\"$pod\",controller=~\"$controller\",action=~\"$action\",status=~\"5..\"}[$__range])) / clamp_min(sum(increase(ruby_http_requests_total{pod=~\"$pod\",controller=~\"$controller\",action=~\"$action\"}[$__range])), 1)",
+          "expr": "100 * sum(increase(ruby_http_requests_total{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",controller=~\"$controller\",action=~\"$action\",status=~\"5..\"}[$__range])) / clamp_min(sum(increase(ruby_http_requests_total{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",controller=~\"$controller\",action=~\"$action\"}[$__range])), 1)",
           "instant": true,
           "legendFormat": "5xx",
           "range": false,
@@ -305,7 +305,7 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "sum(rate(ruby_http_request_duration_seconds_sum{pod=~\"$pod\",controller=~\"$controller\",action=~\"$action\"}[$__rate_interval])) / clamp_min(sum(rate(ruby_http_request_duration_seconds_count{pod=~\"$pod\",controller=~\"$controller\",action=~\"$action\"}[$__rate_interval])), 1e-9)",
+          "expr": "sum(rate(ruby_http_request_duration_seconds_sum{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",controller=~\"$controller\",action=~\"$action\"}[$__rate_interval])) / clamp_min(sum(rate(ruby_http_request_duration_seconds_count{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",controller=~\"$controller\",action=~\"$action\"}[$__rate_interval])), 1e-9)",
           "instant": true,
           "legendFormat": "Average",
           "range": false,
@@ -376,7 +376,7 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(ruby_http_request_duration_seconds_bucket{pod=~\"$pod\",controller=~\"$controller\",action=~\"$action\"}[$__rate_interval]))) or max(ruby_http_request_duration_seconds{pod=~\"$pod\",controller=~\"$controller\",action=~\"$action\",quantile=\"0.95\"})",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(ruby_http_request_duration_seconds_bucket{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",controller=~\"$controller\",action=~\"$action\"}[$__rate_interval]))) or max(ruby_http_request_duration_seconds{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",controller=~\"$controller\",action=~\"$action\",quantile=\"0.95\"})",
           "instant": true,
           "legendFormat": "P95",
           "range": false,
@@ -448,7 +448,7 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "sum(rate(ruby_http_request_sql_duration_seconds_sum{pod=~\"$pod\",controller=~\"$controller\",action=~\"$action\"}[$__rate_interval])) / clamp_min(sum(rate(ruby_http_request_sql_duration_seconds_count{pod=~\"$pod\",controller=~\"$controller\",action=~\"$action\"}[$__rate_interval])), 1e-9)",
+          "expr": "sum(rate(ruby_http_request_sql_duration_seconds_sum{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",controller=~\"$controller\",action=~\"$action\"}[$__rate_interval])) / clamp_min(sum(rate(ruby_http_request_sql_duration_seconds_count{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",controller=~\"$controller\",action=~\"$action\"}[$__rate_interval])), 1e-9)",
           "instant": true,
           "legendFormat": "SQL average",
           "range": false,
@@ -504,7 +504,7 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "sum by (controller, action) (rate(ruby_http_requests_total{pod=~\"$pod\",controller=~\"$controller\",action=~\"$action\"}[$__rate_interval]))",
+          "expr": "sum by (controller, action) (rate(ruby_http_requests_total{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",controller=~\"$controller\",action=~\"$action\"}[$__rate_interval]))",
           "legendFormat": "{{controller}}#{{action}}",
           "range": true,
           "refId": "A"
@@ -559,7 +559,7 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum by (le, controller, action) (rate(ruby_http_request_duration_seconds_bucket{pod=~\"$pod\",controller=~\"$controller\",action=~\"$action\"}[$__rate_interval]))) or max by (controller, action) (ruby_http_request_duration_seconds{pod=~\"$pod\",controller=~\"$controller\",action=~\"$action\",quantile=\"0.95\"})",
+          "expr": "histogram_quantile(0.95, sum by (le, controller, action) (rate(ruby_http_request_duration_seconds_bucket{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",controller=~\"$controller\",action=~\"$action\"}[$__rate_interval]))) or max by (controller, action) (ruby_http_request_duration_seconds{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",controller=~\"$controller\",action=~\"$action\",quantile=\"0.95\"})",
           "legendFormat": "{{controller}}#{{action}}",
           "range": true,
           "refId": "A"
@@ -614,7 +614,7 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "sum(rate(ruby_http_request_duration_seconds_sum{pod=~\"$pod\",controller=~\"$controller\",action=~\"$action\"}[$__rate_interval])) / clamp_min(sum(rate(ruby_http_request_duration_seconds_count{pod=~\"$pod\",controller=~\"$controller\",action=~\"$action\"}[$__rate_interval])), 1e-9)",
+          "expr": "sum(rate(ruby_http_request_duration_seconds_sum{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",controller=~\"$controller\",action=~\"$action\"}[$__rate_interval])) / clamp_min(sum(rate(ruby_http_request_duration_seconds_count{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",controller=~\"$controller\",action=~\"$action\"}[$__rate_interval])), 1e-9)",
           "legendFormat": "Request",
           "range": true,
           "refId": "A"
@@ -625,7 +625,7 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "sum(rate(ruby_http_request_sql_duration_seconds_sum{pod=~\"$pod\",controller=~\"$controller\",action=~\"$action\"}[$__rate_interval])) / clamp_min(sum(rate(ruby_http_request_sql_duration_seconds_count{pod=~\"$pod\",controller=~\"$controller\",action=~\"$action\"}[$__rate_interval])), 1e-9)",
+          "expr": "sum(rate(ruby_http_request_sql_duration_seconds_sum{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",controller=~\"$controller\",action=~\"$action\"}[$__rate_interval])) / clamp_min(sum(rate(ruby_http_request_sql_duration_seconds_count{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",controller=~\"$controller\",action=~\"$action\"}[$__rate_interval])), 1e-9)",
           "legendFormat": "SQL",
           "range": true,
           "refId": "B"
@@ -682,7 +682,7 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "100 * sum by (controller, action) (rate(ruby_http_requests_total{pod=~\"$pod\",controller=~\"$controller\",action=~\"$action\",status=~\"5..\"}[$__rate_interval])) / clamp_min(sum by (controller, action) (rate(ruby_http_requests_total{pod=~\"$pod\",controller=~\"$controller\",action=~\"$action\"}[$__rate_interval])), 1e-9)",
+          "expr": "100 * sum by (controller, action) (rate(ruby_http_requests_total{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",controller=~\"$controller\",action=~\"$action\",status=~\"5..\"}[$__rate_interval])) / clamp_min(sum by (controller, action) (rate(ruby_http_requests_total{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",controller=~\"$controller\",action=~\"$action\"}[$__rate_interval])), 1e-9)",
           "legendFormat": "{{controller}}#{{action}}",
           "range": true,
           "refId": "A"
@@ -737,7 +737,7 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "topk(15, sum by (controller, action) (rate(ruby_http_requests_total{pod=~\"$pod\",controller=~\"$controller\",action=~\"$action\"}[$interval])))",
+          "expr": "topk(15, sum by (controller, action) (rate(ruby_http_requests_total{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",controller=~\"$controller\",action=~\"$action\"}[$interval])))",
           "instant": true,
           "legendFormat": "{{controller}}#{{action}}",
           "range": false,
@@ -793,7 +793,7 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "topk(15, histogram_quantile(0.95, sum by (le, controller, action) (rate(ruby_http_request_duration_seconds_bucket{pod=~\"$pod\",controller=~\"$controller\",action=~\"$action\"}[$interval]))) or max by (controller, action) (ruby_http_request_duration_seconds{pod=~\"$pod\",controller=~\"$controller\",action=~\"$action\",quantile=\"0.95\"}))",
+          "expr": "topk(15, histogram_quantile(0.95, sum by (le, controller, action) (rate(ruby_http_request_duration_seconds_bucket{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",controller=~\"$controller\",action=~\"$action\"}[$interval]))) or max by (controller, action) (ruby_http_request_duration_seconds{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",controller=~\"$controller\",action=~\"$action\",quantile=\"0.95\"}))",
           "instant": true,
           "legendFormat": "{{controller}}#{{action}}",
           "range": false,
@@ -851,7 +851,7 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "topk(15, 100 * sum by (controller, action) (rate(ruby_http_requests_total{pod=~\"$pod\",controller=~\"$controller\",action=~\"$action\",status=~\"5..\"}[$interval])) / clamp_min(sum by (controller, action) (rate(ruby_http_requests_total{pod=~\"$pod\",controller=~\"$controller\",action=~\"$action\"}[$interval])), 1e-9))",
+          "expr": "topk(15, 100 * sum by (controller, action) (rate(ruby_http_requests_total{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",controller=~\"$controller\",action=~\"$action\",status=~\"5..\"}[$interval])) / clamp_min(sum by (controller, action) (rate(ruby_http_requests_total{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",controller=~\"$controller\",action=~\"$action\"}[$interval])), 1e-9))",
           "instant": true,
           "legendFormat": "{{controller}}#{{action}}",
           "range": false,
@@ -1020,14 +1020,14 @@
           "type": "prometheus",
           "uid": "$datasource"
         },
-        "definition": "label_values(ruby_http_requests_total{pod=~\"$pod\"}, controller)",
+        "definition": "label_values(ruby_http_requests_total{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\"}, controller)",
         "hide": 0,
         "includeAll": true,
         "label": "Controller",
         "multi": true,
         "name": "controller",
         "options": [],
-        "query": "label_values(ruby_http_requests_total{pod=~\"$pod\"}, controller)",
+        "query": "label_values(ruby_http_requests_total{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\"}, controller)",
         "refresh": 1,
         "regex": "",
         "skipUrlSync": false,
@@ -1049,14 +1049,14 @@
           "type": "prometheus",
           "uid": "$datasource"
         },
-        "definition": "label_values(ruby_http_requests_total{pod=~\"$pod\",controller=~\"$controller\"}, action)",
+        "definition": "label_values(ruby_http_requests_total{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",controller=~\"$controller\"}, action)",
         "hide": 0,
         "includeAll": true,
         "label": "Action",
         "multi": true,
         "name": "action",
         "options": [],
-        "query": "label_values(ruby_http_requests_total{pod=~\"$pod\",controller=~\"$controller\"}, action)",
+        "query": "label_values(ruby_http_requests_total{job=~\"$job\",namespace=~\"$namespace\",service=~\"$service\",pod=~\"$pod\",controller=~\"$controller\"}, action)",
         "refresh": 1,
         "regex": "",
         "skipUrlSync": false,
