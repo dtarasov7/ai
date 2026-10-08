@@ -1,0 +1,14 @@
+@startuml
+title print PATH — Inspect a single value
+skinparam shadowing false
+autonumber
+actor "User" as U
+participant "TerminalUI" as UI
+participant "DebugSession" as S
+participant "Inspection / instrumentation" as I
+U -> UI : print PATH
+UI -> S : inspect(PATH)
+S -> I : read_path(current_state(), PATH)
+I --> S : Copied value or unavailable-path error
+UI --> U : Result or command error; return to prompt
+@enduml

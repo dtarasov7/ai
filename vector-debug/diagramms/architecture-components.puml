@@ -1,0 +1,45 @@
+@startuml
+title VRL Debugger — components
+skinparam shadowing false
+
+actor "User" as user
+package "Python Standard Library application" {
+  component "cli.py" as cli
+  component "ui.py\nTerminalUI" as ui
+  component "session.py\nDebugSession" as session
+  component "scanner.py / branches.py" as scanner
+  component "inspection.py" as inspection
+  component "instrumentation.py" as capture
+  component "runner.py\nVectorRunner" as runner
+  component "diff.py / models.py" as models
+  component "theme.py / terminal.py" as terminal
+  component "version.py" as version
+}
+component "Vector binary" as vector
+artifact "VRL source + JSON / JSONL input" as files
+artifact "vrl-debug.ini" as palette
+artifact "vrl_debug.py" as standalone
+component "tools/build_single_file.py" as builder
+user --> cli : CLI arguments
+files --> cli : read
+cli --> scanner : scan()
+cli --> runner : probe Vector capabilities
+cli --> session : create session
+cli --> ui : run()
+ui --> session : commands and snapshots
+ui --> terminal : colors and command history
+palette --> terminal : optional overrides
+session --> scanner : source ranges and control flow
+session --> inspection : paths, watches and edit locations
+session --> models : states, diffs and errors
+session --> runner : prefix replay and conditions
+runner --> inspection : insert replay edits
+runner --> capture : capture checkpoints and locals
+runner --> vector : subprocess: vector vrl
+version --> cli
+version --> ui
+builder --> standalone : combine maintained modules
+note bottom of standalone
+Same behavior as the package; no package needed at runtime.
+end note
+@enduml

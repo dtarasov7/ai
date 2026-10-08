@@ -1,0 +1,10 @@
+@startuml
+title q / quit — Выйти из отладчика
+skinparam shadowing false
+autonumber
+actor "Пользователь" as U
+participant "TerminalUI" as UI
+U -> UI : q / quit
+UI -> UI : command() возвращает False
+UI --> U : run() завершает цикл команд
+@enduml

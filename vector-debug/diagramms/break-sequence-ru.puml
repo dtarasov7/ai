@@ -1,0 +1,15 @@
+@startuml
+title b LINE / break LINE — Добавить breakpoint по строке
+skinparam shadowing false
+autonumber
+actor "Пользователь" as U
+participant "TerminalUI" as UI
+participant "DebugSession" as S
+participant "Scanner / разбор блоков" as B
+U -> UI : b LINE / break LINE
+UI -> S : add_line_breakpoint(LINE, condition)
+S -> B : source_target(LINE): найти поддерживаемую команду
+S -> S : Сохранить строку, внешнее выражение, цель и условие
+S --> UI : Привязанный диапазон; условие вычисляется позже в continue / until
+UI --> U : Результат либо ошибка команды; возврат к приглашению
+@enduml

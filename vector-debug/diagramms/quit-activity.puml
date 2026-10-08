@@ -1,0 +1,13 @@
+@startuml
+title q / quit — algorithm
+skinparam shadowing false
+start
+:Read command and validate arguments;
+if (Command syntax valid?) then (yes)
+:Return False from command();
+:Exit run() and return to CLI, session-only settings are discarded;
+else (no)
+:Display command error, keep current state;
+endif
+stop
+@enduml

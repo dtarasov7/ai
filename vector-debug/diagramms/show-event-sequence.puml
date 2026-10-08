@@ -1,0 +1,10 @@
+@startuml
+title show event on / show event off — Control automatic event output
+skinparam shadowing false
+autonumber
+actor "User" as U
+participant "TerminalUI" as UI
+U -> UI : show event on / show event off
+UI -> UI : Validate show SECTION on|off; update auto_event
+UI --> U : Confirm setting; next state display uses it
+@enduml

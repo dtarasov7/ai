@@ -1,0 +1,37 @@
+@startuml
+title VRL Debugger — startup
+skinparam shadowing false
+
+autonumber
+actor "User" as U
+participant "CLI" as CLI
+participant "Files / palette" as F
+participant "Scanner" as B
+participant "VectorRunner" as R
+participant "Vector" as V
+participant "DebugSession" as S
+participant "TerminalUI" as UI
+U -> CLI : python3 vrl_debug.py [arguments]
+alt --version / --help
+  CLI --> U : Version or argparse help; exit before Vector initialization
+else Debug session requested
+  CLI -> CLI : Validate required paths and positive finite timeout
+  CLI -> F : Read optional INI, VRL source and JSON / selected JSONL record
+  CLI -> B : scan(source)
+  CLI -> R : VectorRunner(binary, timeout, diagnostics)
+  R -> V : --version; vrl --help; transport probe
+  V --> R : Capabilities and encoded probe result
+  alt Input and capability checks succeed
+    CLI -> S : DebugSession(expressions, runner, input_event)
+    CLI -> UI : run()
+    UI -> UI : Initialize readline history; show help and initial state
+    loop Until quit or EOF
+      U -> UI : Command
+      UI -> UI : Dispatch command; show result or command error
+    end
+    CLI --> U : exit 0
+  else Startup fails
+    CLI --> U : Diagnostics on stderr; exit 1 (interrupt: 130)
+  end
+end
+@enduml

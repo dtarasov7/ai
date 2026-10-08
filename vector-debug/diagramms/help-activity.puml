@@ -1,0 +1,13 @@
+@startuml
+title h / help — algorithm
+skinparam shadowing false
+start
+:Read command and validate arguments;
+if (Command syntax valid?) then (yes)
+:Display command names, aliases and arguments from HELP;
+:Keep session state, do not invoke Vector;
+else (no)
+:Display command error, keep current state;
+endif
+stop
+@enduml

@@ -1,0 +1,14 @@
+@startuml
+title d / diff — algorithm
+skinparam shadowing false
+start
+:Read command and validate arguments;
+if (Command syntax valid?) then (yes)
+:Read current state without moving execution;
+:Group event diff entries as added, changed and deleted, display old and new values;
+:Use existing palette, do not invoke Vector;
+else (no)
+:Display command error, keep current state;
+endif
+stop
+@enduml

@@ -1,0 +1,14 @@
+@startuml
+title e / event — algorithm
+skinparam shadowing false
+start
+:Read command and validate arguments;
+if (Command syntax valid?) then (yes)
+:Read current state without moving execution;
+:Format current event as JSON regardless of automatic display flag;
+:Use existing palette, do not invoke Vector;
+else (no)
+:Display command error, keep current state;
+endif
+stop
+@enduml

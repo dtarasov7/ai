@@ -1,0 +1,10 @@
+@startuml
+title show locals on / show locals off — Control automatic locals output
+skinparam shadowing false
+autonumber
+actor "User" as U
+participant "TerminalUI" as UI
+U -> UI : show locals on / show locals off
+UI -> UI : Validate show SECTION on|off; update auto_locals
+UI --> U : Confirm setting; next state display uses it
+@enduml

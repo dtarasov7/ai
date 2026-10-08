@@ -1,0 +1,19 @@
+@startuml
+title b LINE if EXPR / break LINE if EXPR — algorithm
+skinparam shadowing false
+start
+:Read command and validate arguments;
+if (Command syntax valid?) then (yes)
+:Parse positive source line and nonempty VRL condition;
+:Resolve deepest supported statement, loop-body nested blocks stay atomic;
+if (Source target valid?) then (yes)
+:Store or replace breakpoint for requested line, rearm stop;
+:Display resolved range, do not execute program or condition;
+else (no)
+:Report command error without changing breakpoints;
+endif
+else (no)
+:Display command error, keep current state;
+endif
+stop
+@enduml

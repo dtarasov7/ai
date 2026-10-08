@@ -1,0 +1,15 @@
+@startuml
+title b LINE / break LINE — Add a source breakpoint
+skinparam shadowing false
+autonumber
+actor "User" as U
+participant "TerminalUI" as UI
+participant "DebugSession" as S
+participant "Scanner / branches" as B
+U -> UI : b LINE / break LINE
+UI -> S : add_line_breakpoint(LINE, condition)
+S -> B : source_target(LINE): resolve supported statement
+S -> S : Store requested line, enclosing expression, target and condition
+S --> UI : Resolved range; condition evaluated later by continue / until
+UI --> U : Result or command error; return to prompt
+@enduml

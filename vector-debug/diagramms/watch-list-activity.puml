@@ -1,0 +1,19 @@
+@startuml
+title watch — algorithm
+skinparam shadowing false
+start
+:Read command and validate arguments;
+if (Command syntax valid?) then (yes)
+while (More watched paths?) is (yes)
+if (Path available in current state?) then (yes)
+:Display value;
+else (no)
+:Display unavailable marker, keep watch;
+endif
+endwhile (no)
+:If list is empty, display none, do not move execution;
+else (no)
+:Display command error, keep current state;
+endif
+stop
+@enduml

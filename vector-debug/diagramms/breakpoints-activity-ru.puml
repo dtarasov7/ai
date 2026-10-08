@@ -1,0 +1,16 @@
+@startuml
+title bl / breakpoints — алгоритм
+skinparam shadowing false
+start
+:Прочитать команду и проверить аргументы;
+if (Синтаксис команды допустим?) then (да)
+if (Есть breakpoints по строкам?) then (да)
+:Отсортировать по указанным строкам, показать диапазоны и условия;
+else (нет)
+:Показать отсутствие breakpoints;
+endif
+else (нет)
+:Показать ошибку команды, сохранить текущее состояние;
+endif
+stop
+@enduml

@@ -1,0 +1,18 @@
+@startuml
+title print PATH — algorithm
+skinparam shadowing false
+start
+:Read command and validate arguments;
+if (Command syntax valid?) then (yes)
+:Parse event root or local name and path segments;
+:Traverse object keys and nonnegative array indexes in current values;
+if (Value available?) then (yes)
+:Display PATH and JSON value, null is a valid value;
+else (no)
+:Report unavailable value or invalid-path command error;
+endif
+else (no)
+:Display command error, keep current state;
+endif
+stop
+@enduml

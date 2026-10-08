@@ -1,0 +1,10 @@
+@startuml
+title show event on / show event off — Управлять автоматическим выводом данных
+skinparam shadowing false
+autonumber
+actor "Пользователь" as U
+participant "TerminalUI" as UI
+U -> UI : show event on / show event off
+UI -> UI : Проверить show SECTION on|off; изменить auto_event
+UI --> U : Подтвердить настройку; она действует при следующем выводе
+@enduml

@@ -1,0 +1,14 @@
+@startuml
+title watch PATH — algorithm
+skinparam shadowing false
+start
+:Read command and validate arguments;
+if (Command syntax valid?) then (yes)
+:Validate path syntax without requiring its value to exist;
+:Add path once, retain across navigation and edits;
+:Display remaining watches with values or unavailable markers;
+else (no)
+:Display command error, keep current state;
+endif
+stop
+@enduml

@@ -1,0 +1,13 @@
+@startuml
+title d locals / diff locals — Display local-variable changes
+skinparam shadowing false
+autonumber
+actor "User" as U
+participant "TerminalUI" as UI
+participant "DebugSession" as S
+U -> UI : d locals / diff locals
+UI -> UI : show_diff(locals_only=True)
+UI -> S : current_state(); source_expression() when needed
+S --> UI : Copied values and original source range
+UI --> U : Result or command error; return to prompt
+@enduml

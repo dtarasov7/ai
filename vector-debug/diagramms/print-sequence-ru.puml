@@ -1,0 +1,14 @@
+@startuml
+title print PATH — Посмотреть отдельное значение
+skinparam shadowing false
+autonumber
+actor "Пользователь" as U
+participant "TerminalUI" as UI
+participant "DebugSession" as S
+participant "Просмотр / инструментирование" as I
+U -> UI : print PATH
+UI -> S : inspect(PATH)
+S -> I : read_path(current_state(), PATH)
+I --> S : Копия значения либо ошибка недоступного пути
+UI --> U : Результат либо ошибка команды; возврат к приглашению
+@enduml

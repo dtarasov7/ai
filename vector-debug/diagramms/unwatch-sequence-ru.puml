@@ -1,0 +1,14 @@
+@startuml
+title unwatch PATH — Удалить наблюдение
+skinparam shadowing false
+autonumber
+actor "Пользователь" as U
+participant "TerminalUI" as UI
+participant "DebugSession" as S
+U -> UI : unwatch PATH
+UI -> S : remove_watch(PATH)
+S -> S : Проверить, что PATH зарегистрирован
+S -> S : Удалить наблюдение либо сообщить ошибку команды
+UI -> UI : show_watches()
+UI --> U : Результат либо ошибка команды; возврат к приглашению
+@enduml

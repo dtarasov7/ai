@@ -1,0 +1,16 @@
+@startuml
+title watch — Показать наблюдаемые значения
+skinparam shadowing false
+autonumber
+actor "Пользователь" as U
+participant "TerminalUI" as UI
+participant "DebugSession" as S
+participant "Просмотр / инструментирование" as I
+U -> UI : watch
+UI -> S : Прочитать watches
+loop Для каждого наблюдаемого пути
+UI -> S : inspect(PATH)
+S -> I : read_path(current_state(), PATH)
+end
+UI --> U : Результат либо ошибка команды; возврат к приглашению
+@enduml

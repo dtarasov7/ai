@@ -1,0 +1,28 @@
+@startuml
+title set PATH = JSON — algorithm
+skinparam shadowing false
+start
+:Read command and validate arguments;
+if (Command syntax valid?) then (yes)
+:Parse assignment, path and strict JSON value;
+if (Successful current position and local available if needed?) then (yes)
+:Record original source offset, inside loop include iteration and body boundary;
+:Create candidate session with appended edit, replay current navigation;
+if (Replay successful and exact JSON value visible?) then (yes)
+:Commit candidate caches, trace and edits, compute event and locals diffs;
+else (no)
+:Reject edit, keep original session unchanged;
+endif
+else (no)
+:Report command error without applying edit;
+endif
+if (Command completed without a command error?) then (yes)
+:Display source, enabled sections, diffs and watches;
+else (no)
+:Display command error and return to prompt without state redraw;
+endif
+else (no)
+:Display command error, keep current state;
+endif
+stop
+@enduml

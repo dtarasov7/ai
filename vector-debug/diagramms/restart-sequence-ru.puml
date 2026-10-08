@@ -1,0 +1,18 @@
+@startuml
+title r / restart — Начать навигацию заново
+skinparam shadowing false
+autonumber
+actor "Пользователь" as U
+participant "TerminalUI" as UI
+participant "DebugSession" as S
+U -> UI : r / restart
+UI -> S : restart()
+S -> S : Выйти из трассы; index = 0; активировать остановки; вычислить diff locals
+S --> UI : Кешированный шаг 0; правки, наблюдения, breakpoints и кеши сохранены
+opt Команда завершилась без ошибки команды
+UI -> S : current_state() и source_expression()
+S --> UI : Копия текущего состояния и позиции исходника
+UI -> UI : show_state(): включённые разделы, diff, наблюдения и ошибки
+end
+UI --> U : Результат либо ошибка команды; возврат к приглашению
+@enduml

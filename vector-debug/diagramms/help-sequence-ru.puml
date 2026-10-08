@@ -1,0 +1,10 @@
+@startuml
+title h / help — Показать справку по командам
+skinparam shadowing false
+autonumber
+actor "Пользователь" as U
+participant "TerminalUI" as UI
+U -> UI : h / help
+UI -> UI : Прочитать константу HELP
+UI --> U : Результат либо ошибка команды; возврат к приглашению
+@enduml

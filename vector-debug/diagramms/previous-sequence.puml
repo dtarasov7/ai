@@ -1,0 +1,36 @@
+@startuml
+title p / prev / previous — Return to the previous step
+skinparam shadowing false
+autonumber
+actor "User" as U
+participant "TerminalUI" as UI
+participant "DebugSession" as S
+participant "Scanner / branches" as B
+participant "Inspection / instrumentation" as I
+participant "VectorRunner" as R
+participant "Vector process" as V
+U -> UI : p / prev / previous
+UI -> S : step_previous()
+alt Earlier trace snapshot exists
+S -> S : Move trace cursor backward; compute locals diff
+else Use top-level navigation
+S -> S : goto(max(0, index - 1))
+alt Cached position exists
+S -> S : Reuse snapshot; compute transition diff
+else Cache miss
+S -> B : Build prefix and checkpoint metadata
+S -> R : run() / run_checkpoints(original input, edits)
+R -> I : Insert replay edits and diagnostic capture
+R -> V : vector vrl --program FILE --input FILE
+V --> R : Encoded event, locals and position, or diagnostics
+R --> S : RunResult or DebugError
+S -> S : Cache result; preserve prior values on failure
+end
+end
+opt Command completed without a command error
+UI -> S : current_state() and source_expression()
+S --> UI : Copied current state and source cursor
+UI -> UI : show_state(): enabled sections, diffs, watches and errors
+end
+UI --> U : Result or command error; return to prompt
+@enduml

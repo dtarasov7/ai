@@ -1,0 +1,34 @@
+@startuml
+title edits clear — Remove all edits
+skinparam shadowing false
+autonumber
+actor "User" as U
+participant "TerminalUI" as UI
+participant "DebugSession" as S
+participant "Scanner / branches" as B
+participant "Inspection / instrumentation" as I
+participant "Candidate DebugSession" as C
+participant "VectorRunner" as R
+participant "Vector process" as V
+U -> UI : edits clear
+UI -> S : clear_edits()
+S -> C : _with_edits([])
+C -> B : Build prefix and checkpoint metadata
+C -> R : run() / run_checkpoints(original input, edits)
+R -> I : Insert replay edits and diagnostic capture
+R -> V : vector vrl --program FILE --input FILE
+V --> R : Encoded event, locals and position, or diagnostics
+R --> C : RunResult or DebugError
+C --> S : Replayed candidate state or error
+alt Replay succeeded
+S -> S : _commit_edits(); retain watches and breakpoints
+else Replay failed
+S --> UI : Command error; keep original edits and state
+end
+opt Command completed without a command error
+UI -> S : current_state() and source_expression()
+S --> UI : Copied current state and source cursor
+UI -> UI : show_state(): enabled sections, diffs, watches and errors
+end
+UI --> U : Result or command error; return to prompt
+@enduml

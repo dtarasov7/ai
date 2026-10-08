@@ -1,0 +1,14 @@
+@startuml
+title unwatch PATH — algorithm
+skinparam shadowing false
+start
+:Read command and validate arguments;
+if (Command syntax valid?) then (yes)
+:Require an existing watched path;
+:Remove path, report command error if absent;
+:Display remaining watches with values or unavailable markers;
+else (no)
+:Display command error, keep current state;
+endif
+stop
+@enduml

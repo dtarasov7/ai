@@ -1,0 +1,13 @@
+@startuml
+title l / locals — Показать локальные переменные
+skinparam shadowing false
+autonumber
+actor "Пользователь" as U
+participant "TerminalUI" as UI
+participant "DebugSession" as S
+U -> UI : l / locals
+UI -> UI : show_locals()
+UI -> S : current_state(); при необходимости source_expression()
+S --> UI : Копия значений и исходный диапазон строк
+UI --> U : Результат либо ошибка команды; возврат к приглашению
+@enduml

@@ -1,0 +1,13 @@
+@startuml
+title src all / source all — Display the entire source
+skinparam shadowing false
+autonumber
+actor "User" as U
+participant "TerminalUI" as UI
+participant "DebugSession" as S
+U -> UI : src all / source all
+UI -> UI : show_source(full=True)
+UI -> S : current_state(); source_expression() when needed
+S --> UI : Copied values and original source range
+UI --> U : Result or command error; return to prompt
+@enduml

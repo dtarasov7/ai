@@ -1,0 +1,14 @@
+@startuml
+title src all / source all — algorithm
+skinparam shadowing false
+start
+:Read command and validate arguments;
+if (Command syntax valid?) then (yes)
+:Read current state without moving execution;
+:Display all original lines, including comments and blank lines, with the current marker;
+:Use existing palette, do not invoke Vector;
+else (no)
+:Display command error, keep current state;
+endif
+stop
+@enduml

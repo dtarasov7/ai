@@ -1,0 +1,15 @@
+@startuml
+title watch PATH — Add a watched path
+skinparam shadowing false
+autonumber
+actor "User" as U
+participant "TerminalUI" as UI
+participant "DebugSession" as S
+participant "Inspection / instrumentation" as I
+U -> UI : watch PATH
+UI -> S : add_watch(PATH)
+S -> I : Validate path syntax; value may be unavailable
+S -> S : Add unless already watched
+UI -> UI : show_watches()
+UI --> U : Result or command error; return to prompt
+@enduml

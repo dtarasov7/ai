@@ -1,0 +1,38 @@
+@startuml
+title set PATH = JSON — Change a value
+skinparam shadowing false
+autonumber
+actor "User" as U
+participant "TerminalUI" as UI
+participant "DebugSession" as S
+participant "Scanner / branches" as B
+participant "Inspection / instrumentation" as I
+participant "Candidate DebugSession" as C
+participant "VectorRunner" as R
+participant "Vector process" as V
+U -> UI : set PATH = JSON
+UI -> I : split_assignment()
+UI -> S : set_value(PATH, JSON)
+S -> I : parse_path(PATH); check current-scope local availability
+S -> R : strict_json(JSON) in runner.py
+S -> S : Resolve current offset, loop and iteration; append candidate edit
+S -> C : _with_edits(): fresh session and caches
+C -> B : Build prefix and checkpoint metadata
+C -> R : run() / run_checkpoints(original input, edits)
+R -> I : Insert replay edits and diagnostic capture
+R -> V : vector vrl --program FILE --input FILE
+V --> R : Encoded event, locals and position, or diagnostics
+R --> C : RunResult or DebugError
+C --> S : Candidate state or replay failure
+alt Successful replay exposes exact requested JSON value
+S -> S : _commit_edits(): replace caches and trace; compute diffs
+else Candidate rejected
+S --> UI : Command error; original session unchanged
+end
+opt Command completed without a command error
+UI -> S : current_state() and source_expression()
+S --> UI : Copied current state and source cursor
+UI -> UI : show_state(): enabled sections, diffs, watches and errors
+end
+UI --> U : Result or command error; return to prompt
+@enduml

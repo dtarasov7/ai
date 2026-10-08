@@ -1,0 +1,37 @@
+@startuml
+title fi / finish iteration — algorithm
+skinparam shadowing false
+start
+:Read command and validate arguments;
+if (Command syntax valid?) then (yes)
+if (Current state has an error?) then (yes)
+:Keep last successful values and error;
+else (no)
+if (Active for_each iteration?) then (yes)
+:Finish current iteration, capture next iteration header or following statement;
+if (Position cached?) then (yes)
+:Reuse cached snapshot;
+else (no)
+:Generate prefix and checkpoint capture, apply replay edits;
+:Run Vector with original input, decode diagnostic envelope;
+if (Evaluation succeeded?) then (yes)
+:Cache event, locals and execution position;
+else (no)
+:Cache error with last successful values;
+endif
+endif
+:Ignore breakpoints, do not execute the following sibling statement;
+else (no)
+:Report command error, suggest entering a loop;
+endif
+endif
+if (Command completed without a command error?) then (yes)
+:Display source, enabled sections, diffs and watches;
+else (no)
+:Display command error and return to prompt without state redraw;
+endif
+else (no)
+:Display command error, keep current state;
+endif
+stop
+@enduml

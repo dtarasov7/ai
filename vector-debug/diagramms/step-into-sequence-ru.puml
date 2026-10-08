@@ -1,0 +1,37 @@
+@startuml
+title i / into / step into — Войти в ветку или цикл
+skinparam shadowing false
+autonumber
+actor "Пользователь" as U
+participant "TerminalUI" as UI
+participant "DebugSession" as S
+participant "Scanner / разбор блоков" as B
+participant "Просмотр / инструментирование" as I
+participant "VectorRunner" as R
+participant "Процесс Vector" as V
+U -> UI : i / into / step into
+UI -> S : step_into()
+S -> B : parse_control(expression)
+alt Команда не поддерживает вход
+S -> S : step_next()
+else Распознана управляющая конструкция
+S -> S : Начать трассу либо выбрать границу ветки / итерации / тела
+end
+alt Позиция уже есть в кеше
+S -> S : Использовать снимок и вычислить diff перехода
+else Нет в кеше
+S -> B : Подготовить префикс и метаданные точек остановки
+S -> R : run() / run_checkpoints(исходные данные, правки)
+R -> I : Вставить правки replay и сбор диагностики
+R -> V : vector vrl --program FILE --input FILE
+V --> R : Закодированные данные, locals и позиция либо диагностика
+R --> S : RunResult либо DebugError
+S -> S : Сохранить результат в кеше; при ошибке оставить прежние значения
+end
+opt Команда завершилась без ошибки команды
+UI -> S : current_state() и source_expression()
+S --> UI : Копия текущего состояния и позиции исходника
+UI -> UI : show_state(): включённые разделы, diff, наблюдения и ошибки
+end
+UI --> U : Результат либо ошибка команды; возврат к приглашению
+@enduml

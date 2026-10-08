@@ -1,0 +1,15 @@
+@startuml
+title show event on / show event off — algorithm
+skinparam shadowing false
+start
+:Read command and validate arguments;
+if (Command syntax valid?) then (yes)
+:Validate section and on/off arguments;
+:Update auto_event for this UI session;
+:Confirm setting without execution or immediate state redraw;
+:Explicit inspection and watches remain available, auto_locals also controls locals diff;
+else (no)
+:Display command error, keep current state;
+endif
+stop
+@enduml

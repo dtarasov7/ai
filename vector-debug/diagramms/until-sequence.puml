@@ -1,0 +1,45 @@
+@startuml
+title until LINE — Run to a source line
+skinparam shadowing false
+autonumber
+actor "User" as U
+participant "TerminalUI" as UI
+participant "DebugSession" as S
+participant "Scanner / branches" as B
+participant "Inspection / instrumentation" as I
+participant "VectorRunner" as R
+participant "Vector process" as V
+U -> UI : until LINE
+UI -> S : until_line(LINE)
+S -> B : Resolve LINE to supported statement
+S -> S : Pass current breakpoint once; select forward stop loop
+loop Until target, breakpoint, error or program end
+S -> S : Check target and upcoming breakpoint before execution
+opt Matching breakpoint has a condition
+S -> R : condition(EXPR, current_state)
+R -> V : Evaluate on copied JSON event and captured locals
+V --> R : Boolean result or error
+R --> S : Condition result; reject non-boolean values
+end
+opt No stop reached
+S -> S : step_into() if inner destination requires entry; otherwise step_next()
+alt Cached position exists
+S -> S : Reuse snapshot; compute transition diff
+else Cache miss
+S -> B : Build prefix and checkpoint metadata
+S -> R : run() / run_checkpoints(original input, edits)
+R -> I : Insert replay edits and diagnostic capture
+R -> V : vector vrl --program FILE --input FILE
+V --> R : Encoded event, locals and position, or diagnostics
+R --> S : RunResult or DebugError
+S -> S : Cache result; preserve prior values on failure
+end
+end
+end
+opt Command completed without a command error
+UI -> S : current_state() and source_expression()
+S --> UI : Copied current state and source cursor
+UI -> UI : show_state(): enabled sections, diffs, watches and errors
+end
+UI --> U : Result or command error; return to prompt
+@enduml

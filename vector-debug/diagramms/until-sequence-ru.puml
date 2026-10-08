@@ -1,0 +1,45 @@
+@startuml
+title until LINE — Выполнить до строки
+skinparam shadowing false
+autonumber
+actor "Пользователь" as U
+participant "TerminalUI" as UI
+participant "DebugSession" as S
+participant "Scanner / разбор блоков" as B
+participant "Просмотр / инструментирование" as I
+participant "VectorRunner" as R
+participant "Процесс Vector" as V
+U -> UI : until LINE
+UI -> S : until_line(LINE)
+S -> B : Привязать LINE к поддерживаемой команде
+S -> S : Один раз пройти текущий breakpoint; выбрать цикл движения вперёд
+loop До цели, breakpoint, ошибки либо конца программы
+S -> S : Проверить цель и предстоящий breakpoint до выполнения
+opt У совпавшего breakpoint есть условие
+S -> R : condition(EXPR, current_state)
+R -> V : Вычислить на копии JSON-данных и захваченных locals
+V --> R : Булево значение либо ошибка
+R --> S : Результат условия; отклонить небулевы значения
+end
+opt Остановка не достигнута
+S -> S : step_into(), если нужен вход к внутренней цели; иначе step_next()
+alt Позиция уже есть в кеше
+S -> S : Использовать снимок и вычислить diff перехода
+else Нет в кеше
+S -> B : Подготовить префикс и метаданные точек остановки
+S -> R : run() / run_checkpoints(исходные данные, правки)
+R -> I : Вставить правки replay и сбор диагностики
+R -> V : vector vrl --program FILE --input FILE
+V --> R : Закодированные данные, locals и позиция либо диагностика
+R --> S : RunResult либо DebugError
+S -> S : Сохранить результат в кеше; при ошибке оставить прежние значения
+end
+end
+end
+opt Команда завершилась без ошибки команды
+UI -> S : current_state() и source_expression()
+S --> UI : Копия текущего состояния и позиции исходника
+UI -> UI : show_state(): включённые разделы, diff, наблюдения и ошибки
+end
+UI --> U : Результат либо ошибка команды; возврат к приглашению
+@enduml

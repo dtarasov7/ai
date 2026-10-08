@@ -1,0 +1,10 @@
+@startuml
+title show locals on / show locals off — Управлять автоматическим выводом locals
+skinparam shadowing false
+autonumber
+actor "Пользователь" as U
+participant "TerminalUI" as UI
+U -> UI : show locals on / show locals off
+UI -> UI : Проверить show SECTION on|off; изменить auto_locals
+UI --> U : Подтвердить настройку; она действует при следующем выводе
+@enduml

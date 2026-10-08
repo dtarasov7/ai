@@ -1,0 +1,88 @@
+@startuml
+title VRL Debugger — state and ownership
+skinparam shadowing false
+
+class DebugSession {
+  expressions : tuple[VrlExpression]
+  _input_event : original JSON
+  index : int
+  _states : dict[int, DebugState]
+  _trace_history : list[state, node]
+  _trace_requests : list[enter, finish]
+  _checkpoint_cache : dict[key, snapshot]
+  line_breakpoints : dict[line, target, condition]
+  edits : list[dict]
+  watches : list[path]
+}
+class DebugState {
+  index : int
+  event : JSON
+  locals : dict
+  diff : list[DiffEntry]
+  locals_diff : list[DiffEntry]
+  iteration : optional dict
+  completed_iteration : optional dict
+  error : optional DebugError
+  successful_index : int
+}
+class VrlExpression {
+  index : int
+  start_line : int
+  end_line : int
+  source : str
+}
+class BranchNode {
+  expression : VrlExpression
+  parent : optional Branch
+  branches : list[Branch]
+  loop : optional dict
+}
+class Branch {
+  start : int
+  end : int
+  parent : BranchNode
+  children : list[BranchNode]
+}
+class DiffEntry {
+  path : str
+  kind : added / changed / deleted
+  old_value : JSON
+  new_value : JSON
+}
+class RunResult {
+  event : JSON
+  locals : dict
+  position : optional str
+  iteration : optional dict
+  completed_iteration : optional dict
+  locals_warning : optional str
+}
+class TerminalUI {
+  lines : original source lines
+  auto_event : bool
+  auto_locals : bool
+  theme : Theme
+}
+class VectorRunner {
+  binary : absolute path
+  timeout : seconds
+  run()
+  run_checkpoints()
+  condition()
+}
+TerminalUI --> DebugSession : commands / copied state
+DebugSession *-- VrlExpression
+DebugSession *-- DebugState : caches and history
+DebugSession *-- BranchNode : parsed control roots
+BranchNode *-- Branch
+Branch *-- BranchNode : children
+DebugState *-- DiffEntry
+DebugSession --> VectorRunner : evaluation
+VectorRunner ..> RunResult : returns
+note bottom of DebugSession
+current_state() returns a deep copy.
+Replay starts from _input_event and applies recorded edits.
+Restart retains caches, edits, watches and breakpoints.
+Edit commit replaces evaluation caches and trace.
+end note
+@enduml

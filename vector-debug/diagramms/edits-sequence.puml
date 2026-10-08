@@ -1,0 +1,12 @@
+@startuml
+title edits — List replay edits
+skinparam shadowing false
+autonumber
+actor "User" as U
+participant "TerminalUI" as UI
+participant "DebugSession" as S
+U -> UI : edits
+UI -> S : Read edits
+S --> UI : Paths, values, source lines and optional iterations
+UI --> U : Result or command error; return to prompt
+@enduml

@@ -1,0 +1,16 @@
+@startuml
+title watch — Display watched values
+skinparam shadowing false
+autonumber
+actor "User" as U
+participant "TerminalUI" as UI
+participant "DebugSession" as S
+participant "Inspection / instrumentation" as I
+U -> UI : watch
+UI -> S : Read watches
+loop For each watched path
+UI -> S : inspect(PATH)
+S -> I : read_path(current_state(), PATH)
+end
+UI --> U : Result or command error; return to prompt
+@enduml

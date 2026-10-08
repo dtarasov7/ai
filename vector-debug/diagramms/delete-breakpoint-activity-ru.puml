@@ -1,0 +1,16 @@
+@startuml
+title bd LINE / delete-breakpoint LINE — алгоритм
+skinparam shadowing false
+start
+:Прочитать команду и проверить аргументы;
+if (Синтаксис команды допустим?) then (да)
+if (Есть breakpoint именно для LINE?) then (да)
+:Удалить breakpoint, снять маркер строки, подтвердить удаление;
+else (нет)
+:Сообщить ошибку команды;
+endif
+else (нет)
+:Показать ошибку команды, сохранить текущее состояние;
+endif
+stop
+@enduml

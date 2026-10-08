@@ -1,0 +1,10 @@
+@startuml
+title h / help — Display command help
+skinparam shadowing false
+autonumber
+actor "User" as U
+participant "TerminalUI" as UI
+U -> UI : h / help
+UI -> UI : Read HELP constant
+UI --> U : Result or command error; return to prompt
+@enduml

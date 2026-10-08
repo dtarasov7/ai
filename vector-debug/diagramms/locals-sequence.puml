@@ -1,0 +1,13 @@
+@startuml
+title l / locals — Display locals
+skinparam shadowing false
+autonumber
+actor "User" as U
+participant "TerminalUI" as UI
+participant "DebugSession" as S
+U -> UI : l / locals
+UI -> UI : show_locals()
+UI -> S : current_state(); source_expression() when needed
+S --> UI : Copied values and original source range
+UI --> U : Result or command error; return to prompt
+@enduml

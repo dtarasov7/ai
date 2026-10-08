@@ -1,0 +1,17 @@
+@startuml
+title edits — algorithm
+skinparam shadowing false
+start
+:Read command and validate arguments;
+if (Command syntax valid?) then (yes)
+if (Any edits?) then (yes)
+:Display edits in insertion order with location and iteration;
+else (no)
+:Display no edits;
+endif
+:Keep state and cache, do not invoke Vector;
+else (no)
+:Display command error, keep current state;
+endif
+stop
+@enduml

@@ -1,0 +1,38 @@
+@startuml
+title set PATH = JSON — Изменить значение
+skinparam shadowing false
+autonumber
+actor "Пользователь" as U
+participant "TerminalUI" as UI
+participant "DebugSession" as S
+participant "Scanner / разбор блоков" as B
+participant "Просмотр / инструментирование" as I
+participant "Пробная DebugSession" as C
+participant "VectorRunner" as R
+participant "Процесс Vector" as V
+U -> UI : set PATH = JSON
+UI -> I : split_assignment()
+UI -> S : set_value(PATH, JSON)
+S -> I : parse_path(PATH); проверить доступность local в текущей области
+S -> R : strict_json(JSON) из runner.py
+S -> S : Определить позицию, цикл и итерацию; добавить пробную правку
+S -> C : _with_edits(): новая сессия и кеши
+C -> B : Подготовить префикс и метаданные точек остановки
+C -> R : run() / run_checkpoints(исходные данные, правки)
+R -> I : Вставить правки replay и сбор диагностики
+R -> V : vector vrl --program FILE --input FILE
+V --> R : Закодированные данные, locals и позиция либо диагностика
+R --> C : RunResult либо DebugError
+C --> S : Пробное состояние либо ошибка replay
+alt Успешный replay показывает точно заданное JSON-значение
+S -> S : _commit_edits(): заменить кеши и трассу; вычислить diff
+else Пробная правка отклонена
+S --> UI : Ошибка команды; исходная сессия сохранена
+end
+opt Команда завершилась без ошибки команды
+UI -> S : current_state() и source_expression()
+S --> UI : Копия текущего состояния и позиции исходника
+UI -> UI : show_state(): включённые разделы, diff, наблюдения и ошибки
+end
+UI --> U : Результат либо ошибка команды; возврат к приглашению
+@enduml

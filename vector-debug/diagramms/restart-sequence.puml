@@ -1,0 +1,18 @@
+@startuml
+title r / restart — Restart navigation
+skinparam shadowing false
+autonumber
+actor "User" as U
+participant "TerminalUI" as UI
+participant "DebugSession" as S
+U -> UI : r / restart
+UI -> S : restart()
+S -> S : Exit trace; index = 0; rearm stops; compute locals diff
+S --> UI : Cached step 0; edits, watches, breakpoints and caches retained
+opt Command completed without a command error
+UI -> S : current_state() and source_expression()
+S --> UI : Copied current state and source cursor
+UI -> UI : show_state(): enabled sections, diffs, watches and errors
+end
+UI --> U : Result or command error; return to prompt
+@enduml

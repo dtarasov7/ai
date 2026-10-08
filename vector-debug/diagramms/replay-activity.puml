@@ -1,0 +1,22 @@
+@startuml
+title VRL Debugger — evaluation pipeline
+skinparam shadowing false
+start
+:Receive original program prefix, input, captured names and optional checkpoints / edits;
+:Insert applicable edits, remap checkpoint and loop offsets;
+:Instrument event, locals and checkpoint capture, guard future loop bodies;
+:Write temporary VRL and JSONL files, invoke Vector without a shell and with timeout;
+if (Compile / syntax failure and locals capture was enabled?) then (yes)
+:Retry once without locals, retain warning if baseline succeeds;
+else (no)
+:Do not retry runtime, timeout or protocol failures;
+endif
+if (Subprocess and encoded output valid?) then (yes)
+:Decode base64 JSON, validate event, locals, position and iteration metadata;
+:Return RunResult, session computes diffs and caches snapshot;
+else (no)
+:Raise DebugError with stdout, stderr and error category;
+endif
+:Temporary files removed on exit, failed step preserves last successful values in session;
+stop
+@enduml

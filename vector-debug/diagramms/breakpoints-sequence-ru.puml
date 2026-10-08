@@ -1,0 +1,12 @@
+@startuml
+title bl / breakpoints — Показать breakpoints
+skinparam shadowing false
+autonumber
+actor "Пользователь" as U
+participant "TerminalUI" as UI
+participant "DebugSession" as S
+U -> UI : bl / breakpoints
+UI -> S : Прочитать line_breakpoints
+S --> UI : Указанные строки, привязанные диапазоны и условия
+UI --> U : Результат либо ошибка команды; возврат к приглашению
+@enduml

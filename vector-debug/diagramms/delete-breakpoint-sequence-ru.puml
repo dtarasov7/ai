@@ -1,0 +1,12 @@
+@startuml
+title bd LINE / delete-breakpoint LINE — Удалить breakpoint
+skinparam shadowing false
+autonumber
+actor "Пользователь" as U
+participant "TerminalUI" as UI
+participant "DebugSession" as S
+U -> UI : bd LINE / delete-breakpoint LINE
+UI -> S : delete_line_breakpoint(LINE)
+S -> S : Удалить ключ указанной строки и снять stopped_line
+UI --> U : Результат либо ошибка команды; возврат к приглашению
+@enduml

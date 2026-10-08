@@ -1,0 +1,14 @@
+@startuml
+title unwatch PATH — Remove a watched path
+skinparam shadowing false
+autonumber
+actor "User" as U
+participant "TerminalUI" as UI
+participant "DebugSession" as S
+U -> UI : unwatch PATH
+UI -> S : remove_watch(PATH)
+S -> S : Check that PATH is registered
+S -> S : Remove watched path or raise command error
+UI -> UI : show_watches()
+UI --> U : Result or command error; return to prompt
+@enduml

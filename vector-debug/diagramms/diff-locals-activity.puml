@@ -1,0 +1,14 @@
+@startuml
+title d locals / diff locals — algorithm
+skinparam shadowing false
+start
+:Read command and validate arguments;
+if (Command syntax valid?) then (yes)
+:Read current state without moving execution;
+:Group locals_diff entries as added, changed and deleted, regardless of automatic locals flag;
+:Use existing palette, do not invoke Vector;
+else (no)
+:Display command error, keep current state;
+endif
+stop
+@enduml

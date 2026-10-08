@@ -1,0 +1,34 @@
+@startuml
+title edits clear — Удалить все правки
+skinparam shadowing false
+autonumber
+actor "Пользователь" as U
+participant "TerminalUI" as UI
+participant "DebugSession" as S
+participant "Scanner / разбор блоков" as B
+participant "Просмотр / инструментирование" as I
+participant "Пробная DebugSession" as C
+participant "VectorRunner" as R
+participant "Процесс Vector" as V
+U -> UI : edits clear
+UI -> S : clear_edits()
+S -> C : _with_edits([])
+C -> B : Подготовить префикс и метаданные точек остановки
+C -> R : run() / run_checkpoints(исходные данные, правки)
+R -> I : Вставить правки replay и сбор диагностики
+R -> V : vector vrl --program FILE --input FILE
+V --> R : Закодированные данные, locals и позиция либо диагностика
+R --> C : RunResult либо DebugError
+C --> S : Повторно вычисленное пробное состояние либо ошибка
+alt Replay успешен
+S -> S : _commit_edits(); сохранить наблюдения и breakpoints
+else Replay завершился ошибкой
+S --> UI : Ошибка команды; сохранить исходные правки и состояние
+end
+opt Команда завершилась без ошибки команды
+UI -> S : current_state() и source_expression()
+S --> UI : Копия текущего состояния и позиции исходника
+UI -> UI : show_state(): включённые разделы, diff, наблюдения и ошибки
+end
+UI --> U : Результат либо ошибка команды; возврат к приглашению
+@enduml

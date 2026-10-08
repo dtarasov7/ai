@@ -1,0 +1,16 @@
+@startuml
+title bl / breakpoints — algorithm
+skinparam shadowing false
+start
+:Read command and validate arguments;
+if (Command syntax valid?) then (yes)
+if (Any source breakpoints?) then (yes)
+:Sort by requested line, display ranges and optional conditions;
+else (no)
+:Display no breakpoints;
+endif
+else (no)
+:Display command error, keep current state;
+endif
+stop
+@enduml

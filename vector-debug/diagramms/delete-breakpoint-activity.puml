@@ -1,0 +1,16 @@
+@startuml
+title bd LINE / delete-breakpoint LINE — algorithm
+skinparam shadowing false
+start
+:Read command and validate arguments;
+if (Command syntax valid?) then (yes)
+if (Breakpoint exists for exactly LINE?) then (yes)
+:Delete breakpoint, clear stopped-line marker, confirm removal;
+else (no)
+:Report command error;
+endif
+else (no)
+:Display command error, keep current state;
+endif
+stop
+@enduml

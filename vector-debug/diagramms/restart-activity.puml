@@ -1,0 +1,19 @@
+@startuml
+title r / restart — algorithm
+skinparam shadowing false
+start
+:Read command and validate arguments;
+if (Command syntax valid?) then (yes)
+:Leave trace and clear stopped markers;
+:Select cached step 0, compare locals with prior position;
+:Retain caches, edits, watches and breakpoints, step-0 edits remain visible;
+if (Command completed without a command error?) then (yes)
+:Display source, enabled sections, diffs and watches;
+else (no)
+:Display command error and return to prompt without state redraw;
+endif
+else (no)
+:Display command error, keep current state;
+endif
+stop
+@enduml

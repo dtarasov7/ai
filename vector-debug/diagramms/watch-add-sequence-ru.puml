@@ -1,0 +1,15 @@
+@startuml
+title watch PATH — Добавить наблюдение
+skinparam shadowing false
+autonumber
+actor "Пользователь" as U
+participant "TerminalUI" as UI
+participant "DebugSession" as S
+participant "Просмотр / инструментирование" as I
+U -> UI : watch PATH
+UI -> S : add_watch(PATH)
+S -> I : Проверить синтаксис пути; значение может быть недоступно
+S -> S : Добавить, если ещё нет наблюдения
+UI -> UI : show_watches()
+UI --> U : Результат либо ошибка команды; возврат к приглашению
+@enduml

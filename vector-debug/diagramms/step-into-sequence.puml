@@ -1,0 +1,37 @@
+@startuml
+title i / into / step into — Enter a branch or loop
+skinparam shadowing false
+autonumber
+actor "User" as U
+participant "TerminalUI" as UI
+participant "DebugSession" as S
+participant "Scanner / branches" as B
+participant "Inspection / instrumentation" as I
+participant "VectorRunner" as R
+participant "Vector process" as V
+U -> UI : i / into / step into
+UI -> S : step_into()
+S -> B : parse_control(expression)
+alt Unsupported statement
+S -> S : step_next()
+else Recognized control structure
+S -> S : Start trace or select branch / iteration / body boundary
+end
+alt Cached position exists
+S -> S : Reuse snapshot; compute transition diff
+else Cache miss
+S -> B : Build prefix and checkpoint metadata
+S -> R : run() / run_checkpoints(original input, edits)
+R -> I : Insert replay edits and diagnostic capture
+R -> V : vector vrl --program FILE --input FILE
+V --> R : Encoded event, locals and position, or diagnostics
+R --> S : RunResult or DebugError
+S -> S : Cache result; preserve prior values on failure
+end
+opt Command completed without a command error
+UI -> S : current_state() and source_expression()
+S --> UI : Copied current state and source cursor
+UI -> UI : show_state(): enabled sections, diffs, watches and errors
+end
+UI --> U : Result or command error; return to prompt
+@enduml

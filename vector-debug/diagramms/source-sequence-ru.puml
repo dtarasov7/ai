@@ -1,0 +1,13 @@
+@startuml
+title src / source — Показать контекст исходного кода
+skinparam shadowing false
+autonumber
+actor "Пользователь" as U
+participant "TerminalUI" as UI
+participant "DebugSession" as S
+U -> UI : src / source
+UI -> UI : show_source(full=False)
+UI -> S : current_state(); при необходимости source_expression()
+S --> UI : Копия значений и исходный диапазон строк
+UI --> U : Результат либо ошибка команды; возврат к приглашению
+@enduml

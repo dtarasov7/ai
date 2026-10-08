@@ -1,0 +1,15 @@
+@startuml
+title b LINE if EXPR / break LINE if EXPR — Добавить условный breakpoint
+skinparam shadowing false
+autonumber
+actor "Пользователь" as U
+participant "TerminalUI" as UI
+participant "DebugSession" as S
+participant "Scanner / разбор блоков" as B
+U -> UI : b LINE if EXPR / break LINE if EXPR
+UI -> S : add_line_breakpoint(LINE, condition)
+S -> B : source_target(LINE): найти поддерживаемую команду
+S -> S : Сохранить строку, внешнее выражение, цель и условие
+S --> UI : Привязанный диапазон; условие вычисляется позже в continue / until
+UI --> U : Результат либо ошибка команды; возврат к приглашению
+@enduml

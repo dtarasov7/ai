@@ -1,0 +1,12 @@
+@startuml
+title bl / breakpoints — List breakpoints
+skinparam shadowing false
+autonumber
+actor "User" as U
+participant "TerminalUI" as UI
+participant "DebugSession" as S
+U -> UI : bl / breakpoints
+UI -> S : Read line_breakpoints
+S --> UI : Requested lines, resolved ranges and conditions
+UI --> U : Result or command error; return to prompt
+@enduml

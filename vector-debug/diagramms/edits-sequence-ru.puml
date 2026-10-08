@@ -1,0 +1,12 @@
+@startuml
+title edits — Показать правки replay
+skinparam shadowing false
+autonumber
+actor "Пользователь" as U
+participant "TerminalUI" as UI
+participant "DebugSession" as S
+U -> UI : edits
+UI -> S : Прочитать edits
+S --> UI : Пути, значения, строки и необязательные итерации
+UI --> U : Результат либо ошибка команды; возврат к приглашению
+@enduml
