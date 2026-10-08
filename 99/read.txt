@@ -1,0 +1,10 @@
+﻿Да, `group_topic.discovery` уже возвращает готовые пары **consumer group–topic**. Для lag создайте одно правило LLD `kafka.group_topic.discovery`, а внутри него два прототипа:
+
+```text
+kafka.group_topic.lag.sum["{#CONSUMERGROUP}","{#TOPIC}"]
+kafka.group_topic.lag.max["{#CONSUMERGROUP}","{#TOPIC}"]
+```
+
+Оба значения подставляются из одной строки discovery. Скрипт получает **сначала группу, затем топик**. Объединять два отдельных discovery не требуется — подстановка макросов в прототипы описана в [документации Zabbix 6]
+(https://www.zabbix.com/documentation/6.0/it/manual/discovery/low_level_discovery).
+
