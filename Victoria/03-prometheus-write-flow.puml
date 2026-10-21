@@ -1,0 +1,75 @@
+@startuml
+!pragma layout smetana
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam roundcorner 12
+skinparam defaultFontName Arial
+skinparam componentStyle rectangle
+skinparam ArrowThickness 1.4
+skinparam linetype ortho
+skinparam package {
+  BackgroundColor #F6F8FC
+  BorderColor #8094B2
+  FontColor #233552
+}
+skinparam rectangle {
+  BackgroundColor #EAF2FD
+  BorderColor #6289B8
+  FontColor #193B61
+}
+skinparam note {
+  BackgroundColor #FFF9E6
+  BorderColor #D3AD56
+}
+left to right direction
+title 03 — Запись метрик Prometheus
+rectangle "Prometheus\nRemote Write" as client #DDEBE2
+rectangle "VIP 10.0.0.100\nKeepalived VRRP + IPVS/LVS-DR" as vip #FFF0D9
+package "Узел 1\n10.0.0.11" as N1 {
+  rectangle "vmauth :8427-1" as auth1
+  rectangle "vminsert :8480-1" as ins1
+  rectangle "vmstorage-1" as sto1
+}
+package "Узел 2\n10.0.0.12" as N2 {
+  rectangle "vmauth :8427-2" as auth2
+  rectangle "vminsert :8480-2" as ins2
+  rectangle "vmstorage-2" as sto2
+}
+package "Узел 3\n10.0.0.13" as N3 {
+  rectangle "vmauth :8427-3" as auth3
+  rectangle "vminsert :8480-3" as ins3
+  rectangle "vmstorage-3" as sto3
+}
+client -[#397CD0]-> vip : POST /api/v1/write
+vip -[#397CD0]-> auth1 : IPVS DR
+vip -[#397CD0]-> auth2 : IPVS DR
+vip -[#397CD0]-> auth3 : IPVS DR
+auth1 -[#D9534F]-> ins1 : HTTP backend
+ins1 -[#D9534F,dashed]-> sto1 : TCP 8400
+auth1 -[#D9534F]-> ins2 : HTTP backend
+ins1 -[#D9534F,dashed]-> sto2 : TCP 8400
+auth1 -[#D9534F]-> ins3 : HTTP backend
+ins1 -[#D9534F,dashed]-> sto3 : TCP 8400
+auth2 -[#D9534F]-> ins1 : HTTP backend
+ins2 -[#D9534F,dashed]-> sto1 : TCP 8400
+auth2 -[#D9534F]-> ins2 : HTTP backend
+ins2 -[#D9534F,dashed]-> sto2 : TCP 8400
+auth2 -[#D9534F]-> ins3 : HTTP backend
+ins2 -[#D9534F,dashed]-> sto3 : TCP 8400
+auth3 -[#D9534F]-> ins1 : HTTP backend
+ins3 -[#D9534F,dashed]-> sto1 : TCP 8400
+auth3 -[#D9534F]-> ins2 : HTTP backend
+ins3 -[#D9534F,dashed]-> sto2 : TCP 8400
+auth3 -[#D9534F]-> ins3 : HTTP backend
+ins3 -[#D9534F,dashed]-> sto3 : TCP 8400
+legend bottom
+  Один vminsert на узел — ровно ТРИ на весь кластер.
+  Каждый vmauth выбирает любой доступный vminsert.
+  Каждый vminsert соединён со всеми vmstorage по TCP 8400.
+  Линии обозначают возможные маршруты, НЕ копирование
+  каждой записи во все хранилища (зависит от replicationFactor).
+  HA: IPVS исключает мёртвый vmauth; vmauth выбирает другой vminsert;
+  vminsert перераспределяет новые записи при потере vmstorage.
+endlegend
+
+@enduml

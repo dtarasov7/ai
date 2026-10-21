@@ -1,0 +1,68 @@
+@startuml
+!pragma layout smetana
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam roundcorner 12
+skinparam defaultFontName Arial
+skinparam componentStyle rectangle
+skinparam ArrowThickness 1.4
+skinparam linetype ortho
+skinparam package {
+  BackgroundColor #F6F8FC
+  BorderColor #8094B2
+  FontColor #233552
+}
+skinparam rectangle {
+  BackgroundColor #EAF2FD
+  BorderColor #6289B8
+  FontColor #193B61
+}
+skinparam note {
+  BackgroundColor #FFF9E6
+  BorderColor #D3AD56
+}
+left to right direction
+title 01 — Внутрикластерный трафик
+package "Узел 1\n10.0.0.11" as N1 {
+  rectangle "vminsert-1" as ins1
+  rectangle "vmselect-1" as sel1
+  rectangle "vmstorage-1" as sto1
+}
+package "Узел 2\n10.0.0.12" as N2 {
+  rectangle "vminsert-2" as ins2
+  rectangle "vmselect-2" as sel2
+  rectangle "vmstorage-2" as sto2
+}
+package "Узел 3\n10.0.0.13" as N3 {
+  rectangle "vminsert-3" as ins3
+  rectangle "vmselect-3" as sel3
+  rectangle "vmstorage-3" as sto3
+}
+ins1 -[#D9534F]-> sto1 : TCP 8400
+sel1 -[#258759,dashed]-> sto1 : TCP 8401
+ins1 -[#D9534F]-> sto2 : TCP 8400
+sel1 -[#258759,dashed]-> sto2 : TCP 8401
+ins1 -[#D9534F]-> sto3 : TCP 8400
+sel1 -[#258759,dashed]-> sto3 : TCP 8401
+ins2 -[#D9534F]-> sto1 : TCP 8400
+sel2 -[#258759,dashed]-> sto1 : TCP 8401
+ins2 -[#D9534F]-> sto2 : TCP 8400
+sel2 -[#258759,dashed]-> sto2 : TCP 8401
+ins2 -[#D9534F]-> sto3 : TCP 8400
+sel2 -[#258759,dashed]-> sto3 : TCP 8401
+ins3 -[#D9534F]-> sto1 : TCP 8400
+sel3 -[#258759,dashed]-> sto1 : TCP 8401
+ins3 -[#D9534F]-> sto2 : TCP 8400
+sel3 -[#258759,dashed]-> sto2 : TCP 8401
+ins3 -[#D9534F]-> sto3 : TCP 8400
+sel3 -[#258759,dashed]-> sto3 : TCP 8401
+legend bottom
+  Красные линии: запись, TCP 8400
+  Зелёные пунктирные: чтение, TCP 8401
+  Каждый vminsert/vmselect подключён ко ВСЕМ трём vmstorage.
+  Нет vmauth на внутреннем TCP-тракте.
+  HA: потеря vmstorage — перераспределение новых записей;
+  полнота чтения зависит от replicationFactor и настройки vmselect.
+endlegend
+
+@enduml

@@ -1,0 +1,82 @@
+@startuml
+!pragma layout smetana
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam roundcorner 12
+skinparam defaultFontName Arial
+skinparam componentStyle rectangle
+skinparam ArrowThickness 1.4
+skinparam linetype ortho
+skinparam package {
+  BackgroundColor #F6F8FC
+  BorderColor #8094B2
+  FontColor #233552
+}
+skinparam rectangle {
+  BackgroundColor #EAF2FD
+  BorderColor #6289B8
+  FontColor #193B61
+}
+skinparam note {
+  BackgroundColor #FFF9E6
+  BorderColor #D3AD56
+}
+left to right direction
+title 04 — Административный доступ
+rectangle "Администраторы\nGUI / diagnostics" as client #DDEBE2
+rectangle "VIP 10.0.0.100\nKeepalived + IPVS/LVS-DR" as vip #FFF0D9
+package "Узел 1\n10.0.0.11" as N1 {
+  rectangle "vmauth :8427-1" as auth1
+  rectangle "vminsert :8480-1" as ins1
+  rectangle "vmselect :8481-1" as sel1
+  rectangle "vmstorage HTTP :8482-1" as sto1
+  rectangle "vmalert :8880-1" as alert1
+  rectangle "Alertmanager :9093-1" as am1
+}
+package "Узел 2\n10.0.0.12" as N2 {
+  rectangle "vmauth :8427-2" as auth2
+  rectangle "vminsert :8480-2" as ins2
+  rectangle "vmselect :8481-2" as sel2
+  rectangle "vmstorage HTTP :8482-2" as sto2
+  rectangle "vmalert :8880-2" as alert2
+  rectangle "Alertmanager :9093-2" as am2
+}
+package "Узел 3\n10.0.0.13" as N3 {
+  rectangle "vmauth :8427-3" as auth3
+  rectangle "vminsert :8480-3" as ins3
+  rectangle "vmselect :8481-3" as sel3
+  rectangle "vmstorage HTTP :8482-3" as sto3
+  rectangle "vmalert :8880-3" as alert3
+  rectangle "Alertmanager :9093-3" as am3
+}
+client -[#397CD0]-> vip : HTTP(S)
+vip -[#397CD0]-> auth1 : IPVS DR
+vip -[#397CD0]-> auth2 : IPVS DR
+vip -[#397CD0]-> auth3 : IPVS DR
+auth1 -[#8660BC]-> sel1 : /node1/vmselect/
+auth1 -[#8660BC]-> am1 : /node1/alertmanager/
+auth2 -[#8660BC]-> sel2 : /node2/vmselect/
+auth2 -[#8660BC]-> am2 : /node2/alertmanager/
+auth3 -[#8660BC]-> sel3 : /node3/vmselect/
+auth3 -[#8660BC]-> am3 : /node3/alertmanager/
+note bottom of vip
+  Все три vmauth имеют одинаковую таблицу маршрутов:
+  /nodeN/vminsert/*     -> 10.0.0.1N:8480
+  /nodeN/vmselect/*     -> 10.0.0.1N:8481
+  /nodeN/vmstorage/*    -> 10.0.0.1N:8482
+  /nodeN/vmalert/*      -> 10.0.0.1N:8880
+  /nodeN/alertmanager/* -> 10.0.0.1N:9093
+  N = 1, 2, 3. Показанные стрелки — примеры,
+  остальные соединения существуют по таблице маршрутов.
+end note
+legend bottom
+  IPVS распределяет соединения между vmauth.
+  После vmauth НЕТ балансировки: адресуется конкретный
+  экземпляр на выбранном узле (даже если запрос пришёл
+  на vmauth другого узла).
+  HA: при отказе целевого модуля — ошибка именно его GUI;
+  при отказе vmauth — IPVS использует другой vmauth.
+  Требуется настройка URL-prefix для корректной работы GUI.
+endlegend
+
+@enduml

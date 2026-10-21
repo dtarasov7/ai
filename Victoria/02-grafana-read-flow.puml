@@ -1,0 +1,75 @@
+@startuml
+!pragma layout smetana
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam roundcorner 12
+skinparam defaultFontName Arial
+skinparam componentStyle rectangle
+skinparam ArrowThickness 1.4
+skinparam linetype ortho
+skinparam package {
+  BackgroundColor #F6F8FC
+  BorderColor #8094B2
+  FontColor #233552
+}
+skinparam rectangle {
+  BackgroundColor #EAF2FD
+  BorderColor #6289B8
+  FontColor #193B61
+}
+skinparam note {
+  BackgroundColor #FFF9E6
+  BorderColor #D3AD56
+}
+left to right direction
+title 02 — Чтение метрик Grafana
+rectangle "Grafana\nPromQL" as client #DDEBE2
+rectangle "VIP 10.0.0.100\nKeepalived VRRP + IPVS/LVS-DR" as vip #FFF0D9
+package "Узел 1\n10.0.0.11" as N1 {
+  rectangle "vmauth :8427-1" as auth1
+  rectangle "vmselect :8481-1" as sel1
+  rectangle "vmstorage-1" as sto1
+}
+package "Узел 2\n10.0.0.12" as N2 {
+  rectangle "vmauth :8427-2" as auth2
+  rectangle "vmselect :8481-2" as sel2
+  rectangle "vmstorage-2" as sto2
+}
+package "Узел 3\n10.0.0.13" as N3 {
+  rectangle "vmauth :8427-3" as auth3
+  rectangle "vmselect :8481-3" as sel3
+  rectangle "vmstorage-3" as sto3
+}
+client -[#397CD0]-> vip : HTTP(S)
+vip -[#397CD0]-> auth1 : IPVS DR
+vip -[#397CD0]-> auth2 : IPVS DR
+vip -[#397CD0]-> auth3 : IPVS DR
+auth1 -[#397CD0]-> sel1 : HTTP backend
+sel1 -[#258759,dashed]-> sto1 : TCP 8401
+auth1 -[#397CD0]-> sel2 : HTTP backend
+sel1 -[#258759,dashed]-> sto2 : TCP 8401
+auth1 -[#397CD0]-> sel3 : HTTP backend
+sel1 -[#258759,dashed]-> sto3 : TCP 8401
+auth2 -[#397CD0]-> sel1 : HTTP backend
+sel2 -[#258759,dashed]-> sto1 : TCP 8401
+auth2 -[#397CD0]-> sel2 : HTTP backend
+sel2 -[#258759,dashed]-> sto2 : TCP 8401
+auth2 -[#397CD0]-> sel3 : HTTP backend
+sel2 -[#258759,dashed]-> sto3 : TCP 8401
+auth3 -[#397CD0]-> sel1 : HTTP backend
+sel3 -[#258759,dashed]-> sto1 : TCP 8401
+auth3 -[#397CD0]-> sel2 : HTTP backend
+sel3 -[#258759,dashed]-> sto2 : TCP 8401
+auth3 -[#397CD0]-> sel3 : HTTP backend
+sel3 -[#258759,dashed]-> sto3 : TCP 8401
+legend bottom
+  IPVS выбирает один из трёх vmauth (соединение).
+  КАЖДЫЙ vmauth может выбрать ЛЮБОЙ из трёх vmselect (HTTP-запрос).
+  Каждый vmselect опрашивает все vmstorage по TCP 8401.
+  HA: отказ vmauth — исключение через IPVS health check;
+  отказ vmselect — другой backend у vmauth;
+  отказ vmstorage — чтение с доступных узлов (репликация важна).
+  Ответ Grafana идёт через выбранный vmauth прямо клиенту (LVS-DR).
+endlegend
+
+@enduml
