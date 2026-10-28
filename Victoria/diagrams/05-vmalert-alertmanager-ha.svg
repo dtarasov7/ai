@@ -1,0 +1,162 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1680" viewBox="0 0 1800 1680">
+<defs>
+<marker id="a0878e8" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L10 4 L0 8 Z" fill="#0878e8"/></marker>
+<marker id="s0878e8" markerWidth="10" markerHeight="8" refX="1" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M10 0 L0 4 L10 8 Z" fill="#0878e8"/></marker>
+<linearGradient id="g0878e8" x2="0.8" y2="1"><stop stop-color="#ffffff"/><stop offset="1" stop-color="#e2f0ff"/></linearGradient>
+<marker id="a159447" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L10 4 L0 8 Z" fill="#159447"/></marker>
+<marker id="s159447" markerWidth="10" markerHeight="8" refX="1" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M10 0 L0 4 L10 8 Z" fill="#159447"/></marker>
+<linearGradient id="g159447" x2="0.8" y2="1"><stop stop-color="#ffffff"/><stop offset="1" stop-color="#ddf5e8"/></linearGradient>
+<marker id="add4545" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L10 4 L0 8 Z" fill="#dd4545"/></marker>
+<marker id="sdd4545" markerWidth="10" markerHeight="8" refX="1" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M10 0 L0 4 L10 8 Z" fill="#dd4545"/></marker>
+<linearGradient id="gdd4545" x2="0.8" y2="1"><stop stop-color="#ffffff"/><stop offset="1" stop-color="#fff0ee"/></linearGradient>
+<marker id="a7951b0" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L10 4 L0 8 Z" fill="#7951b0"/></marker>
+<marker id="s7951b0" markerWidth="10" markerHeight="8" refX="1" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M10 0 L0 4 L10 8 Z" fill="#7951b0"/></marker>
+<linearGradient id="g7951b0" x2="0.8" y2="1"><stop stop-color="#ffffff"/><stop offset="1" stop-color="#eee9fb"/></linearGradient>
+<marker id="ae68519" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L10 4 L0 8 Z" fill="#e68519"/></marker>
+<marker id="se68519" markerWidth="10" markerHeight="8" refX="1" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M10 0 L0 4 L10 8 Z" fill="#e68519"/></marker>
+<linearGradient id="ge68519" x2="0.8" y2="1"><stop stop-color="#ffffff"/><stop offset="1" stop-color="#fff0db"/></linearGradient>
+<marker id="a72849c" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L10 4 L0 8 Z" fill="#72849c"/></marker>
+<marker id="s72849c" markerWidth="10" markerHeight="8" refX="1" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M10 0 L0 4 L10 8 Z" fill="#72849c"/></marker>
+<linearGradient id="g72849c" x2="0.8" y2="1"><stop stop-color="#ffffff"/><stop offset="1" stop-color="#f4f8fc"/></linearGradient>
+</defs><rect width="1800" height="100%" fill="white"/>
+<text x="900" y="65" font-family="Open Sans, sans-serif" font-size="43" fill="#0b1938" font-weight="700" text-anchor="middle">Схема 5. vmalert и кластер Alertmanager</text>
+<text x="900" y="106" font-family="Open Sans, sans-serif" font-size="21" fill="#72849c" font-weight="400" text-anchor="middle">Внутренний вход: локальный vmauth; HA обеспечивают три вычислителя</text>
+<rect x="160" y="160" width="480" height="1160" rx="13" fill="url(#g72849c)" stroke="#72849c" stroke-width="2" stroke-dasharray="8 7"/>
+<text x="400" y="203" font-family="Open Sans, sans-serif" font-size="26" fill="#0b1938" font-weight="700" text-anchor="middle">Узел 1 · 10.0.0.11</text>
+<rect x="710" y="160" width="480" height="1160" rx="13" fill="url(#g72849c)" stroke="#72849c" stroke-width="2" stroke-dasharray="8 7"/>
+<text x="950" y="203" font-family="Open Sans, sans-serif" font-size="26" fill="#0b1938" font-weight="700" text-anchor="middle">Узел 2 · 10.0.0.12</text>
+<rect x="1260" y="160" width="480" height="1160" rx="13" fill="url(#g72849c)" stroke="#72849c" stroke-width="2" stroke-dasharray="8 7"/>
+<text x="1500" y="203" font-family="Open Sans, sans-serif" font-size="26" fill="#0b1938" font-weight="700" text-anchor="middle">Узел 3 · 10.0.0.13</text>
+<path d="M362,340 L362,510" fill="none" stroke="#e68519" stroke-width="3" stroke-linejoin="round" marker-end="url(#ae68519)"/>
+<path d="M400,340 L912,510" fill="none" stroke="#e68519" stroke-width="3" stroke-linejoin="round" marker-end="url(#ae68519)"/>
+<path d="M438,340 L1462,510" fill="none" stroke="#e68519" stroke-width="3" stroke-linejoin="round" marker-end="url(#ae68519)"/>
+<path d="M912,340 L400,510" fill="none" stroke="#e68519" stroke-width="3" stroke-linejoin="round" marker-end="url(#ae68519)"/>
+<path d="M950,340 L950,510" fill="none" stroke="#e68519" stroke-width="3" stroke-linejoin="round" marker-end="url(#ae68519)"/>
+<path d="M988,340 L1500,510" fill="none" stroke="#e68519" stroke-width="3" stroke-linejoin="round" marker-end="url(#ae68519)"/>
+<path d="M1462,340 L438,510" fill="none" stroke="#e68519" stroke-width="3" stroke-linejoin="round" marker-end="url(#ae68519)"/>
+<path d="M1500,340 L988,510" fill="none" stroke="#e68519" stroke-width="3" stroke-linejoin="round" marker-end="url(#ae68519)"/>
+<path d="M1538,340 L1538,510" fill="none" stroke="#e68519" stroke-width="3" stroke-linejoin="round" marker-end="url(#ae68519)"/>
+<path d="M200,270 L170,270 L170,855 L200,855" fill="none" stroke="#159447" stroke-width="3" stroke-linejoin="round" marker-end="url(#a159447)"/>
+<path d="M200,308 L185,308 L185,882 L200,882" fill="none" stroke="#dd4545" stroke-width="3" stroke-linejoin="round" marker-end="url(#add4545)"/>
+<rect x="200" y="240" width="400" height="100" rx="13" fill="url(#g7951b0)" stroke="#7951b0" stroke-width="2"/>
+<g transform="translate(255,290.0)" stroke="#7951b0" stroke-width="4" fill="none" stroke-linecap="round">
+<path d="M-22 19 H22 L15 6 V-8 A15 15 0 0 0 -15 -8 V6 Z M-6 27 H6"/>
+</g>
+<text x="305" y="279" font-family="Open Sans, sans-serif" font-size="29" fill="#0b1938" font-weight="700" text-anchor="start">vmalert</text>
+<text x="305" y="312" font-family="Open Sans, sans-serif" font-size="20" fill="#0b1938" font-weight="400" text-anchor="start">HTTP :8880 · UI</text>
+<rect x="200" y="510" width="400" height="100" rx="13" fill="url(#ge68519)" stroke="#e68519" stroke-width="2"/>
+<g transform="translate(255,560.0)" stroke="#e68519" stroke-width="4" fill="none" stroke-linecap="round">
+<path d="M-22 19 H22 L15 6 V-8 A15 15 0 0 0 -15 -8 V6 Z M-6 27 H6"/>
+</g>
+<text x="305" y="549" font-family="Open Sans, sans-serif" font-size="29" fill="#0b1938" font-weight="700" text-anchor="start">Alertmanager</text>
+<text x="305" y="582" font-family="Open Sans, sans-serif" font-size="20" fill="#0b1938" font-weight="400" text-anchor="start">HTTP :9093</text>
+<path d="M750,270 L720,270 L720,855 L750,855" fill="none" stroke="#159447" stroke-width="3" stroke-linejoin="round" marker-end="url(#a159447)"/>
+<path d="M750,308 L735,308 L735,882 L750,882" fill="none" stroke="#dd4545" stroke-width="3" stroke-linejoin="round" marker-end="url(#add4545)"/>
+<rect x="750" y="240" width="400" height="100" rx="13" fill="url(#g7951b0)" stroke="#7951b0" stroke-width="2"/>
+<g transform="translate(805,290.0)" stroke="#7951b0" stroke-width="4" fill="none" stroke-linecap="round">
+<path d="M-22 19 H22 L15 6 V-8 A15 15 0 0 0 -15 -8 V6 Z M-6 27 H6"/>
+</g>
+<text x="855" y="279" font-family="Open Sans, sans-serif" font-size="29" fill="#0b1938" font-weight="700" text-anchor="start">vmalert</text>
+<text x="855" y="312" font-family="Open Sans, sans-serif" font-size="20" fill="#0b1938" font-weight="400" text-anchor="start">HTTP :8880 · UI</text>
+<rect x="750" y="510" width="400" height="100" rx="13" fill="url(#ge68519)" stroke="#e68519" stroke-width="2"/>
+<g transform="translate(805,560.0)" stroke="#e68519" stroke-width="4" fill="none" stroke-linecap="round">
+<path d="M-22 19 H22 L15 6 V-8 A15 15 0 0 0 -15 -8 V6 Z M-6 27 H6"/>
+</g>
+<text x="855" y="549" font-family="Open Sans, sans-serif" font-size="29" fill="#0b1938" font-weight="700" text-anchor="start">Alertmanager</text>
+<text x="855" y="582" font-family="Open Sans, sans-serif" font-size="20" fill="#0b1938" font-weight="400" text-anchor="start">HTTP :9093</text>
+<path d="M1300,270 L1270,270 L1270,855 L1300,855" fill="none" stroke="#159447" stroke-width="3" stroke-linejoin="round" marker-end="url(#a159447)"/>
+<path d="M1300,308 L1285,308 L1285,882 L1300,882" fill="none" stroke="#dd4545" stroke-width="3" stroke-linejoin="round" marker-end="url(#add4545)"/>
+<rect x="1300" y="240" width="400" height="100" rx="13" fill="url(#g7951b0)" stroke="#7951b0" stroke-width="2"/>
+<g transform="translate(1355,290.0)" stroke="#7951b0" stroke-width="4" fill="none" stroke-linecap="round">
+<path d="M-22 19 H22 L15 6 V-8 A15 15 0 0 0 -15 -8 V6 Z M-6 27 H6"/>
+</g>
+<text x="1405" y="279" font-family="Open Sans, sans-serif" font-size="29" fill="#0b1938" font-weight="700" text-anchor="start">vmalert</text>
+<text x="1405" y="312" font-family="Open Sans, sans-serif" font-size="20" fill="#0b1938" font-weight="400" text-anchor="start">HTTP :8880 · UI</text>
+<rect x="1300" y="510" width="400" height="100" rx="13" fill="url(#ge68519)" stroke="#e68519" stroke-width="2"/>
+<g transform="translate(1355,560.0)" stroke="#e68519" stroke-width="4" fill="none" stroke-linecap="round">
+<path d="M-22 19 H22 L15 6 V-8 A15 15 0 0 0 -15 -8 V6 Z M-6 27 H6"/>
+</g>
+<text x="1405" y="549" font-family="Open Sans, sans-serif" font-size="29" fill="#0b1938" font-weight="700" text-anchor="start">Alertmanager</text>
+<text x="1405" y="582" font-family="Open Sans, sans-serif" font-size="20" fill="#0b1938" font-weight="400" text-anchor="start">HTTP :9093</text>
+<rect x="220" y="405" width="1460" height="45" rx="13" fill="url(#ge68519)" stroke="#e68519" stroke-width="2"/>
+<text x="950" y="435" font-family="Open Sans, sans-serif" font-size="21" fill="#e68519" font-weight="700" text-anchor="middle">9 направлений доставки: каждый vmalert → каждый Alertmanager · HTTP :9093</text>
+<path d="M400,610 L400,657 L950,657 L950,610" fill="none" stroke="#e68519" stroke-width="3" stroke-linejoin="round" stroke-dasharray="9 7" marker-end="url(#ae68519)" marker-start="url(#se68519)"/>
+<path d="M985,610 L985,690 L1500,690 L1500,610" fill="none" stroke="#e68519" stroke-width="3" stroke-linejoin="round" stroke-dasharray="9 7" marker-end="url(#ae68519)" marker-start="url(#se68519)"/>
+<path d="M435,610 L435,730 L1535,730 L1535,610" fill="none" stroke="#e68519" stroke-width="3" stroke-linejoin="round" stroke-dasharray="9 7" marker-end="url(#ae68519)" marker-start="url(#se68519)"/>
+<rect x="220" y="752" width="1460" height="45" rx="13" fill="url(#ge68519)" stroke="#e68519" stroke-width="2"/>
+<text x="950" y="782" font-family="Open Sans, sans-serif" font-size="21" fill="#e68519" font-weight="700" text-anchor="middle">Gossip · TCP + UDP :9094 · silences и notification log · без VIP / vmauth</text>
+<rect x="200" y="830" width="400" height="100" rx="13" fill="url(#g159447)" stroke="#159447" stroke-width="2"/>
+<g transform="translate(255,880.0)" stroke="#159447" stroke-width="4" fill="none" stroke-linecap="round">
+<rect x="-20" y="-4" width="40" height="31" rx="5" fill="#159447"/><path d="M-12 -5 V-15 A12 12 0 0 1 12 -15 V-5"/><path d="M0 7 V17" stroke="white"/>
+</g>
+<text x="305" y="869" font-family="Open Sans, sans-serif" font-size="29" fill="#0b1938" font-weight="700" text-anchor="start">vmauth</text>
+<text x="305" y="902" font-family="Open Sans, sans-serif" font-size="20" fill="#0b1938" font-weight="400" text-anchor="start">HTTP :8427</text>
+<rect x="750" y="830" width="400" height="100" rx="13" fill="url(#g159447)" stroke="#159447" stroke-width="2"/>
+<g transform="translate(805,880.0)" stroke="#159447" stroke-width="4" fill="none" stroke-linecap="round">
+<rect x="-20" y="-4" width="40" height="31" rx="5" fill="#159447"/><path d="M-12 -5 V-15 A12 12 0 0 1 12 -15 V-5"/><path d="M0 7 V17" stroke="white"/>
+</g>
+<text x="855" y="869" font-family="Open Sans, sans-serif" font-size="29" fill="#0b1938" font-weight="700" text-anchor="start">vmauth</text>
+<text x="855" y="902" font-family="Open Sans, sans-serif" font-size="20" fill="#0b1938" font-weight="400" text-anchor="start">HTTP :8427</text>
+<rect x="1300" y="830" width="400" height="100" rx="13" fill="url(#g159447)" stroke="#159447" stroke-width="2"/>
+<g transform="translate(1355,880.0)" stroke="#159447" stroke-width="4" fill="none" stroke-linecap="round">
+<rect x="-20" y="-4" width="40" height="31" rx="5" fill="#159447"/><path d="M-12 -5 V-15 A12 12 0 0 1 12 -15 V-5"/><path d="M0 7 V17" stroke="white"/>
+</g>
+<text x="1405" y="869" font-family="Open Sans, sans-serif" font-size="29" fill="#0b1938" font-weight="700" text-anchor="start">vmauth</text>
+<text x="1405" y="902" font-family="Open Sans, sans-serif" font-size="20" fill="#0b1938" font-weight="400" text-anchor="start">HTTP :8427</text>
+<path d="M360,930 L360,1010" fill="none" stroke="#159447" stroke-width="3" stroke-linejoin="round"/>
+<path d="M440,930 L440,1060" fill="none" stroke="#dd4545" stroke-width="3" stroke-linejoin="round"/>
+<path d="M910,930 L910,1010" fill="none" stroke="#159447" stroke-width="3" stroke-linejoin="round"/>
+<path d="M990,930 L990,1060" fill="none" stroke="#dd4545" stroke-width="3" stroke-linejoin="round"/>
+<path d="M1460,930 L1460,1010" fill="none" stroke="#159447" stroke-width="3" stroke-linejoin="round"/>
+<path d="M1540,930 L1540,1060" fill="none" stroke="#dd4545" stroke-width="3" stroke-linejoin="round"/>
+<path d="M275,1010 L1540,1010" fill="none" stroke="#159447" stroke-width="3" stroke-linejoin="round"/>
+<path d="M440,1060 L1625,1060" fill="none" stroke="#dd4545" stroke-width="3" stroke-linejoin="round"/>
+<path d="M285,1010 L285,1130" fill="none" stroke="#159447" stroke-width="3" stroke-linejoin="round" stroke-dasharray="9 7" marker-end="url(#a159447)"/>
+<path d="M515,1060 L515,1130" fill="none" stroke="#dd4545" stroke-width="3" stroke-linejoin="round" stroke-dasharray="9 7" marker-end="url(#add4545)"/>
+<rect x="180" y="1130" width="210" height="94" rx="13" fill="url(#g0878e8)" stroke="#0878e8" stroke-width="2"/>
+<text x="285" y="1169" font-family="Open Sans, sans-serif" font-size="26" fill="#0b1938" font-weight="700" text-anchor="middle">vmselect</text>
+<text x="285" y="1200" font-family="Open Sans, sans-serif" font-size="19" fill="#0b1938" font-weight="400" text-anchor="middle">HTTP :8481</text>
+<rect x="410" y="1130" width="210" height="94" rx="13" fill="url(#gdd4545)" stroke="#dd4545" stroke-width="2"/>
+<text x="515" y="1169" font-family="Open Sans, sans-serif" font-size="26" fill="#0b1938" font-weight="700" text-anchor="middle">vminsert</text>
+<text x="515" y="1200" font-family="Open Sans, sans-serif" font-size="19" fill="#0b1938" font-weight="400" text-anchor="middle">HTTP :8480</text>
+<path d="M835,1010 L835,1130" fill="none" stroke="#159447" stroke-width="3" stroke-linejoin="round" stroke-dasharray="9 7" marker-end="url(#a159447)"/>
+<path d="M1065,1060 L1065,1130" fill="none" stroke="#dd4545" stroke-width="3" stroke-linejoin="round" stroke-dasharray="9 7" marker-end="url(#add4545)"/>
+<rect x="730" y="1130" width="210" height="94" rx="13" fill="url(#g0878e8)" stroke="#0878e8" stroke-width="2"/>
+<text x="835" y="1169" font-family="Open Sans, sans-serif" font-size="26" fill="#0b1938" font-weight="700" text-anchor="middle">vmselect</text>
+<text x="835" y="1200" font-family="Open Sans, sans-serif" font-size="19" fill="#0b1938" font-weight="400" text-anchor="middle">HTTP :8481</text>
+<rect x="960" y="1130" width="210" height="94" rx="13" fill="url(#gdd4545)" stroke="#dd4545" stroke-width="2"/>
+<text x="1065" y="1169" font-family="Open Sans, sans-serif" font-size="26" fill="#0b1938" font-weight="700" text-anchor="middle">vminsert</text>
+<text x="1065" y="1200" font-family="Open Sans, sans-serif" font-size="19" fill="#0b1938" font-weight="400" text-anchor="middle">HTTP :8480</text>
+<path d="M1385,1010 L1385,1130" fill="none" stroke="#159447" stroke-width="3" stroke-linejoin="round" stroke-dasharray="9 7" marker-end="url(#a159447)"/>
+<path d="M1615,1060 L1615,1130" fill="none" stroke="#dd4545" stroke-width="3" stroke-linejoin="round" stroke-dasharray="9 7" marker-end="url(#add4545)"/>
+<rect x="1280" y="1130" width="210" height="94" rx="13" fill="url(#g0878e8)" stroke="#0878e8" stroke-width="2"/>
+<text x="1385" y="1169" font-family="Open Sans, sans-serif" font-size="26" fill="#0b1938" font-weight="700" text-anchor="middle">vmselect</text>
+<text x="1385" y="1200" font-family="Open Sans, sans-serif" font-size="19" fill="#0b1938" font-weight="400" text-anchor="middle">HTTP :8481</text>
+<rect x="1510" y="1130" width="210" height="94" rx="13" fill="url(#gdd4545)" stroke="#dd4545" stroke-width="2"/>
+<text x="1615" y="1169" font-family="Open Sans, sans-serif" font-size="26" fill="#0b1938" font-weight="700" text-anchor="middle">vminsert</text>
+<text x="1615" y="1200" font-family="Open Sans, sans-serif" font-size="19" fill="#0b1938" font-weight="400" text-anchor="middle">HTTP :8480</text>
+<rect x="530" y="1079" width="840" height="30" fill="white"/>
+<text x="950" y="1102" font-family="Open Sans, sans-serif" font-size="21" fill="#0b1938" font-weight="700" text-anchor="middle">Каждый vmauth выбирает один из 3 vmselect или один из 3 vminsert</text>
+<rect x="485" y="949" width="930" height="33" fill="white"/>
+<text x="950" y="974" font-family="Open Sans, sans-serif" font-size="23" fill="#0b1938" font-weight="700" text-anchor="middle">Локальный :8427 · HTTP loopback / HTTPS имя узла · базовый URL</text>
+<text x="950" y="1270" font-family="Open Sans, sans-serif" font-size="21" fill="#0b1938" font-weight="400" text-anchor="middle">Далее: vmselect → все vmstorage (TCP 8401); vminsert → все vmstorage (TCP 8400).</text>
+<text x="950" y="1301" font-family="Open Sans, sans-serif" font-size="18" fill="#72849c" font-weight="400" text-anchor="middle">Соединения хранения раскрыты на схеме №1. Линии распределения — логические, без дополнительного прокси.</text>
+<rect x="55" y="1350" width="825" height="256" rx="13" fill="url(#g72849c)" stroke="#72849c" stroke-width="2"/>
+<text x="77" y="1386" font-family="Open Sans, sans-serif" font-size="24" fill="#0b1938" font-weight="700" text-anchor="start">Обозначения и условия HA</text>
+<text x="77" y="1423" font-family="Open Sans, sans-serif" font-size="20" fill="#0b1938" font-weight="400" text-anchor="start">Зелёный: чтение; красный: запись через локальный вход.</text>
+<text x="77" y="1454" font-family="Open Sans, sans-serif" font-size="20" fill="#0b1938" font-weight="400" text-anchor="start">Оранжевый: алерты; пунктир ↔ — служебный gossip.</text>
+<text x="77" y="1485" font-family="Open Sans, sans-serif" font-size="20" fill="#0b1938" font-weight="400" text-anchor="start">Одинаковые rules / labels; evaluation / dedup: 15s.</text>
+<text x="77" y="1516" font-family="Open Sans, sans-serif" font-size="20" fill="#0b1938" font-weight="400" text-anchor="start">Каждый vmalert настроен на все 3 notifier.url.</text>
+<text x="77" y="1547" font-family="Open Sans, sans-serif" font-size="20" fill="#0b1938" font-weight="400" text-anchor="start">Собственный DR-VIP не считается рабочим HA-входом.</text>
+<text x="77" y="1578" font-family="Open Sans, sans-serif" font-size="20" fill="#0b1938" font-weight="400" text-anchor="start">Внешний VIP 10.0.0.100:8427 — на схемах №2–4.</text>
+<rect x="920" y="1350" width="825" height="256" rx="13" fill="url(#gdd4545)" stroke="#dd4545" stroke-width="2"/>
+<text x="942" y="1386" font-family="Open Sans, sans-serif" font-size="24" fill="#dd4545" font-weight="700" text-anchor="start">Отказ → оставшийся путь</text>
+<text x="942" y="1423" font-family="Open Sans, sans-serif" font-size="20" fill="#0b1938" font-weight="400" text-anchor="start">vmalert или локальный vmauth: работают другие пары.</text>
+<text x="942" y="1454" font-family="Open Sans, sans-serif" font-size="20" fill="#0b1938" font-weight="400" text-anchor="start">vmselect / vminsert: vmauth выбирает другой backend.</text>
+<text x="942" y="1485" font-family="Open Sans, sans-serif" font-size="20" fill="#0b1938" font-weight="400" text-anchor="start">Alertmanager: алерты уже доставляются другим двум.</text>
+<text x="942" y="1516" font-family="Open Sans, sans-serif" font-size="20" fill="#0b1938" font-weight="400" text-anchor="start">Разрыв gossip: возможны повторные уведомления.</text>
+<text x="942" y="1547" font-family="Open Sans, sans-serif" font-size="20" fill="#0b1938" font-weight="400" text-anchor="start">Без доступа к чтению правила вычислить нельзя.</text>
+<text x="942" y="1578" font-family="Open Sans, sans-serif" font-size="20" fill="#0b1938" font-weight="400" text-anchor="start">HA не гарантирует успех каждого запроса при сбое.</text>
+<text x="55" y="1656" font-family="Open Sans, sans-serif" font-size="15" fill="#72849c" font-weight="400" text-anchor="start">VICTORIAMETRICS 1.130.0  /  3 УЗЛА  /  ПРОЕКТНАЯ СХЕМА</text>
+<text x="1745" y="1656" font-family="Open Sans, sans-serif" font-size="17" fill="#72849c" font-weight="400" text-anchor="end">05 / 05</text>
+</svg>

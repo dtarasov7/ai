@@ -1,0 +1,143 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1600" viewBox="0 0 1800 1600">
+<defs>
+<marker id="a0878e8" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L10 4 L0 8 Z" fill="#0878e8"/></marker>
+<marker id="s0878e8" markerWidth="10" markerHeight="8" refX="1" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M10 0 L0 4 L10 8 Z" fill="#0878e8"/></marker>
+<linearGradient id="g0878e8" x2="0.8" y2="1"><stop stop-color="#ffffff"/><stop offset="1" stop-color="#e2f0ff"/></linearGradient>
+<marker id="a159447" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L10 4 L0 8 Z" fill="#159447"/></marker>
+<marker id="s159447" markerWidth="10" markerHeight="8" refX="1" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M10 0 L0 4 L10 8 Z" fill="#159447"/></marker>
+<linearGradient id="g159447" x2="0.8" y2="1"><stop stop-color="#ffffff"/><stop offset="1" stop-color="#ddf5e8"/></linearGradient>
+<marker id="add4545" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L10 4 L0 8 Z" fill="#dd4545"/></marker>
+<marker id="sdd4545" markerWidth="10" markerHeight="8" refX="1" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M10 0 L0 4 L10 8 Z" fill="#dd4545"/></marker>
+<linearGradient id="gdd4545" x2="0.8" y2="1"><stop stop-color="#ffffff"/><stop offset="1" stop-color="#fff0ee"/></linearGradient>
+<marker id="a7951b0" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L10 4 L0 8 Z" fill="#7951b0"/></marker>
+<marker id="s7951b0" markerWidth="10" markerHeight="8" refX="1" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M10 0 L0 4 L10 8 Z" fill="#7951b0"/></marker>
+<linearGradient id="g7951b0" x2="0.8" y2="1"><stop stop-color="#ffffff"/><stop offset="1" stop-color="#eee9fb"/></linearGradient>
+<marker id="ae68519" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L10 4 L0 8 Z" fill="#e68519"/></marker>
+<marker id="se68519" markerWidth="10" markerHeight="8" refX="1" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M10 0 L0 4 L10 8 Z" fill="#e68519"/></marker>
+<linearGradient id="ge68519" x2="0.8" y2="1"><stop stop-color="#ffffff"/><stop offset="1" stop-color="#fff0db"/></linearGradient>
+<marker id="a72849c" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L10 4 L0 8 Z" fill="#72849c"/></marker>
+<marker id="s72849c" markerWidth="10" markerHeight="8" refX="1" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M10 0 L0 4 L10 8 Z" fill="#72849c"/></marker>
+<linearGradient id="g72849c" x2="0.8" y2="1"><stop stop-color="#ffffff"/><stop offset="1" stop-color="#f4f8fc"/></linearGradient>
+</defs><rect width="1800" height="100%" fill="white"/>
+<text x="900" y="65" font-family="Open Sans, sans-serif" font-size="43" fill="#0b1938" font-weight="700" text-anchor="middle">Схема 7. vmrestore — восстановление данных</text>
+<text x="900" y="106" font-family="Open Sans, sans-serif" font-size="21" fill="#72849c" font-weight="400" text-anchor="middle">Копия каждого vmstorage → его целевой том · vmstorage остановлен до завершения</text>
+<rect x="160" y="155" width="1580" height="230" rx="13" fill="url(#g0878e8)" stroke="#0878e8" stroke-width="2"/>
+<text x="950" y="192" font-family="Open Sans, sans-serif" font-size="25" fill="#0b1938" font-weight="700" text-anchor="middle">Внешнее хранилище резервных копий · пример: S3 / S3-совместимый сервис</text>
+<text x="950" y="220" font-family="Open Sans, sans-serif" font-size="19" fill="#72849c" font-weight="400" text-anchor="middle">Bucket: vm-backups · общий префикс: cluster-a/ · отдельный префикс каждого vmstorage</text>
+<rect data-visio-target="true" x="200" y="250" width="400" height="110" rx="13" fill="url(#g0878e8)" stroke="#0878e8" stroke-width="2"/>
+<text x="400" y="285" font-family="Open Sans, sans-serif" font-size="27" fill="#0b1938" font-weight="700" text-anchor="middle">Резервная копия</text>
+<text x="400" y="315" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="middle">vmstorage-1/latest</text>
+<text x="400" y="340" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="middle">Собственный набор файлов узла</text>
+<rect data-visio-target="true" x="750" y="250" width="400" height="110" rx="13" fill="url(#g0878e8)" stroke="#0878e8" stroke-width="2"/>
+<text x="950" y="285" font-family="Open Sans, sans-serif" font-size="27" fill="#0b1938" font-weight="700" text-anchor="middle">Резервная копия</text>
+<text x="950" y="315" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="middle">vmstorage-2/latest</text>
+<text x="950" y="340" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="middle">Собственный набор файлов узла</text>
+<rect data-visio-target="true" x="1300" y="250" width="400" height="110" rx="13" fill="url(#g0878e8)" stroke="#0878e8" stroke-width="2"/>
+<text x="1500" y="285" font-family="Open Sans, sans-serif" font-size="27" fill="#0b1938" font-weight="700" text-anchor="middle">Резервная копия</text>
+<text x="1500" y="315" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="middle">vmstorage-3/latest</text>
+<text x="1500" y="340" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="middle">Собственный набор файлов узла</text>
+<rect x="160" y="505" width="480" height="725" rx="13" fill="url(#g72849c)" stroke="#72849c" stroke-width="2" stroke-dasharray="8 7"/>
+<text x="400" y="548" font-family="Open Sans, sans-serif" font-size="26" fill="#0b1938" font-weight="700" text-anchor="middle">Узел 1 · 10.0.0.11</text>
+<rect x="710" y="505" width="480" height="725" rx="13" fill="url(#g72849c)" stroke="#72849c" stroke-width="2" stroke-dasharray="8 7"/>
+<text x="950" y="548" font-family="Open Sans, sans-serif" font-size="26" fill="#0b1938" font-weight="700" text-anchor="middle">Узел 2 · 10.0.0.12</text>
+<rect x="1260" y="505" width="480" height="725" rx="13" fill="url(#g72849c)" stroke="#72849c" stroke-width="2" stroke-dasharray="8 7"/>
+<text x="1500" y="548" font-family="Open Sans, sans-serif" font-size="26" fill="#0b1938" font-weight="700" text-anchor="middle">Узел 3 · 10.0.0.13</text>
+<path d="M225,360 L225,570" fill="none" stroke="#159447" stroke-width="3" stroke-linejoin="round" marker-end="url(#a159447)"/>
+<path d="M400,680 L400,830" fill="none" stroke="#dd4545" stroke-width="3" stroke-linejoin="round" marker-end="url(#add4545)"/>
+<path d="M400,940 L400,1070" fill="none" stroke="#72849c" stroke-width="3" stroke-linejoin="round" stroke-dasharray="9 7" marker-end="url(#a72849c)"/>
+<rect data-visio-target="true" x="200" y="570" width="400" height="110" rx="13" fill="url(#g7951b0)" stroke="#7951b0" stroke-width="2"/>
+<g transform="translate(250,618)" stroke="#7951b0" stroke-width="4" fill="none" stroke-linecap="round">
+<path d="M-22 8 V26 H23 V8 M0 -27 V11 M-12 -1 L0 12 L12 -1"/>
+</g>
+<text x="295" y="610" font-family="Open Sans, sans-serif" font-size="28" fill="#0b1938" font-weight="700" text-anchor="start">vmrestore</text>
+<text x="295" y="642" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Разовый запуск</text>
+<rect data-visio-target="true" x="200" y="830" width="400" height="110" rx="13" fill="url(#ge68519)" stroke="#e68519" stroke-width="2"/>
+<text x="400" y="865" font-family="Open Sans, sans-serif" font-size="27" fill="#0b1938" font-weight="700" text-anchor="middle">Каталог данных</text>
+<text x="400" y="895" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="middle">-storageDataPath</text>
+<text x="400" y="920" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="middle">Том целевого vmstorage-1</text>
+<rect data-visio-target="true" x="200" y="1070" width="400" height="110" rx="13" fill="url(#ge68519)" stroke="#e68519" stroke-width="2"/>
+<g transform="translate(250,1118)" stroke="#e68519" stroke-width="4" fill="none" stroke-linecap="round">
+<path d="M-23 -17 V18 C-23 30 23 30 23 18 V-17"/><ellipse cy="-17" rx="23" ry="9"/><path d="M-23 0 C-23 12 23 12 23 0 M-23 14 C-23 26 23 26 23 14"/>
+</g>
+<text x="295" y="1110" font-family="Open Sans, sans-serif" font-size="28" fill="#0b1938" font-weight="700" text-anchor="start">vmstorage</text>
+<text x="295" y="1142" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">ОСТАНОВЛЕН до завершения</text>
+<rect x="210" y="717" width="380" height="66" fill="white"/>
+<text x="400" y="740" font-family="Open Sans, sans-serif" font-size="20" fill="#dd4545" font-weight="700" text-anchor="middle">2. Запись файлов на диск</text>
+<text x="400" y="773" font-family="Open Sans, sans-serif" font-size="18" fill="#72849c" font-weight="400" text-anchor="middle">Замещение содержимого каталога</text>
+<rect x="210" y="967" width="380" height="63" fill="white"/>
+<text x="400" y="990" font-family="Open Sans, sans-serif" font-size="20" fill="#72849c" font-weight="700" text-anchor="middle">3. После успеха и проверки</text>
+<text x="400" y="1020" font-family="Open Sans, sans-serif" font-size="18" fill="#72849c" font-weight="400" text-anchor="middle">Запуск vmstorage с этим каталогом</text>
+<text x="400" y="1210" font-family="Open Sans, sans-serif" font-size="18" fill="#72849c" font-weight="400" text-anchor="middle">Исходный или заменяющий узел</text>
+<path d="M775,360 L775,570" fill="none" stroke="#159447" stroke-width="3" stroke-linejoin="round" marker-end="url(#a159447)"/>
+<path d="M950,680 L950,830" fill="none" stroke="#dd4545" stroke-width="3" stroke-linejoin="round" marker-end="url(#add4545)"/>
+<path d="M950,940 L950,1070" fill="none" stroke="#72849c" stroke-width="3" stroke-linejoin="round" stroke-dasharray="9 7" marker-end="url(#a72849c)"/>
+<rect data-visio-target="true" x="750" y="570" width="400" height="110" rx="13" fill="url(#g7951b0)" stroke="#7951b0" stroke-width="2"/>
+<g transform="translate(800,618)" stroke="#7951b0" stroke-width="4" fill="none" stroke-linecap="round">
+<path d="M-22 8 V26 H23 V8 M0 -27 V11 M-12 -1 L0 12 L12 -1"/>
+</g>
+<text x="845" y="610" font-family="Open Sans, sans-serif" font-size="28" fill="#0b1938" font-weight="700" text-anchor="start">vmrestore</text>
+<text x="845" y="642" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Разовый запуск</text>
+<rect data-visio-target="true" x="750" y="830" width="400" height="110" rx="13" fill="url(#ge68519)" stroke="#e68519" stroke-width="2"/>
+<text x="950" y="865" font-family="Open Sans, sans-serif" font-size="27" fill="#0b1938" font-weight="700" text-anchor="middle">Каталог данных</text>
+<text x="950" y="895" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="middle">-storageDataPath</text>
+<text x="950" y="920" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="middle">Том целевого vmstorage-2</text>
+<rect data-visio-target="true" x="750" y="1070" width="400" height="110" rx="13" fill="url(#ge68519)" stroke="#e68519" stroke-width="2"/>
+<g transform="translate(800,1118)" stroke="#e68519" stroke-width="4" fill="none" stroke-linecap="round">
+<path d="M-23 -17 V18 C-23 30 23 30 23 18 V-17"/><ellipse cy="-17" rx="23" ry="9"/><path d="M-23 0 C-23 12 23 12 23 0 M-23 14 C-23 26 23 26 23 14"/>
+</g>
+<text x="845" y="1110" font-family="Open Sans, sans-serif" font-size="28" fill="#0b1938" font-weight="700" text-anchor="start">vmstorage</text>
+<text x="845" y="1142" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">ОСТАНОВЛЕН до завершения</text>
+<rect x="760" y="717" width="380" height="66" fill="white"/>
+<text x="950" y="740" font-family="Open Sans, sans-serif" font-size="20" fill="#dd4545" font-weight="700" text-anchor="middle">2. Запись файлов на диск</text>
+<text x="950" y="773" font-family="Open Sans, sans-serif" font-size="18" fill="#72849c" font-weight="400" text-anchor="middle">Замещение содержимого каталога</text>
+<rect x="760" y="967" width="380" height="63" fill="white"/>
+<text x="950" y="990" font-family="Open Sans, sans-serif" font-size="20" fill="#72849c" font-weight="700" text-anchor="middle">3. После успеха и проверки</text>
+<text x="950" y="1020" font-family="Open Sans, sans-serif" font-size="18" fill="#72849c" font-weight="400" text-anchor="middle">Запуск vmstorage с этим каталогом</text>
+<text x="950" y="1210" font-family="Open Sans, sans-serif" font-size="18" fill="#72849c" font-weight="400" text-anchor="middle">Исходный или заменяющий узел</text>
+<path d="M1325,360 L1325,570" fill="none" stroke="#159447" stroke-width="3" stroke-linejoin="round" marker-end="url(#a159447)"/>
+<path d="M1500,680 L1500,830" fill="none" stroke="#dd4545" stroke-width="3" stroke-linejoin="round" marker-end="url(#add4545)"/>
+<path d="M1500,940 L1500,1070" fill="none" stroke="#72849c" stroke-width="3" stroke-linejoin="round" stroke-dasharray="9 7" marker-end="url(#a72849c)"/>
+<rect data-visio-target="true" x="1300" y="570" width="400" height="110" rx="13" fill="url(#g7951b0)" stroke="#7951b0" stroke-width="2"/>
+<g transform="translate(1350,618)" stroke="#7951b0" stroke-width="4" fill="none" stroke-linecap="round">
+<path d="M-22 8 V26 H23 V8 M0 -27 V11 M-12 -1 L0 12 L12 -1"/>
+</g>
+<text x="1395" y="610" font-family="Open Sans, sans-serif" font-size="28" fill="#0b1938" font-weight="700" text-anchor="start">vmrestore</text>
+<text x="1395" y="642" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Разовый запуск</text>
+<rect data-visio-target="true" x="1300" y="830" width="400" height="110" rx="13" fill="url(#ge68519)" stroke="#e68519" stroke-width="2"/>
+<text x="1500" y="865" font-family="Open Sans, sans-serif" font-size="27" fill="#0b1938" font-weight="700" text-anchor="middle">Каталог данных</text>
+<text x="1500" y="895" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="middle">-storageDataPath</text>
+<text x="1500" y="920" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="middle">Том целевого vmstorage-3</text>
+<rect data-visio-target="true" x="1300" y="1070" width="400" height="110" rx="13" fill="url(#ge68519)" stroke="#e68519" stroke-width="2"/>
+<g transform="translate(1350,1118)" stroke="#e68519" stroke-width="4" fill="none" stroke-linecap="round">
+<path d="M-23 -17 V18 C-23 30 23 30 23 18 V-17"/><ellipse cy="-17" rx="23" ry="9"/><path d="M-23 0 C-23 12 23 12 23 0 M-23 14 C-23 26 23 26 23 14"/>
+</g>
+<text x="1395" y="1110" font-family="Open Sans, sans-serif" font-size="28" fill="#0b1938" font-weight="700" text-anchor="start">vmstorage</text>
+<text x="1395" y="1142" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">ОСТАНОВЛЕН до завершения</text>
+<rect x="1310" y="717" width="380" height="66" fill="white"/>
+<text x="1500" y="740" font-family="Open Sans, sans-serif" font-size="20" fill="#dd4545" font-weight="700" text-anchor="middle">2. Запись файлов на диск</text>
+<text x="1500" y="773" font-family="Open Sans, sans-serif" font-size="18" fill="#72849c" font-weight="400" text-anchor="middle">Замещение содержимого каталога</text>
+<rect x="1310" y="967" width="380" height="63" fill="white"/>
+<text x="1500" y="990" font-family="Open Sans, sans-serif" font-size="20" fill="#72849c" font-weight="700" text-anchor="middle">3. После успеха и проверки</text>
+<text x="1500" y="1020" font-family="Open Sans, sans-serif" font-size="18" fill="#72849c" font-weight="400" text-anchor="middle">Запуск vmstorage с этим каталогом</text>
+<text x="1500" y="1210" font-family="Open Sans, sans-serif" font-size="18" fill="#72849c" font-weight="400" text-anchor="middle">Исходный или заменяющий узел</text>
+<rect x="220" y="430" width="1460" height="45" rx="13" fill="url(#g159447)" stroke="#159447" stroke-width="2"/>
+<text x="950" y="460" font-family="Open Sans, sans-serif" font-size="20" fill="#159447" font-weight="700" text-anchor="middle">1. Получение копий · vmrestore инициирует HTTPS / TCP 443* · стрелки показывают поток данных</text>
+<rect x="55" y="1270" width="825" height="256" rx="13" fill="url(#g72849c)" stroke="#72849c" stroke-width="2"/>
+<text x="77" y="1306" font-family="Open Sans, sans-serif" font-size="24" fill="#0b1938" font-weight="700" text-anchor="start">Условия восстановления</text>
+<text x="77" y="1343" font-family="Open Sans, sans-serif" font-size="19" fill="#0b1938" font-weight="400" text-anchor="start">Выбирается завершённая копия нужного vmstorage.</text>
+<text x="77" y="1374" font-family="Open Sans, sans-serif" font-size="19" fill="#0b1938" font-weight="400" text-anchor="start">Зелёный: копия → утилита; красный: запись на диск.</text>
+<text x="77" y="1405" font-family="Open Sans, sans-serif" font-size="19" fill="#0b1938" font-weight="400" text-anchor="start">Серый пунктир: запуск после восстановления.</text>
+<text x="77" y="1436" font-family="Open Sans, sans-serif" font-size="19" fill="#0b1938" font-weight="400" text-anchor="start">Каталог доступен утилите; vmstorage его не использует.</text>
+<text x="77" y="1467" font-family="Open Sans, sans-serif" font-size="19" fill="#0b1938" font-weight="400" text-anchor="start">* Порт endpoint зависит от выбранного хранилища.</text>
+<text x="77" y="1498" font-family="Open Sans, sans-serif" font-size="19" fill="#0b1938" font-weight="400" text-anchor="start">Показаны три пути; один узел восстанавливается отдельно.</text>
+<rect x="920" y="1270" width="825" height="256" rx="13" fill="url(#gdd4545)" stroke="#dd4545" stroke-width="2"/>
+<text x="942" y="1306" font-family="Open Sans, sans-serif" font-size="24" fill="#dd4545" font-weight="700" text-anchor="start">Ограничения и HA</text>
+<text x="942" y="1343" font-family="Open Sans, sans-serif" font-size="20" fill="#0b1938" font-weight="400" text-anchor="start">Существующие файлы могут заменяться и удаляться.</text>
+<text x="942" y="1374" font-family="Open Sans, sans-serif" font-size="20" fill="#0b1938" font-weight="400" text-anchor="start">При восстановлении одного узла остальные работают.</text>
+<text x="942" y="1405" font-family="Open Sans, sans-serif" font-size="20" fill="#0b1938" font-weight="400" text-anchor="start">Полнота чтения зависит от RF и наличия реплик.</text>
+<text x="942" y="1436" font-family="Open Sans, sans-serif" font-size="20" fill="#0b1938" font-weight="400" text-anchor="start">Данных после snapshot в этой копии нет.</text>
+<text x="942" y="1467" font-family="Open Sans, sans-serif" font-size="20" fill="#0b1938" font-weight="400" text-anchor="start">Автодогрузки истории между vmstorage нет.</text>
+<text x="942" y="1498" font-family="Open Sans, sans-serif" font-size="20" fill="#0b1938" font-weight="400" text-anchor="start">Конфигурации и правила восстанавливаются отдельно.</text>
+<text x="55" y="1576" font-family="Open Sans, sans-serif" font-size="15" fill="#72849c" font-weight="400" text-anchor="start">VICTORIAMETRICS 1.130.0  /  3 УЗЛА  /  ПРОЕКТНАЯ СХЕМА</text>
+<text x="1745" y="1576" font-family="Open Sans, sans-serif" font-size="17" fill="#72849c" font-weight="400" text-anchor="end">07 / 07</text>
+</svg>

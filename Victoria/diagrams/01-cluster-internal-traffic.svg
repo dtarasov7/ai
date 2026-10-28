@@ -1,0 +1,124 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1400" viewBox="0 0 1800 1400">
+<defs>
+<marker id="a0878e8" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L10 4 L0 8 Z" fill="#0878e8"/></marker>
+<marker id="s0878e8" markerWidth="10" markerHeight="8" refX="1" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M10 0 L0 4 L10 8 Z" fill="#0878e8"/></marker>
+<linearGradient id="g0878e8" x2="0.8" y2="1"><stop stop-color="#ffffff"/><stop offset="1" stop-color="#e2f0ff"/></linearGradient>
+<marker id="a159447" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L10 4 L0 8 Z" fill="#159447"/></marker>
+<marker id="s159447" markerWidth="10" markerHeight="8" refX="1" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M10 0 L0 4 L10 8 Z" fill="#159447"/></marker>
+<linearGradient id="g159447" x2="0.8" y2="1"><stop stop-color="#ffffff"/><stop offset="1" stop-color="#ddf5e8"/></linearGradient>
+<marker id="add4545" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L10 4 L0 8 Z" fill="#dd4545"/></marker>
+<marker id="sdd4545" markerWidth="10" markerHeight="8" refX="1" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M10 0 L0 4 L10 8 Z" fill="#dd4545"/></marker>
+<linearGradient id="gdd4545" x2="0.8" y2="1"><stop stop-color="#ffffff"/><stop offset="1" stop-color="#fff0ee"/></linearGradient>
+<marker id="a7951b0" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L10 4 L0 8 Z" fill="#7951b0"/></marker>
+<marker id="s7951b0" markerWidth="10" markerHeight="8" refX="1" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M10 0 L0 4 L10 8 Z" fill="#7951b0"/></marker>
+<linearGradient id="g7951b0" x2="0.8" y2="1"><stop stop-color="#ffffff"/><stop offset="1" stop-color="#eee9fb"/></linearGradient>
+<marker id="ae68519" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L10 4 L0 8 Z" fill="#e68519"/></marker>
+<marker id="se68519" markerWidth="10" markerHeight="8" refX="1" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M10 0 L0 4 L10 8 Z" fill="#e68519"/></marker>
+<linearGradient id="ge68519" x2="0.8" y2="1"><stop stop-color="#ffffff"/><stop offset="1" stop-color="#fff0db"/></linearGradient>
+<marker id="a72849c" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L10 4 L0 8 Z" fill="#72849c"/></marker>
+<marker id="s72849c" markerWidth="10" markerHeight="8" refX="1" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M10 0 L0 4 L10 8 Z" fill="#72849c"/></marker>
+<linearGradient id="g72849c" x2="0.8" y2="1"><stop stop-color="#ffffff"/><stop offset="1" stop-color="#f4f8fc"/></linearGradient>
+</defs><rect width="1800" height="100%" fill="white"/>
+<text x="900" y="65" font-family="Open Sans, sans-serif" font-size="43" fill="#0b1938" font-weight="700" text-anchor="middle">Схема 1. Внутрикластерный обмен данными</text>
+<text x="900" y="106" font-family="Open Sans, sans-serif" font-size="21" fill="#72849c" font-weight="400" text-anchor="middle">Прямые соединения компонентов · без VIP и HTTP-прокси</text>
+<rect x="160" y="165" width="480" height="895" rx="13" fill="url(#g72849c)" stroke="#72849c" stroke-width="2" stroke-dasharray="8 7"/>
+<text x="400" y="208" font-family="Open Sans, sans-serif" font-size="26" fill="#0b1938" font-weight="700" text-anchor="middle">Узел 1 · 10.0.0.11</text>
+<rect x="710" y="165" width="480" height="895" rx="13" fill="url(#g72849c)" stroke="#72849c" stroke-width="2" stroke-dasharray="8 7"/>
+<text x="950" y="208" font-family="Open Sans, sans-serif" font-size="26" fill="#0b1938" font-weight="700" text-anchor="middle">Узел 2 · 10.0.0.12</text>
+<rect x="1260" y="165" width="480" height="895" rx="13" fill="url(#g72849c)" stroke="#72849c" stroke-width="2" stroke-dasharray="8 7"/>
+<text x="1500" y="208" font-family="Open Sans, sans-serif" font-size="26" fill="#0b1938" font-weight="700" text-anchor="middle">Узел 3 · 10.0.0.13</text>
+<path d="M362,370 L362,590" fill="none" stroke="#dd4545" stroke-width="3" stroke-linejoin="round" marker-end="url(#add4545)"/>
+<path d="M400,370 L912,590" fill="none" stroke="#dd4545" stroke-width="3" stroke-linejoin="round" marker-end="url(#add4545)"/>
+<path d="M438,370 L1462,590" fill="none" stroke="#dd4545" stroke-width="3" stroke-linejoin="round" marker-end="url(#add4545)"/>
+<path d="M912,370 L400,590" fill="none" stroke="#dd4545" stroke-width="3" stroke-linejoin="round" marker-end="url(#add4545)"/>
+<path d="M950,370 L950,590" fill="none" stroke="#dd4545" stroke-width="3" stroke-linejoin="round" marker-end="url(#add4545)"/>
+<path d="M988,370 L1500,590" fill="none" stroke="#dd4545" stroke-width="3" stroke-linejoin="round" marker-end="url(#add4545)"/>
+<path d="M1462,370 L438,590" fill="none" stroke="#dd4545" stroke-width="3" stroke-linejoin="round" marker-end="url(#add4545)"/>
+<path d="M1500,370 L988,590" fill="none" stroke="#dd4545" stroke-width="3" stroke-linejoin="round" marker-end="url(#add4545)"/>
+<path d="M1538,370 L1538,590" fill="none" stroke="#dd4545" stroke-width="3" stroke-linejoin="round" marker-end="url(#add4545)"/>
+<path d="M362,900 L362,730" fill="none" stroke="#159447" stroke-width="3" stroke-linejoin="round" marker-end="url(#a159447)"/>
+<path d="M400,900 L912,730" fill="none" stroke="#159447" stroke-width="3" stroke-linejoin="round" marker-end="url(#a159447)"/>
+<path d="M438,900 L1462,730" fill="none" stroke="#159447" stroke-width="3" stroke-linejoin="round" marker-end="url(#a159447)"/>
+<path d="M912,900 L400,730" fill="none" stroke="#159447" stroke-width="3" stroke-linejoin="round" marker-end="url(#a159447)"/>
+<path d="M950,900 L950,730" fill="none" stroke="#159447" stroke-width="3" stroke-linejoin="round" marker-end="url(#a159447)"/>
+<path d="M988,900 L1500,730" fill="none" stroke="#159447" stroke-width="3" stroke-linejoin="round" marker-end="url(#a159447)"/>
+<path d="M1462,900 L438,730" fill="none" stroke="#159447" stroke-width="3" stroke-linejoin="round" marker-end="url(#a159447)"/>
+<path d="M1500,900 L988,730" fill="none" stroke="#159447" stroke-width="3" stroke-linejoin="round" marker-end="url(#a159447)"/>
+<path d="M1538,900 L1538,730" fill="none" stroke="#159447" stroke-width="3" stroke-linejoin="round" marker-end="url(#a159447)"/>
+<rect x="200" y="270" width="400" height="100" rx="13" fill="url(#gdd4545)" stroke="#dd4545" stroke-width="2"/>
+<g transform="translate(255,320.0)" stroke="#dd4545" stroke-width="4" fill="none" stroke-linecap="round">
+<path d="M-22 8 V26 H23 V8 M0 -27 V11 M-12 -1 L0 12 L12 -1"/>
+</g>
+<text x="305" y="309" font-family="Open Sans, sans-serif" font-size="29" fill="#0b1938" font-weight="700" text-anchor="start">vminsert</text>
+<text x="305" y="342" font-family="Open Sans, sans-serif" font-size="20" fill="#0b1938" font-weight="400" text-anchor="start">HTTP :8480</text>
+<rect x="200" y="590" width="400" height="140" rx="13" fill="url(#ge68519)" stroke="#e68519" stroke-width="2"/>
+<g transform="translate(255,660.0)" stroke="#e68519" stroke-width="4" fill="none" stroke-linecap="round">
+<path d="M-23 -17 V18 C-23 30 23 30 23 18 V-17"/><ellipse cy="-17" rx="23" ry="9"/><path d="M-23 0 C-23 12 23 12 23 0 M-23 14 C-23 26 23 26 23 14"/>
+</g>
+<text x="305" y="629" font-family="Open Sans, sans-serif" font-size="29" fill="#0b1938" font-weight="700" text-anchor="start">vmstorage</text>
+<text x="305" y="662" font-family="Open Sans, sans-serif" font-size="20" fill="#0b1938" font-weight="400" text-anchor="start">HTTP :8482 · служебный</text>
+<text x="305" y="693" font-family="Open Sans, sans-serif" font-size="21" fill="#e68519" font-weight="700" text-anchor="start">TCP :8400 / :8401</text>
+<rect x="200" y="900" width="400" height="100" rx="13" fill="url(#g0878e8)" stroke="#0878e8" stroke-width="2"/>
+<g transform="translate(255,950.0)" stroke="#0878e8" stroke-width="4" fill="none" stroke-linecap="round">
+<circle cx="-6" cy="-5" r="18"/><path d="M8 9 L27 28" stroke-width="8"/>
+</g>
+<text x="305" y="939" font-family="Open Sans, sans-serif" font-size="29" fill="#0b1938" font-weight="700" text-anchor="start">vmselect</text>
+<text x="305" y="972" font-family="Open Sans, sans-serif" font-size="20" fill="#0b1938" font-weight="400" text-anchor="start">HTTP :8481</text>
+<rect x="750" y="270" width="400" height="100" rx="13" fill="url(#gdd4545)" stroke="#dd4545" stroke-width="2"/>
+<g transform="translate(805,320.0)" stroke="#dd4545" stroke-width="4" fill="none" stroke-linecap="round">
+<path d="M-22 8 V26 H23 V8 M0 -27 V11 M-12 -1 L0 12 L12 -1"/>
+</g>
+<text x="855" y="309" font-family="Open Sans, sans-serif" font-size="29" fill="#0b1938" font-weight="700" text-anchor="start">vminsert</text>
+<text x="855" y="342" font-family="Open Sans, sans-serif" font-size="20" fill="#0b1938" font-weight="400" text-anchor="start">HTTP :8480</text>
+<rect x="750" y="590" width="400" height="140" rx="13" fill="url(#ge68519)" stroke="#e68519" stroke-width="2"/>
+<g transform="translate(805,660.0)" stroke="#e68519" stroke-width="4" fill="none" stroke-linecap="round">
+<path d="M-23 -17 V18 C-23 30 23 30 23 18 V-17"/><ellipse cy="-17" rx="23" ry="9"/><path d="M-23 0 C-23 12 23 12 23 0 M-23 14 C-23 26 23 26 23 14"/>
+</g>
+<text x="855" y="629" font-family="Open Sans, sans-serif" font-size="29" fill="#0b1938" font-weight="700" text-anchor="start">vmstorage</text>
+<text x="855" y="662" font-family="Open Sans, sans-serif" font-size="20" fill="#0b1938" font-weight="400" text-anchor="start">HTTP :8482 · служебный</text>
+<text x="855" y="693" font-family="Open Sans, sans-serif" font-size="21" fill="#e68519" font-weight="700" text-anchor="start">TCP :8400 / :8401</text>
+<rect x="750" y="900" width="400" height="100" rx="13" fill="url(#g0878e8)" stroke="#0878e8" stroke-width="2"/>
+<g transform="translate(805,950.0)" stroke="#0878e8" stroke-width="4" fill="none" stroke-linecap="round">
+<circle cx="-6" cy="-5" r="18"/><path d="M8 9 L27 28" stroke-width="8"/>
+</g>
+<text x="855" y="939" font-family="Open Sans, sans-serif" font-size="29" fill="#0b1938" font-weight="700" text-anchor="start">vmselect</text>
+<text x="855" y="972" font-family="Open Sans, sans-serif" font-size="20" fill="#0b1938" font-weight="400" text-anchor="start">HTTP :8481</text>
+<rect x="1300" y="270" width="400" height="100" rx="13" fill="url(#gdd4545)" stroke="#dd4545" stroke-width="2"/>
+<g transform="translate(1355,320.0)" stroke="#dd4545" stroke-width="4" fill="none" stroke-linecap="round">
+<path d="M-22 8 V26 H23 V8 M0 -27 V11 M-12 -1 L0 12 L12 -1"/>
+</g>
+<text x="1405" y="309" font-family="Open Sans, sans-serif" font-size="29" fill="#0b1938" font-weight="700" text-anchor="start">vminsert</text>
+<text x="1405" y="342" font-family="Open Sans, sans-serif" font-size="20" fill="#0b1938" font-weight="400" text-anchor="start">HTTP :8480</text>
+<rect x="1300" y="590" width="400" height="140" rx="13" fill="url(#ge68519)" stroke="#e68519" stroke-width="2"/>
+<g transform="translate(1355,660.0)" stroke="#e68519" stroke-width="4" fill="none" stroke-linecap="round">
+<path d="M-23 -17 V18 C-23 30 23 30 23 18 V-17"/><ellipse cy="-17" rx="23" ry="9"/><path d="M-23 0 C-23 12 23 12 23 0 M-23 14 C-23 26 23 26 23 14"/>
+</g>
+<text x="1405" y="629" font-family="Open Sans, sans-serif" font-size="29" fill="#0b1938" font-weight="700" text-anchor="start">vmstorage</text>
+<text x="1405" y="662" font-family="Open Sans, sans-serif" font-size="20" fill="#0b1938" font-weight="400" text-anchor="start">HTTP :8482 · служебный</text>
+<text x="1405" y="693" font-family="Open Sans, sans-serif" font-size="21" fill="#e68519" font-weight="700" text-anchor="start">TCP :8400 / :8401</text>
+<rect x="1300" y="900" width="400" height="100" rx="13" fill="url(#g0878e8)" stroke="#0878e8" stroke-width="2"/>
+<g transform="translate(1355,950.0)" stroke="#0878e8" stroke-width="4" fill="none" stroke-linecap="round">
+<circle cx="-6" cy="-5" r="18"/><path d="M8 9 L27 28" stroke-width="8"/>
+</g>
+<text x="1405" y="939" font-family="Open Sans, sans-serif" font-size="29" fill="#0b1938" font-weight="700" text-anchor="start">vmselect</text>
+<text x="1405" y="972" font-family="Open Sans, sans-serif" font-size="20" fill="#0b1938" font-weight="400" text-anchor="start">HTTP :8481</text>
+<rect x="220" y="443" width="1460" height="45" rx="13" fill="url(#gdd4545)" stroke="#dd4545" stroke-width="2"/>
+<text x="950" y="473" font-family="Open Sans, sans-serif" font-size="22" fill="#dd4545" font-weight="700" text-anchor="middle">ЗАПИСЬ · каждый vminsert → все 3 vmstorage · внутренний протокол / TCP 8400</text>
+<rect x="220" y="790" width="1460" height="45" rx="13" fill="url(#g159447)" stroke="#159447" stroke-width="2"/>
+<text x="950" y="820" font-family="Open Sans, sans-serif" font-size="22" fill="#159447" font-weight="700" text-anchor="middle">ЧТЕНИЕ · каждый vmselect → все 3 vmstorage · внутренний протокол / TCP 8401</text>
+<rect x="55" y="1100" width="825" height="194" rx="13" fill="url(#g72849c)" stroke="#72849c" stroke-width="2"/>
+<text x="77" y="1136" font-family="Open Sans, sans-serif" font-size="24" fill="#0b1938" font-weight="700" text-anchor="start">Что означают стрелки</text>
+<text x="77" y="1173" font-family="Open Sans, sans-serif" font-size="20" fill="#0b1938" font-weight="400" text-anchor="start">Красный: запись; зелёный: инициатор запроса чтения.</text>
+<text x="77" y="1204" font-family="Open Sans, sans-serif" font-size="20" fill="#0b1938" font-weight="400" text-anchor="start">9 соединений записи + 9 соединений чтения.</text>
+<text x="77" y="1235" font-family="Open Sans, sans-serif" font-size="20" fill="#0b1938" font-weight="400" text-anchor="start">Данные чтения возвращаются по тем же соединениям.</text>
+<text x="77" y="1266" font-family="Open Sans, sans-serif" font-size="20" fill="#0b1938" font-weight="400" text-anchor="start">vmstorage не обмениваются репликами между собой.</text>
+<rect x="920" y="1100" width="825" height="194" rx="13" fill="url(#gdd4545)" stroke="#dd4545" stroke-width="2"/>
+<text x="942" y="1136" font-family="Open Sans, sans-serif" font-size="24" fill="#dd4545" font-weight="700" text-anchor="start">HA: один vmstorage недоступен</text>
+<text x="942" y="1173" font-family="Open Sans, sans-serif" font-size="20" fill="#0b1938" font-weight="400" text-anchor="start">Новые записи перенаправляются на оставшиеся узлы.</text>
+<text x="942" y="1204" font-family="Open Sans, sans-serif" font-size="20" fill="#0b1938" font-weight="400" text-anchor="start">RF=1: часть истории недоступна; partial / ошибка.</text>
+<text x="942" y="1235" font-family="Open Sans, sans-serif" font-size="20" fill="#0b1938" font-weight="400" text-anchor="start">RF=2: ранее реплицированные данные доступны.</text>
+<text x="942" y="1266" font-family="Open Sans, sans-serif" font-size="20" fill="#0b1938" font-weight="400" text-anchor="start">RF=2 на insert/select + dedup; детали — в 1.md.</text>
+<text x="900" y="1035" font-family="Open Sans, sans-serif" font-size="21" fill="#72849c" font-weight="400" text-anchor="middle">При отказе одного vminsert или vmselect остальные экземпляры продолжают работу.</text>
+<text x="55" y="1376" font-family="Open Sans, sans-serif" font-size="15" fill="#72849c" font-weight="400" text-anchor="start">VICTORIAMETRICS 1.130.0  /  3 УЗЛА  /  ПРОЕКТНАЯ СХЕМА</text>
+<text x="1745" y="1376" font-family="Open Sans, sans-serif" font-size="17" fill="#72849c" font-weight="400" text-anchor="end">01 / 05</text>
+</svg>
