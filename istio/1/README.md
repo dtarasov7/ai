@@ -4,9 +4,7 @@
 
 **Можно:** Да. **Рекомендация:** Стоит.
 
-## Что означает правый столбец
-
-На скриншоте: `istio-proxy (Envoy proxy: sidecar и Istio gateway)`.
+## Как реализуется возможность
 
 Envoy выполняет маршрутизацию; istiod передаёт ему конфигурацию. VirtualService задаёт HTTP-маршруты, DestinationRule — версии и свойства upstream. Вход и выход оформляют отдельными gateway и ServiceEntry.
 

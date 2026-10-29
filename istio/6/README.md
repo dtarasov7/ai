@@ -4,9 +4,7 @@
 
 **Можно:** Да. **Рекомендация:** Стоит; Kubernetes часто достаточен.
 
-## Что означает правый столбец
-
-На скриншоте: `istiod (pilot, istio federation, istio multi-cluster)`.
+## Как реализуется возможность
 
 istiod наблюдает Service и EndpointSlice Kubernetes и сообщает Envoy адреса доступных workload. ServiceEntry добавляет сторонние адреса. Для приложения обычно достаточно стабильного имени Kubernetes Service.
 

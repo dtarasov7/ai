@@ -4,9 +4,7 @@
 
 **Можно:** Да. **Рекомендация:** Стоит при использовании mesh.
 
-## Что означает правый столбец
-
-На скриншоте: `Ingress gateway, VirtualService`.
+## Как реализуется возможность
 
 В Deckhouse IngressIstioController создаёт gateway; Gateway выбирает его по istio.deckhouse.io/ingress-gateway-class, а VirtualService задаёт host/path → backend. Возможен и ingress-nginx с интеграцией Istio.
 

@@ -4,9 +4,7 @@
 
 **Можно:** Да, для межсервисного доступа. **Рекомендация:** Стоит.
 
-## Что означает правый столбец
-
-На скриншоте: `dex-authenticator, dex-idp-proxy, mTLS, RBAC, AuthorizationPolicies`.
+## Как реализуется возможность
 
 Для workload-to-workload нужны mTLS, Kubernetes ServiceAccount, PeerAuthentication STRICT и AuthorizationPolicy. Сертификаты удостоверяют сервисную identity; правило разрешает конкретный principal. Dex относится к пользовательскому входу. Kubernetes RBAC регулирует API Kubernetes, а не HTTP сервиса.
 

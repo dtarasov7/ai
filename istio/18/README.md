@@ -4,9 +4,7 @@
 
 **Можно:** Частично. **Рекомендация:** Стоит использовать Kubernetes probes.
 
-## Что означает правый столбец
-
-На скриншоте: `Envoy proxy health checks`.
+## Как реализуется возможность
 
 Kubelet выполняет readiness/liveness/startup probes приложения. Readiness влияет на endpoints, которыми пользуется Envoy; Istio может переписывать HTTP-пробы для работы с sidecar/mTLS. Готовность proxy и здоровье приложения — разные проверки.
 

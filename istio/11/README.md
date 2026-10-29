@@ -4,9 +4,7 @@
 
 **Можно:** Частично. **Рекомендация:** Стоит совместно с CNI.
 
-## Что означает правый столбец
-
-На скриншоте: `L4/L7 traffic rules`.
+## Как реализуется возможность
 
 PeerAuthentication и AuthorizationPolicy ограничивают обращения к workload по identity и L7-признакам. Kubernetes NetworkPolicy/Cilium ограничивают сетевую достижимость. VirtualService и Sidecar exportTo управляют маршрутизацией/видимостью, а не создают границу безопасности.
 

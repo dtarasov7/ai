@@ -4,9 +4,7 @@
 
 **Можно:** Частично. **Рекомендация:** Стоит для JWT и грубых правил.
 
-## Что означает правый столбец
-
-На скриншоте: `dex-authenticator, dex-idp-proxy, RBAC, JWT`.
+## Как реализуется возможность
 
 RequestAuthentication проверяет подпись, issuer и audience JWT; AuthorizationPolicy требует authenticated principal и нужные claims. Для browser login, MFA, выдачи и обновления токенов нужны IdP и OIDC proxy/приложение. Настройка auth модуля для Kiali не включает SSO автоматически для всех сервисов.
 
