@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Цель пункта: Маршрут без заголовка ведёт к v1, x-cohort=B — к v2.
+# Запускайте этапы prepare → check → cleanup; после ошибки сначала сохраните диагностику.
+# При неожиданной ошибке, неопределённой переменной или сбое части конвейера останавливаем сценарий.
+# Очистка запускается отдельно.
+set -euo pipefail
+
+# Все имена и проверки привязаны к namespace этого опыта. Не размещайте в нём посторонние ресурсы.
+NS=pmi-istio-1
+
+# Проверяем метку владельца: совпадение имени namespace само по себе не даёт права использовать или
+# удалять его.
+OWNER=$(kubectl get namespace "$NS" --ignore-not-found -o jsonpath='{.metadata.labels.pmi-istio-owner}')
+
+# Пустая метка требует дополнительной проверки: namespace мог уже исчезнуть либо принадлежит другому
+# владельцу.
+if [ -z "$OWNER" ]; then
+
+  # Отличаем уже удалённый namespace от существующего namespace без нашей метки; второй удалять нельзя.
+  EXISTING=$(kubectl get namespace "$NS" --ignore-not-found -o name)
+  if [ -z "$EXISTING" ]; then
+    echo "Namespace уже отсутствует."
+    exit 0
+  fi
+fi
+
+# При несовпадении владельца останавливаемся; чужой namespace не изменяем и не удаляем.
+if [ "$OWNER" != "$NS" ]; then
+  echo "ОШИБКА: метка владельца не совпадает; удаление отменено."
+  exit 1
+fi
+
+# Удаляем namespace вместе с ресурсами опыта. Метка владельца проверена выше; общий control plane и
+# gateway сюда не входят.
+kubectl delete namespace "$NS" --wait=true --timeout=180s
