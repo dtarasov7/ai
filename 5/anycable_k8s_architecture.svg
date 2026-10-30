@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+<title id="title">WebSocket и AnyCable-Go: Kubernetes и внешний Redis</title>
+<desc id="desc">Браузер через WAF и L4 балансировщик по WebSocket соединяется с Ingress и AnyCable-Go Pod внутри Kubernetes. Backend Pod также внутри Kubernetes. Redis находится за пределами Kubernetes и обменивается данными с AnyCable-Go и backend.</desc>
+<defs>
+  <marker id="blue" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0L8 4L0 8Z" fill="#2563eb"/></marker>
+  <marker id="blueStart" markerWidth="8" markerHeight="8" refX="1" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M8 0L0 4L8 8Z" fill="#2563eb"/></marker>
+  <marker id="amber" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0L8 4L0 8Z" fill="#d97706"/></marker>
+  <marker id="amberStart" markerWidth="8" markerHeight="8" refX="1" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M8 0L0 4L8 8Z" fill="#d97706"/></marker>
+  <style>
+   text {font-family:Arial,'DejaVu Sans',sans-serif;fill:#14233f} .title{font-size:34px;font-weight:700} .heading{font-size:25px;font-weight:700} .sub{font-size:18px;fill:#52627b} .small{font-size:17px;font-weight:600} .tag{font-size:18px;font-weight:700}.foot{font-size:18px;fill:#44546d}
+   .ws{fill:none;stroke:#2563eb;stroke-width:3;marker-start:url(#blueStart);marker-end:url(#blue)} .redis{fill:none;stroke:#d97706;stroke-width:3;marker-start:url(#amberStart);marker-end:url(#amber)}
+  </style>
+</defs>
+<rect width="1600" height="900" fill="#fff"/>
+<text x="70" y="65" class="title">WebSocket + AnyCable-Go: границы Kubernetes</text>
+<text x="70" y="102" class="sub">WebSocket заканчивается в AnyCable-Go Pod; Redis работает вне кластера Kubernetes</text>
+
+<!-- external edge grouping -->
+<rect x="43" y="168" width="655" height="306" rx="22" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2" stroke-dasharray="8 6"/>
+<text x="67" y="202" class="small" fill="#64748b">Клиент и внешняя инфраструктура</text>
+<!-- browser -->
+<rect x="69" y="253" width="175" height="152" rx="16" fill="#eff6ff" stroke="#60a5fa" stroke-width="2.5"/>
+<rect x="116" y="277" width="80" height="56" rx="7" fill="white" stroke="#2563eb" stroke-width="2"/>
+<rect x="116" y="277" width="80" height="13" rx="6" fill="#bfdbfe"/>
+<circle cx="125" cy="283" r="3" fill="#ef4444"/><circle cx="136" cy="283" r="3" fill="#f59e0b"/><circle cx="147" cy="283" r="3" fill="#22c55e"/>
+<text x="156" y="358" text-anchor="middle" class="heading" font-size="23">Браузер</text><text x="156" y="384" text-anchor="middle" class="sub">JavaScript</text>
+<!-- waf -->
+<rect x="294" y="253" width="160" height="152" rx="16" fill="#fff1f2" stroke="#fb7185" stroke-width="2.5"/>
+<path d="M354 281l19-8 19 8v22c0 16-12 25-19 29-7-4-19-13-19-29z" fill="#fb7185"/>
+<text x="374" y="359" text-anchor="middle" class="heading">WAF</text><text x="374" y="383" text-anchor="middle" class="sub">L7 security</text>
+<!-- L4 -->
+<rect x="503" y="253" width="165" height="152" rx="16" fill="#fff7ed" stroke="#fb923c" stroke-width="2.5"/>
+<circle cx="585" cy="286" r="11" fill="#fb923c"/><circle cx="559" cy="318" r="8" fill="#fb923c"/><circle cx="585" cy="318" r="8" fill="#fb923c"/><circle cx="611" cy="318" r="8" fill="#fb923c"/>
+<path d="M585 298v12h-26m26 0h26" fill="none" stroke="#ea580c" stroke-width="3"/>
+<text x="585" y="354" text-anchor="middle" class="heading" style="font-size:22px">L4 балансер</text><text x="585" y="381" text-anchor="middle" class="sub">TCP</text>
+<!-- k8s cluster -->
+<rect x="735" y="168" width="817" height="555" rx="24" fill="#f0fdf4" fill-opacity=".55" stroke="#16a34a" stroke-width="3" stroke-dasharray="12 7"/>
+<rect x="765" y="142" width="415" height="52" rx="12" fill="#15803d"/>
+<text x="784" y="177" font-size="25" font-weight="700" fill="white">Kubernetes Cluster (k8s)</text>
+<text x="774" y="226" class="sub">Ingress и оба Pod развернуты в Kubernetes</text>
+<!-- ingress -->
+<rect x="770" y="253" width="194" height="152" rx="16" fill="#f5f3ff" stroke="#8b5cf6" stroke-width="2.5"/>
+<path d="M864 277l30 17v33l-30 17-30-17v-33z" fill="#8b5cf6"/><path d="M847 309h34m-9-9 9 9-9 9" fill="none" stroke="white" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="867" y="362" text-anchor="middle" class="heading">Ingress</text><text x="867" y="384" text-anchor="middle" class="sub">Controller</text>
+<!-- anycable pod outer -->
+<rect x="1050" y="240" width="443" height="180" rx="19" fill="#e0f2fe" stroke="#0284c7" stroke-width="2.7"/>
+<rect x="1072" y="221" width="103" height="36" rx="8" fill="#0284c7"/><text x="1123" y="245" text-anchor="middle" font-size="20" fill="white" font-weight="700">Pod</text>
+<g transform="translate(1082,274)"><rect width="94" height="83" rx="12" fill="#0f766e"/><rect x="12" y="13" width="70" height="16" rx="4" fill="#ccfbf1"/><rect x="12" y="36" width="70" height="16" rx="4" fill="#ccfbf1"/><rect x="12" y="59" width="70" height="12" rx="4" fill="#ccfbf1"/></g>
+<text x="1323" y="314" text-anchor="middle" class="heading">AnyCable-Go</text><text x="1323" y="345" text-anchor="middle" class="sub">WebSocket Gateway</text><text x="1323" y="374" text-anchor="middle" class="sub">держит соединения</text>
+<!-- backend pod -->
+<rect x="1049" y="509" width="444" height="164" rx="19" fill="#e0f2fe" stroke="#0284c7" stroke-width="2.7"/>
+<rect x="1072" y="491" width="103" height="36" rx="8" fill="#0284c7"/><text x="1123" y="515" text-anchor="middle" font-size="20" fill="white" font-weight="700">Pod</text>
+<g transform="translate(1089,546)"><rect width="89" height="70" rx="12" fill="#1d4ed8"/><path d="M44 12l29 16v30L44 73 15 58V28z" fill="white" transform="translate(0,-5)"/></g>
+<text x="1320" y="576" text-anchor="middle" class="heading">Backend</text><text x="1320" y="609" text-anchor="middle" class="sub">Application / Business logic</text>
+<!-- Blue websocket segments -->
+<path class="ws" d="M250 331 H289"/><path class="ws" d="M460 331 H497"/><path class="ws" d="M674 331 H762"/><path class="ws" d="M970 331 H1043"/>
+<rect x="536" y="430" width="520" height="50" rx="12" fill="#dbeafe" stroke="#93c5fd"/>
+<text x="796" y="461" text-anchor="middle" class="tag" fill="#1d4ed8">WebSocket (wss://) — двусторонний канал до AnyCable-Go</text>
+<!-- redis external bottom -->
+<rect x="78" y="564" width="590" height="183" rx="20" fill="#fff7ed" stroke="#f97316" stroke-width="2.5"/>
+<text x="103" y="601" class="small" fill="#9a3412">Внешняя инфраструктура — НЕ Kubernetes</text>
+<g transform="translate(123,619)"><ellipse cx="59" cy="15" rx="55" ry="14" fill="#dc2626"/><path d="M4 15v57c0 19 110 19 110 0V15" fill="#ef4444"/><ellipse cx="59" cy="45" rx="55" ry="14" fill="#dc2626"/><ellipse cx="59" cy="72" rx="55" ry="14" fill="#b91c1c"/></g>
+<text x="353" y="659" text-anchor="middle" class="heading">Redis</text><text x="353" y="692" text-anchor="middle" class="sub">External Redis</text><text x="353" y="722" text-anchor="middle" class="sub">Pub/Sub / Streams / state*</text>
+<!-- routed redis two lines through space below cluster edge -->
+<path class="redis" d="M674 639 H960 V450 H1200 V427"/>
+<rect x="724" y="599" width="224" height="30" rx="7" fill="#fff"/><text x="836" y="620" text-anchor="middle" class="small" fill="#b45309">Redis protocol (TCP)</text>
+<path class="redis" d="M677 700 H1008 V591 H1042"/>
+<rect x="750" y="667" width="218" height="29" rx="7" fill="#fff"/><text x="859" y="687" text-anchor="middle" class="small" fill="#b45309">Pub/Sub / события*</text>
+<text x="80" y="805" class="foot">Синие стрелки — WebSocket. Оранжевые — соединения с внешним Redis (не WebSocket).</text>
+<text x="80" y="836" class="foot">* Конкретный обмен с Redis зависит от конфигурации AnyCable и backend.</text>
+</svg>
