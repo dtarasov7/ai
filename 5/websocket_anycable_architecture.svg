@@ -1,0 +1,173 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2200" height="800" viewBox="0 0 2200 800">
+  <defs>
+    <style>
+      .title { font: 700 60px 'Arial', 'DejaVu Sans', sans-serif; fill:#0b1636; }
+      .label { font: 700 36px 'Arial', 'DejaVu Sans', sans-serif; fill:#101828; }
+      .sub { font: 400 24px 'Arial', 'DejaVu Sans', sans-serif; fill:#344054; }
+      .small { font: 700 20px 'Arial', 'DejaVu Sans', sans-serif; }
+      .note { font: 500 26px 'Arial', 'DejaVu Sans', sans-serif; fill:#17202A; }
+      .ws { font: 700 22px 'Arial', 'DejaVu Sans', sans-serif; fill:#1665d8; }
+      .orange { font: 700 18px 'Arial', 'DejaVu Sans', sans-serif; fill:#f97316; }
+      .greenText { font: 700 26px 'Arial', 'DejaVu Sans', sans-serif; fill:#15803d; }
+      .panelShadow { filter:url(#none); }
+    </style>
+    <marker id="arrowBlue" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0,0 L12,6 L0,12 z" fill="#1677ff"/>
+    </marker>
+    <marker id="arrowBlueStart" markerWidth="12" markerHeight="12" refX="2" refY="6" orient="auto">
+      <path d="M12,0 L0,6 L12,12 z" fill="#1677ff"/>
+    </marker>
+    <marker id="arrowOrange" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0,0 L12,6 L0,12 z" fill="#f97316"/>
+    </marker>
+    <marker id="arrowOrangeStart" markerWidth="12" markerHeight="12" refX="2" refY="6" orient="auto">
+      <path d="M12,0 L0,6 L12,12 z" fill="#f97316"/>
+    </marker>
+    <marker id="arrowGreen" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0,0 L12,6 L0,12 z" fill="#16a34a"/>
+    </marker>
+  </defs>
+
+  <rect width="2200" height="800" fill="#ffffff"/>
+  <text x="1100" y="95" text-anchor="middle" class="title">WebSocket + AnyCable-Go</text>
+
+  <!-- Panels -->
+  <!-- Browser -->
+  <g transform="translate(20,180)">
+    <rect x="0" y="0" rx="20" ry="20" width="220" height="290" fill="#eef6ff" stroke="#2f80ed" stroke-width="3"/>
+    <text x="110" y="55" text-anchor="middle" class="label">Браузер</text>
+    <text x="110" y="90" text-anchor="middle" class="sub">клиент, код JS</text>
+    <g transform="translate(28,120)">
+      <rect x="0" y="0" width="164" height="140" rx="12" fill="#ffffff" stroke="#7b8794" stroke-width="3"/>
+      <rect x="0" y="0" width="164" height="34" rx="12" fill="#9aa5b1"/>
+      <circle cx="18" cy="17" r="7" fill="#ef4444"/>
+      <circle cx="43" cy="17" r="7" fill="#fbbf24"/>
+      <circle cx="68" cy="17" r="7" fill="#22c55e"/>
+      <circle cx="82" cy="87" r="30" fill="none" stroke="#1976d2" stroke-width="6"/>
+      <path d="M52 87h60M82 57c10 10 10 50 0 60M82 57c-10 10-10 50 0 60" fill="none" stroke="#1976d2" stroke-width="4"/>
+    </g>
+  </g>
+
+  <!-- WAF -->
+  <g transform="translate(375,180)">
+    <rect x="0" y="0" rx="20" ry="20" width="190" height="290" fill="#fff1f2" stroke="#ef4444" stroke-width="3"/>
+    <text x="95" y="55" text-anchor="middle" class="label">WAF</text>
+    <g transform="translate(34,110)">
+      <rect x="0" y="10" width="108" height="96" rx="8" fill="#ef6b4a" opacity="0.9"/>
+      <path d="M0 42h108M0 74h108M36 10v96M72 10v96" stroke="#fff1f2" stroke-width="6" opacity="0.75"/>
+      <path d="M105 17 C125 35,148 30,160 17 L160 85 C160 113,136 126,105 143 C74 126,50 113,50 85 L50 17 C62 30,85 35,105 17 Z" fill="#e6485d" stroke="#ffffff" stroke-width="5"/>
+    </g>
+  </g>
+
+  <!-- L4 LB -->
+  <g transform="translate(690,180)">
+    <rect x="0" y="0" rx="20" ry="20" width="210" height="290" fill="#fff8eb" stroke="#f59e0b" stroke-width="3"/>
+    <text x="105" y="55" text-anchor="middle" class="label" style="font-size:28px">L4 балансер</text>
+    <g transform="translate(46,110)" fill="none" stroke="#1e88e5" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="60" cy="10" r="16" fill="#1e88e5"/>
+      <circle cx="10" cy="95" r="16" fill="#1e88e5"/>
+      <circle cx="60" cy="95" r="16" fill="#1e88e5"/>
+      <circle cx="110" cy="95" r="16" fill="#1e88e5"/>
+      <path d="M60 26V72M60 72H10M60 72H110"/>
+    </g>
+  </g>
+
+  <!-- Ingress -->
+  <g transform="translate(1025,180)">
+    <rect x="0" y="0" rx="20" ry="20" width="190" height="290" fill="#f6f0ff" stroke="#7c3aed" stroke-width="3"/>
+    <text x="95" y="55" text-anchor="middle" class="label">Ингресс</text>
+    <g transform="translate(37,112)">
+      <polygon points="58,0 116,33 116,99 58,132 0,99 0,33" fill="#6d4ed4"/>
+      <path d="M28 66H88M88 66L72 50M88 66L72 82M58 66L88 66M58 66L80 44M58 66L80 88" fill="none" stroke="#ffffff" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+  </g>
+
+  <!-- AnyCable -->
+  <g transform="translate(1340,180)">
+    <rect x="0" y="0" rx="20" ry="20" width="200" height="290" fill="#edfdf2" stroke="#22a851" stroke-width="3"/>
+    <text x="100" y="55" text-anchor="middle" class="label" style="font-size:26px">AnyCable-Go</text>
+    <g transform="translate(34,112)">
+      <rect x="0" y="0" width="110" height="38" rx="8" fill="#2f4858"/>
+      <rect x="0" y="48" width="110" height="38" rx="8" fill="#2f4858"/>
+      <rect x="0" y="96" width="110" height="38" rx="8" fill="#2f4858"/>
+      <circle cx="18" cy="19" r="4" fill="#56f39a"/><circle cx="34" cy="19" r="4" fill="#56f39a"/><circle cx="50" cy="19" r="4" fill="#56f39a"/><circle cx="92" cy="19" r="4" fill="#f7f779"/>
+      <circle cx="18" cy="67" r="4" fill="#56f39a"/><circle cx="34" cy="67" r="4" fill="#56f39a"/><circle cx="50" cy="67" r="4" fill="#56f39a"/><circle cx="92" cy="67" r="4" fill="#f7f779"/>
+      <circle cx="18" cy="115" r="4" fill="#56f39a"/><circle cx="34" cy="115" r="4" fill="#56f39a"/><circle cx="50" cy="115" r="4" fill="#56f39a"/><circle cx="92" cy="115" r="4" fill="#f7f779"/>
+      <circle cx="110" cy="106" r="34" fill="#16a34a" stroke="#ffffff" stroke-width="4"/>
+      <path d="M94 106h26M120 106l-8-8M120 106l-8 8M126 96c-5-9-14-14-24-14M126 116c-5 9-14 14-24 14" fill="none" stroke="#ffffff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+  </g>
+
+  <!-- Redis -->
+  <g transform="translate(1665,180)">
+    <rect x="0" y="0" rx="20" ry="20" width="180" height="290" fill="#fff1f2" stroke="#ef4444" stroke-width="3"/>
+    <text x="90" y="55" text-anchor="middle" class="label">Redis</text>
+    <g transform="translate(30,115)">
+      <polygon points="60,0 120,18 60,36 0,18" fill="#ef4444"/>
+      <polygon points="0,18 60,36 60,58 0,40" fill="#dc2626"/>
+      <polygon points="120,18 60,36 60,58 120,40" fill="#b91c1c"/>
+      <polygon points="60,42 120,60 60,78 0,60" fill="#ef4444"/>
+      <polygon points="0,60 60,78 60,100 0,82" fill="#dc2626"/>
+      <polygon points="120,60 60,78 60,100 120,82" fill="#b91c1c"/>
+      <polygon points="60,84 120,102 60,120 0,102" fill="#ef4444"/>
+      <polygon points="0,102 60,120 60,142 0,124" fill="#dc2626"/>
+      <polygon points="120,102 60,120 60,142 120,124" fill="#b91c1c"/>
+      <circle cx="86" cy="16" r="8" fill="#ffffff"/>
+      <polygon points="55,10 68,6 74,16 61,20" fill="#ffffff"/>
+      <polygon points="95,0 108,8 100,20 87,12" fill="#ffffff"/>
+    </g>
+  </g>
+
+  <!-- Pod backend -->
+  <g transform="translate(1985,180)">
+    <rect x="0" y="0" rx="20" ry="20" width="180" height="290" fill="#eef6ff" stroke="#2f80ed" stroke-width="3"/>
+    <text x="90" y="55" text-anchor="middle" class="label">Под</text>
+    <text x="90" y="90" text-anchor="middle" class="sub">backend</text>
+    <g transform="translate(38,116)">
+      <polygon points="52,0 104,30 104,90 52,120 0,90 0,30" fill="#1e88e5"/>
+      <path d="M52 23l30 17v34L52 91 22 74V40z" fill="#ffffff" opacity="0.92"/>
+      <path d="M52 23v68M22 40l30 17 30-17" fill="none" stroke="#1e88e5" stroke-width="3" opacity="0.5"/>
+    </g>
+  </g>
+
+  <!-- Blue websocket arrows -->
+  <g stroke="#1677ff" stroke-width="6" fill="none" marker-start="url(#arrowBlueStart)" marker-end="url(#arrowBlue)">
+    <line x1="250" y1="340" x2="365" y2="340"/>
+    <line x1="575" y1="340" x2="680" y2="340"/>
+    <line x1="910" y1="340" x2="1015" y2="340"/>
+    <line x1="1225" y1="340" x2="1330" y2="340"/>
+  </g>
+
+  <!-- WS labels -->
+  <text x="307" y="292" text-anchor="middle" class="ws">WebSocket</text>
+  <text x="307" y="319" text-anchor="middle" class="ws">(ws/wss)</text>
+  <text x="628" y="292" text-anchor="middle" class="ws">WebSocket</text>
+  <text x="628" y="319" text-anchor="middle" class="ws">(ws/wss)</text>
+  <text x="962" y="292" text-anchor="middle" class="ws">WebSocket</text>
+  <text x="962" y="319" text-anchor="middle" class="ws">(ws/wss)</text>
+  <text x="1277" y="292" text-anchor="middle" class="ws">WebSocket</text>
+  <text x="1277" y="319" text-anchor="middle" class="ws">(ws/wss)</text>
+
+  <!-- Orange arrows -->
+  <g stroke="#f97316" stroke-width="6" fill="none" marker-start="url(#arrowOrangeStart)" marker-end="url(#arrowOrange)">
+    <line x1="1550" y1="340" x2="1655" y2="340"/>
+    <line x1="1855" y1="340" x2="1975" y2="340"/>
+  </g>
+  <text x="1602" y="286" text-anchor="middle" class="orange">Pub/Sub,</text>
+  <text x="1602" y="310" text-anchor="middle" class="orange">presence, state</text>
+  <text x="1915" y="286" text-anchor="middle" class="orange">команды /</text>
+  <text x="1915" y="310" text-anchor="middle" class="orange">события</text>
+
+  <!-- Bottom green persistent connection -->
+  <path d="M 130 540 L 130 595 L 1438 595 L 1438 540" fill="none" stroke="#16a34a" stroke-width="6" marker-start="url(#arrowGreen)" marker-end="url(#arrowGreen)"/>
+  <text x="784" y="575" text-anchor="middle" class="greenText">Постоянное двустороннее WebSocket-соединение</text>
+
+  <!-- Note box -->
+  <g transform="translate(650,650)">
+    <rect x="0" y="0" rx="18" ry="18" width="900" height="92" fill="#f2f8ff" stroke="#3b82f6" stroke-width="3"/>
+    <circle cx="62" cy="46" r="28" fill="#3b82f6"/>
+    <text x="62" y="56" text-anchor="middle" style="font:700 34px Arial, DejaVu Sans, sans-serif; fill:#ffffff">i</text>
+    <line x1="116" y1="18" x2="116" y2="74" stroke="#60a5fa" stroke-width="3"/>
+    <text x="140" y="56" class="note">От браузера до AnyCable-Go трафик идёт по WebSocket.</text>
+  </g>
+</svg>
