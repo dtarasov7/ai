@@ -1,0 +1,129 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1900" viewBox="0 0 1800 1900">
+<defs>
+<marker id="a0878e8" markerWidth="12" markerHeight="10" refX="11" refY="5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L12 5 L0 10 Z" fill="#0878e8"/></marker>
+<marker id="s0878e8" markerWidth="12" markerHeight="10" refX="1" refY="5" orient="auto" markerUnits="userSpaceOnUse"><path d="M12 0 L0 5 L12 10 Z" fill="#0878e8"/></marker>
+<linearGradient id="g0878e8" x2="0.8" y2="1"><stop stop-color="#ffffff"/><stop offset="1" stop-color="#e2f0ff"/></linearGradient>
+<marker id="a159447" markerWidth="12" markerHeight="10" refX="11" refY="5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L12 5 L0 10 Z" fill="#159447"/></marker>
+<marker id="s159447" markerWidth="12" markerHeight="10" refX="1" refY="5" orient="auto" markerUnits="userSpaceOnUse"><path d="M12 0 L0 5 L12 10 Z" fill="#159447"/></marker>
+<linearGradient id="g159447" x2="0.8" y2="1"><stop stop-color="#ffffff"/><stop offset="1" stop-color="#ddf5e8"/></linearGradient>
+<marker id="add4545" markerWidth="12" markerHeight="10" refX="11" refY="5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L12 5 L0 10 Z" fill="#dd4545"/></marker>
+<marker id="sdd4545" markerWidth="12" markerHeight="10" refX="1" refY="5" orient="auto" markerUnits="userSpaceOnUse"><path d="M12 0 L0 5 L12 10 Z" fill="#dd4545"/></marker>
+<linearGradient id="gdd4545" x2="0.8" y2="1"><stop stop-color="#ffffff"/><stop offset="1" stop-color="#fff0ee"/></linearGradient>
+<marker id="a7951b0" markerWidth="12" markerHeight="10" refX="11" refY="5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L12 5 L0 10 Z" fill="#7951b0"/></marker>
+<marker id="s7951b0" markerWidth="12" markerHeight="10" refX="1" refY="5" orient="auto" markerUnits="userSpaceOnUse"><path d="M12 0 L0 5 L12 10 Z" fill="#7951b0"/></marker>
+<linearGradient id="g7951b0" x2="0.8" y2="1"><stop stop-color="#ffffff"/><stop offset="1" stop-color="#eee9fb"/></linearGradient>
+<marker id="ae68519" markerWidth="12" markerHeight="10" refX="11" refY="5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L12 5 L0 10 Z" fill="#e68519"/></marker>
+<marker id="se68519" markerWidth="12" markerHeight="10" refX="1" refY="5" orient="auto" markerUnits="userSpaceOnUse"><path d="M12 0 L0 5 L12 10 Z" fill="#e68519"/></marker>
+<linearGradient id="ge68519" x2="0.8" y2="1"><stop stop-color="#ffffff"/><stop offset="1" stop-color="#fff0db"/></linearGradient>
+<marker id="a72849c" markerWidth="12" markerHeight="10" refX="11" refY="5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L12 5 L0 10 Z" fill="#72849c"/></marker>
+<marker id="s72849c" markerWidth="12" markerHeight="10" refX="1" refY="5" orient="auto" markerUnits="userSpaceOnUse"><path d="M12 0 L0 5 L12 10 Z" fill="#72849c"/></marker>
+<linearGradient id="g72849c" x2="0.8" y2="1"><stop stop-color="#ffffff"/><stop offset="1" stop-color="#f4f8fc"/></linearGradient>
+</defs><rect width="1800" height="100%" fill="white"/>
+<text x="900" y="65" font-family="Open Sans, sans-serif" font-size="38" fill="#0b1938" font-weight="700" text-anchor="middle">Схема 1. Внутренние сертификаты DKP: как устроен выпуск</text>
+<text x="900" y="108" font-family="Open Sans, sans-serif" font-size="21" fill="#72849c" font-weight="400" text-anchor="middle">По исходникам версии 1.73.4 · разные процессы выпуска · внешние точки входа не рассматриваются</text>
+<text x="900" y="150" font-family="Open Sans, sans-serif" font-size="17" fill="#72849c" font-weight="400" text-anchor="middle">УЦ — удостоверяющий центр; TLS — защита соединения; CSR — запрос подписи; Secret — объект хранения данных Kubernetes; etcd — база состояния; API — программный интерфейс</text>
+<rect x="60" y="200" width="400" height="170" rx="13" fill="url(#g0878e8)" stroke="#0878e8" stroke-width="2" data-visio-target="true"/>
+<text x="82" y="238" font-family="Open Sans, sans-serif" font-size="22" fill="#0878e8" font-weight="700" text-anchor="start">Первоначальная установка</text>
+<text x="82" y="276" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Bashible запускает kubeadm.</text>
+<text x="82" y="308" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Создаются сертификаты и УЦ.</text>
+<text x="82" y="340" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Файлы — на управляющем узле.</text>
+<rect x="650" y="200" width="510" height="170" rx="13" fill="url(#g7951b0)" stroke="#7951b0" stroke-width="2" data-visio-target="true"/>
+<text x="672" y="238" font-family="Open Sans, sans-serif" font-size="23" fill="#7951b0" font-weight="700" text-anchor="start">Объект Kubernetes типа Secret</text>
+<text x="672" y="276" font-family="Open Sans, sans-serif" font-size="19" fill="#0b1938" font-weight="400" text-anchor="start">Имя d8-pki; пространство имён kube-system.</text>
+<text x="672" y="308" font-family="Open Sans, sans-serif" font-size="19" fill="#0b1938" font-weight="400" text-anchor="start">Сертификаты и ключи трёх разных УЦ.</text>
+<text x="672" y="340" font-family="Open Sans, sans-serif" font-size="19" fill="#0b1938" font-weight="400" text-anchor="start">Роли: Kubernetes, etcd, доверенные прокси.</text>
+<rect x="60" y="480" width="400" height="175" rx="13" fill="url(#g0878e8)" stroke="#0878e8" stroke-width="2" data-visio-target="true"/>
+<text x="82" y="518" font-family="Open Sans, sans-serif" font-size="21" fill="#0878e8" font-weight="700" text-anchor="start">Настройка управляющего узла</text>
+<text x="82" y="556" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Модуль control-plane-manager.</text>
+<text x="82" y="583" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Берёт УЦ из объекта Secret d8-pki.</text>
+<text x="82" y="610" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Проверяет файлы при настройке узла.</text>
+<text x="82" y="637" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Вызывает kubeadm для новой выдачи.</text>
+<rect x="650" y="480" width="510" height="175" rx="13" fill="url(#g159447)" stroke="#159447" stroke-width="2" data-visio-target="true"/>
+<text x="672" y="518" font-family="Open Sans, sans-serif" font-size="22" fill="#159447" font-weight="700" text-anchor="start">Сертификаты управляющих служб</text>
+<text x="672" y="556" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">На узле: /etc/kubernetes, включая каталог pki.</text>
+<text x="672" y="583" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Семь пар файлов и три файла подключения.</text>
+<text x="672" y="610" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Проверка имён, ключей и срока действия.</text>
+<text x="672" y="637" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Замена, если осталось менее 30 суток.</text>
+<rect x="60" y="800" width="400" height="175" rx="13" fill="url(#g0878e8)" stroke="#0878e8" stroke-width="2" data-visio-target="true"/>
+<text x="82" y="838" font-family="Open Sans, sans-serif" font-size="22" fill="#0878e8" font-weight="700" text-anchor="start">Kubelet — программа узла</text>
+<text x="82" y="876" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Получает два сертификата: клиента</text>
+<text x="82" y="908" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">и сервера. Автоматически запрашивает</text>
+<text x="82" y="940" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">новые до истечения срока старых.</text>
+<rect x="650" y="800" width="510" height="175" rx="13" fill="url(#g159447)" stroke="#159447" stroke-width="2" data-visio-target="true"/>
+<text x="672" y="838" font-family="Open Sans, sans-serif" font-size="22" fill="#159447" font-weight="700" text-anchor="start">Разрешение запроса и подписание</text>
+<text x="672" y="876" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Запрос — объект CertificateSigningRequest.</text>
+<text x="672" y="908" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Node-manager разрешает; Kubernetes подписывает.</text>
+<text x="672" y="940" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Для контроллеров узлов: отдельные запросы.</text>
+<rect x="60" y="1120" width="400" height="190" rx="13" fill="url(#ge68519)" stroke="#e68519" stroke-width="2" data-visio-target="true"/>
+<text x="82" y="1158" font-family="Open Sans, sans-serif" font-size="23" fill="#e68519" font-weight="700" text-anchor="start">Программа InternalTLS</text>
+<text x="82" y="1196" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Нет объекта Secret → создаёт свой УЦ</text>
+<text x="82" y="1225" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">и сертификат службы на ≈10 лет.</text>
+<text x="82" y="1254" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Читает и записывает объект Secret.</text>
+<text x="82" y="1283" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Запускается при настройке модуля.</text>
+<rect x="650" y="1120" width="510" height="190" rx="13" fill="url(#g159447)" stroke="#159447" stroke-width="2" data-visio-target="true"/>
+<text x="672" y="1158" font-family="Open Sans, sans-serif" font-size="23" fill="#159447" font-weight="700" text-anchor="start">15 служб используют эту программу</text>
+<text x="672" y="1196" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Службы проверки и преобразования объектов:</text>
+<text x="672" y="1225" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Deckhouse, Gatekeeper, контроллеры узлов;</text>
+<text x="672" y="1254" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">внутренний Dex, адаптер метрик и другие.</text>
+<text x="672" y="1283" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Применяются сертификат и доверие к УЦ.</text>
+<path d="M460 280 L650 280" fill="none" stroke="#0878e8" stroke-width="3" marker-end="url(#a0878e8)"/>
+<text x="555" y="258" font-family="Open Sans, sans-serif" font-size="18" fill="#0878e8" font-weight="700" text-anchor="middle">Создание сертификатов</text>
+<path d="M650 325 L555 325 L555 435 L260 435 L260 480" fill="none" stroke="#7951b0" stroke-width="3" marker-end="url(#a7951b0)"/>
+<text x="385" y="420" font-family="Open Sans, sans-serif" font-size="18" fill="#7951b0" font-weight="700" text-anchor="middle">Сертификаты и ключи УЦ</text>
+<path d="M460 565 L650 565" fill="none" stroke="#159447" stroke-width="3" marker-end="url(#a159447)"/>
+<text x="555" y="545" font-family="Open Sans, sans-serif" font-size="16" fill="#159447" font-weight="700" text-anchor="middle">Файлы / перезапуск</text>
+<path d="M1100 370 L1200 370 L1200 750 L1000 750 L1000 800" fill="none" stroke="#7951b0" stroke-width="3" marker-end="url(#a7951b0)"/>
+<text x="1070" y="735" font-family="Open Sans, sans-serif" font-size="17" fill="#7951b0" font-weight="700" text-anchor="middle">УЦ Kubernetes</text>
+<path d="M460 845 L650 845" fill="none" stroke="#0878e8" stroke-width="3" marker-end="url(#a0878e8)"/>
+<text x="555" y="825" font-family="Open Sans, sans-serif" font-size="18" fill="#0878e8" font-weight="700" text-anchor="middle">CSR</text>
+<path d="M650 925 L460 925" fill="none" stroke="#159447" stroke-width="3" marker-end="url(#a159447)"/>
+<text x="555" y="907" font-family="Open Sans, sans-serif" font-size="17" fill="#159447" font-weight="700" text-anchor="middle">Сертификат</text>
+<path d="M460 1210 L650 1210" fill="none" stroke="#159447" stroke-width="3" marker-end="url(#a159447)"/>
+<text x="555" y="1190" font-family="Open Sans, sans-serif" font-size="16" fill="#159447" font-weight="700" text-anchor="middle">Сертификат / доверие</text>
+<rect x="1230" y="200" width="515" height="455" rx="13" fill="url(#g72849c)" stroke="#72849c" stroke-width="2"/>
+<text x="1252" y="238" font-family="Open Sans, sans-serif" font-size="23" fill="#0b1938" font-weight="700" text-anchor="start">Управляющие службы: когда замена</text>
+<text x="1252" y="276" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Сертификат компонента — обычно на год.</text>
+<text x="1252" y="312" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Сертификаты УЦ — обычно на 10 лет.</text>
+<text x="1252" y="348" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Проверка при запуске и изменении настроек.</text>
+<text x="1252" y="384" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Периодическое применение — раз в ≈10 суток.</text>
+<text x="1252" y="420" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Новая выдача нужна не при каждой проверке.</text>
+<text x="1252" y="456" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Изменились имена или алгоритм ключа —</text>
+<text x="1252" y="492" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">может потребоваться другой сертификат.</text>
+<text x="1252" y="528" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">УЦ копируются из объекта Secret d8-pki;</text>
+<text x="1252" y="564" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">автоматическая смена всех УЦ не обеспечена.</text>
+<rect x="1230" y="755" width="515" height="255" rx="13" fill="url(#g72849c)" stroke="#72849c" stroke-width="2"/>
+<text x="1252" y="793" font-family="Open Sans, sans-serif" font-size="23" fill="#0b1938" font-weight="700" text-anchor="start">Узлы: свои правила обновления</text>
+<text x="1252" y="831" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Kubelet: обычно год, обновление заранее.</text>
+<text x="1252" y="863" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Сертификаты клиента и сервера различаются.</text>
+<text x="1252" y="895" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Разрешение выдачи и подпись — разные шаги.</text>
+<text x="1252" y="927" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Контроллеры узлов запрашивают ежедневно</text>
+<text x="1252" y="959" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">новый клиентский сертификат на 180 суток.</text>
+<rect x="1230" y="1050" width="515" height="560" rx="13" fill="url(#ge68519)" stroke="#e68519" stroke-width="2"/>
+<text x="1252" y="1088" font-family="Open Sans, sans-serif" font-size="23" fill="#e68519" font-weight="700" text-anchor="start">InternalTLS: условия новой выдачи</text>
+<text x="1252" y="1126" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">При настройке модуля и событиях Secret.</text>
+<text x="1252" y="1163" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Отдельного ежедневного задания нет.</text>
+<text x="1252" y="1200" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Осталось менее 182,5 суток у сертификата</text>
+<text x="1252" y="1237" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">УЦ или службы — создаётся новая цепочка.</text>
+<text x="1252" y="1274" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Другие имена или нет УЦ — тоже новая цепочка.</text>
+<text x="1252" y="1311" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Ошибка чтения не гарантирует автозамену.</text>
+<text x="1252" y="1348" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Корпоративный сертификат на 90 суток</text>
+<text x="1252" y="1385" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">может сразу замениться местным.</text>
+<text x="1252" y="1422" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Сертификат общий для службы,</text>
+<text x="1252" y="1459" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">а не новый для каждого её контейнера.</text>
+<text x="1252" y="1496" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Заменить нужно и настройки доверия,</text>
+<text x="1252" y="1533" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">и данные работающей программы.</text>
+<rect x="60" y="1430" width="1100" height="180" rx="13" fill="url(#g7951b0)" stroke="#7951b0" stroke-width="2"/>
+<text x="82" y="1468" font-family="Open Sans, sans-serif" font-size="23" fill="#7951b0" font-weight="700" text-anchor="start">Другие процессы выпуска: подробные правила приведены в документе</text>
+<text x="82" y="1506" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">VPA (настройка ресурсов подов): ежедневная проверка; замена при остатке менее 7 суток.</text>
+<text x="82" y="1535" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Bashible и Hubble повторно используют существующий Secret без проверки срока в найденных программах.</text>
+<text x="82" y="1564" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Basic-auth-proxy: срок 72 часа; некоторые другие программы создают сертификаты при запуске.</text>
+<text x="82" y="1593" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Хранилище образов, OpenVPN, Istio, cert-manager и установщик имеют отдельные процессы.</text>
+<rect x="55" y="1660" width="1690" height="170" rx="13" fill="url(#gdd4545)" stroke="#dd4545" stroke-width="2"/>
+<text x="77" y="1698" font-family="Open Sans, sans-serif" font-size="24" fill="#dd4545" font-weight="700" text-anchor="start">Что важно для требования корпоративных сертификатов</text>
+<text x="77" y="1736" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Новый издатель cert-manager не меняет автоматически подпись kubeadm, Kubernetes и собственных программ модулей.</text>
+<text x="77" y="1763" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">В части настроек мониторинга проверка сертификата сервера отключена. Корпоративная подпись сама по себе её не включает.</text>
+<text x="77" y="1790" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">API Kubernetes не имеет штатного отзыва отдельного клиентского сертификата. Возможности OpenVPN не относятся ко всем службам.</text>
+<text x="77" y="1817" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Это описание по публичным исходникам. Состав установленного кластера и особенности сертифицированной сборки не проверялись.</text>
+<text x="55" y="1868" font-family="Open Sans, sans-serif" font-size="15" fill="#72849c" font-weight="400" text-anchor="start">DECKHOUSE 1.73.4 CSE PRO / ПРОЕКТ ДЛЯ ОБСУЖДЕНИЯ / 05.11.2026</text>
+<text x="1745" y="1868" font-family="Open Sans, sans-serif" font-size="17" fill="#72849c" font-weight="400" text-anchor="end">01 / 03</text>
+</svg>

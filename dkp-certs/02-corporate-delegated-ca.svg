@@ -1,0 +1,126 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1900" viewBox="0 0 1800 1900">
+<defs>
+<marker id="a0878e8" markerWidth="12" markerHeight="10" refX="11" refY="5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L12 5 L0 10 Z" fill="#0878e8"/></marker>
+<marker id="s0878e8" markerWidth="12" markerHeight="10" refX="1" refY="5" orient="auto" markerUnits="userSpaceOnUse"><path d="M12 0 L0 5 L12 10 Z" fill="#0878e8"/></marker>
+<linearGradient id="g0878e8" x2="0.8" y2="1"><stop stop-color="#ffffff"/><stop offset="1" stop-color="#e2f0ff"/></linearGradient>
+<marker id="a159447" markerWidth="12" markerHeight="10" refX="11" refY="5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L12 5 L0 10 Z" fill="#159447"/></marker>
+<marker id="s159447" markerWidth="12" markerHeight="10" refX="1" refY="5" orient="auto" markerUnits="userSpaceOnUse"><path d="M12 0 L0 5 L12 10 Z" fill="#159447"/></marker>
+<linearGradient id="g159447" x2="0.8" y2="1"><stop stop-color="#ffffff"/><stop offset="1" stop-color="#ddf5e8"/></linearGradient>
+<marker id="add4545" markerWidth="12" markerHeight="10" refX="11" refY="5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L12 5 L0 10 Z" fill="#dd4545"/></marker>
+<marker id="sdd4545" markerWidth="12" markerHeight="10" refX="1" refY="5" orient="auto" markerUnits="userSpaceOnUse"><path d="M12 0 L0 5 L12 10 Z" fill="#dd4545"/></marker>
+<linearGradient id="gdd4545" x2="0.8" y2="1"><stop stop-color="#ffffff"/><stop offset="1" stop-color="#fff0ee"/></linearGradient>
+<marker id="a7951b0" markerWidth="12" markerHeight="10" refX="11" refY="5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L12 5 L0 10 Z" fill="#7951b0"/></marker>
+<marker id="s7951b0" markerWidth="12" markerHeight="10" refX="1" refY="5" orient="auto" markerUnits="userSpaceOnUse"><path d="M12 0 L0 5 L12 10 Z" fill="#7951b0"/></marker>
+<linearGradient id="g7951b0" x2="0.8" y2="1"><stop stop-color="#ffffff"/><stop offset="1" stop-color="#eee9fb"/></linearGradient>
+<marker id="ae68519" markerWidth="12" markerHeight="10" refX="11" refY="5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L12 5 L0 10 Z" fill="#e68519"/></marker>
+<marker id="se68519" markerWidth="12" markerHeight="10" refX="1" refY="5" orient="auto" markerUnits="userSpaceOnUse"><path d="M12 0 L0 5 L12 10 Z" fill="#e68519"/></marker>
+<linearGradient id="ge68519" x2="0.8" y2="1"><stop stop-color="#ffffff"/><stop offset="1" stop-color="#fff0db"/></linearGradient>
+<marker id="a72849c" markerWidth="12" markerHeight="10" refX="11" refY="5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L12 5 L0 10 Z" fill="#72849c"/></marker>
+<marker id="s72849c" markerWidth="12" markerHeight="10" refX="1" refY="5" orient="auto" markerUnits="userSpaceOnUse"><path d="M12 0 L0 5 L12 10 Z" fill="#72849c"/></marker>
+<linearGradient id="g72849c" x2="0.8" y2="1"><stop stop-color="#ffffff"/><stop offset="1" stop-color="#f4f8fc"/></linearGradient>
+</defs><rect width="1800" height="100%" fill="white"/>
+<text x="900" y="65" font-family="Open Sans, sans-serif" font-size="38" fill="#0b1938" font-weight="700" text-anchor="middle">Схема 2. Корпоративные УЦ: делегирование подписи</text>
+<text x="900" y="108" font-family="Open Sans, sans-serif" font-size="21" fill="#72849c" font-weight="400" text-anchor="middle">Проект для DKP 1.73.4 CSE PRO · несколько программ выпуска требуют изменения</text>
+<text x="900" y="150" font-family="Open Sans, sans-serif" font-size="17" fill="#72849c" font-weight="400" text-anchor="middle">УЦ — удостоверяющий центр; TLS — защита соединения; CSR — запрос подписи; Secret — объект хранения данных Kubernetes; etcd — база состояния; API — программный интерфейс</text>
+<rect x="55" y="430" width="1690" height="730" rx="13" fill="url(#g72849c)" stroke="#72849c" stroke-width="2" stroke-dasharray="8 7"/>
+<text x="78" y="467" font-family="Open Sans, sans-serif" font-size="22" fill="#72849c" font-weight="700" text-anchor="start">Кластер DKP</text>
+<rect x="660" y="180" width="480" height="170" rx="13" fill="url(#g7951b0)" stroke="#7951b0" stroke-width="2" data-visio-target="true"/>
+<text x="682" y="218" font-family="Open Sans, sans-serif" font-size="25" fill="#7951b0" font-weight="700" text-anchor="start">Корпоративный УЦ</text>
+<text x="682" y="256" font-family="Open Sans, sans-serif" font-size="19" fill="#0b1938" font-weight="400" text-anchor="start">Утверждает УЦ для разных задач.</text>
+<text x="682" y="288" font-family="Open Sans, sans-serif" font-size="19" fill="#0b1938" font-weight="400" text-anchor="start">Подписывает промежуточные сертификаты.</text>
+<text x="682" y="320" font-family="Open Sans, sans-serif" font-size="19" fill="#0b1938" font-weight="400" text-anchor="start">Ограничивает переданные полномочия.</text>
+<rect x="1250" y="180" width="490" height="190" rx="13" fill="url(#g72849c)" stroke="#72849c" stroke-width="2"/>
+<text x="1272" y="218" font-family="Open Sans, sans-serif" font-size="23" fill="#0b1938" font-weight="700" text-anchor="start">Граница полномочий</text>
+<text x="1272" y="256" font-family="Open Sans, sans-serif" font-size="17" fill="#0b1938" font-weight="400" text-anchor="start">Срок, имена, назначения и глубина цепочки.</text>
+<text x="1272" y="285" font-family="Open Sans, sans-serif" font-size="17" fill="#0b1938" font-weight="400" text-anchor="start">Разделить клиентов API, etcd и прокси.</text>
+<text x="1272" y="314" font-family="Open Sans, sans-serif" font-size="17" fill="#0b1938" font-weight="400" text-anchor="start">Принимающая программа проверяет ограничения.</text>
+<text x="1272" y="343" font-family="Open Sans, sans-serif" font-size="17" fill="#0b1938" font-weight="400" text-anchor="start">Общий корпоративный корень не даёт изоляции.</text>
+<rect x="60" y="500" width="490" height="190" rx="13" fill="url(#g0878e8)" stroke="#0878e8" stroke-width="2" data-visio-target="true"/>
+<text x="82" y="538" font-family="Open Sans, sans-serif" font-size="24" fill="#0878e8" font-weight="700" text-anchor="start">Разные УЦ управляющих служб</text>
+<text x="82" y="576" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">УЦ Kubernetes, etcd и доверенных прокси.</text>
+<text x="82" y="605" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Ключи используют местные программы подписи.</text>
+<text x="82" y="634" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Данные — объект Secret d8-pki и файлы узлов.</text>
+<text x="82" y="663" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Проверить установку и полные цепочки.</text>
+<rect x="660" y="500" width="480" height="190" rx="13" fill="url(#ge68519)" stroke="#e68519" stroke-width="2" stroke-dasharray="8 7" data-visio-target="true"/>
+<text x="682" y="538" font-family="Open Sans, sans-serif" font-size="24" fill="#e68519" font-weight="700" text-anchor="start">УЦ внутренних модулей</text>
+<text x="682" y="576" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Корпоративные УЦ для согласованных задач.</text>
+<text x="682" y="605" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Диагностика сети, хранилище образов, OpenVPN.</text>
+<text x="682" y="634" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Единой готовой настройки для всех нет.</text>
+<text x="682" y="663" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Нужно изменить эти программы выпуска.</text>
+<rect x="1250" y="500" width="490" height="190" rx="13" fill="url(#g7951b0)" stroke="#7951b0" stroke-width="2" data-visio-target="true"/>
+<text x="1272" y="538" font-family="Open Sans, sans-serif" font-size="24" fill="#7951b0" font-weight="700" text-anchor="start">Настройки доверия</text>
+<text x="1272" y="576" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Каким УЦ доверяют проверки и расширения API.</text>
+<text x="1272" y="605" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Клиенты API, доверенные прокси, база etcd.</text>
+<text x="1272" y="634" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Не принимать любого корпоративного клиента.</text>
+<text x="1272" y="663" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Включить проверку, где она была отключена.</text>
+<rect x="60" y="900" width="490" height="180" rx="13" fill="url(#g159447)" stroke="#159447" stroke-width="2" data-visio-target="true"/>
+<text x="82" y="938" font-family="Open Sans, sans-serif" font-size="22" fill="#159447" font-weight="700" text-anchor="start">Выдача для управляющих служб</text>
+<text x="82" y="976" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Control-plane-manager, kubeadm и Kubernetes.</text>
+<text x="82" y="1008" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Новые узлы, новые имена, замена сертификатов.</text>
+<text x="82" y="1040" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Обращение в корпоративный УЦ не требуется.</text>
+<rect x="660" y="900" width="480" height="180" rx="13" fill="url(#g159447)" stroke="#159447" stroke-width="2" data-visio-target="true"/>
+<text x="682" y="938" font-family="Open Sans, sans-serif" font-size="23" fill="#159447" font-weight="700" text-anchor="start">Локальная выдача модулей</text>
+<text x="682" y="976" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Используют выделенный корпоративный УЦ.</text>
+<text x="682" y="1008" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Правила обновления зависят от срока УЦ.</text>
+<text x="682" y="1040" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Самоподписание программ тоже изменить.</text>
+<rect x="1250" y="900" width="490" height="180" rx="13" fill="url(#g159447)" stroke="#159447" stroke-width="2" data-visio-target="true"/>
+<text x="1272" y="938" font-family="Open Sans, sans-serif" font-size="23" fill="#159447" font-weight="700" text-anchor="start">Компоненты и проверяющие</text>
+<text x="1272" y="976" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Сертификат, ключ и полная цепочка.</text>
+<text x="1272" y="1008" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Обновление доверия и перечитывание данных.</text>
+<text x="1272" y="1040" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Проверка имени, назначения и полномочий.</text>
+<path d="M660 280 L305 280 L305 500" fill="none" stroke="#7951b0" stroke-width="3" marker-end="url(#a7951b0)"/>
+<text x="445" y="410" font-family="Open Sans, sans-serif" font-size="18" fill="#7951b0" font-weight="700" text-anchor="middle">УЦ разных задач / ограничения</text>
+<path d="M900 350 L900 500" fill="none" stroke="#7951b0" stroke-width="3" marker-end="url(#a7951b0)"/>
+<text x="1010" y="400" font-family="Open Sans, sans-serif" font-size="17" fill="#7951b0" font-weight="700" text-anchor="middle">Делегирование</text>
+<path d="M1140 280 L1195 280 L1195 410 L1495 410 L1495 500" fill="none" stroke="#7951b0" stroke-width="3" marker-end="url(#a7951b0)" stroke-dasharray="9 7"/>
+<text x="1350" y="397" font-family="Open Sans, sans-serif" font-size="17" fill="#7951b0" font-weight="700" text-anchor="middle">Согласованная цепочка</text>
+<path d="M305 690 L305 900" fill="none" stroke="#0878e8" stroke-width="3" marker-end="url(#a0878e8)"/>
+<text x="420" y="805" font-family="Open Sans, sans-serif" font-size="18" fill="#0878e8" font-weight="700" text-anchor="middle">Локальная подпись</text>
+<path d="M900 690 L900 900" fill="none" stroke="#e68519" stroke-width="3" marker-end="url(#ae68519)"/>
+<text x="1020" y="805" font-family="Open Sans, sans-serif" font-size="18" fill="#e68519" font-weight="700" text-anchor="middle">Локальная подпись</text>
+<path d="M1495 690 L1495 900" fill="none" stroke="#7951b0" stroke-width="3" marker-end="url(#a7951b0)"/>
+<text x="1615" y="805" font-family="Open Sans, sans-serif" font-size="18" fill="#7951b0" font-weight="700" text-anchor="middle">Проверка доверия</text>
+<path d="M1140 990 L1250 990" fill="none" stroke="#159447" stroke-width="3" marker-end="url(#a159447)"/>
+<text x="1195" y="971" font-family="Open Sans, sans-serif" font-size="17" fill="#159447" font-weight="700" text-anchor="middle">Сертификат</text>
+<path d="M305 1080 L305 1130 L1495 1130 L1495 1080" fill="none" stroke="#159447" stroke-width="3" marker-end="url(#a159447)"/>
+<text x="800" y="1117" font-family="Open Sans, sans-serif" font-size="18" fill="#159447" font-weight="700" text-anchor="middle">Доставка сертификатов и применение работающими программами</text>
+<rect x="55" y="1210" width="545" height="440" rx="13" fill="url(#gdd4545)" stroke="#dd4545" stroke-width="2"/>
+<text x="77" y="1248" font-family="Open Sans, sans-serif" font-size="23" fill="#dd4545" font-weight="700" text-anchor="start">Контроль выпуска</text>
+<text x="77" y="1286" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">УЦ закрепляет полномочия в сертификате.</text>
+<text x="77" y="1322" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Ограничения действуют и при подписи</text>
+<text x="77" y="1358" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">в обход программы, если цепочку проверяют.</text>
+<text x="77" y="1394" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Остаётся подделка разрешённых имён</text>
+<text x="77" y="1430" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">и отсутствие учёта каждой местной подписи.</text>
+<text x="77" y="1466" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Ограничения доменных имён не ограничивают</text>
+<text x="77" y="1502" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">имя клиента и группы при входе в API.</text>
+<text x="77" y="1538" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Для разных задач — разные границы доверия.</text>
+<text x="77" y="1574" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Один издатель не заменяет проверку прав.</text>
+<rect x="635" y="1210" width="545" height="440" rx="13" fill="url(#gdd4545)" stroke="#dd4545" stroke-width="2"/>
+<text x="657" y="1248" font-family="Open Sans, sans-serif" font-size="23" fill="#dd4545" font-weight="700" text-anchor="start">Обновление и отзыв</text>
+<text x="657" y="1286" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Обновление сертификата и смена УЦ различны.</text>
+<text x="657" y="1322" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Новый УЦ при том же корне не отзывает старый.</text>
+<text x="657" y="1358" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">У API нет штатного отзыва одного сертификата.</text>
+<text x="657" y="1394" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Нужен проверенный способ убрать старое</text>
+<text x="657" y="1430" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">доверие и прекратить текущий доступ.</text>
+<text x="657" y="1466" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">При коротком сроке УЦ согласовать пороги:</text>
+<text x="657" y="1502" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">InternalTLS заменяет при остатке менее полугода.</text>
+<text x="657" y="1538" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Запись в Secret не меняет программу выдачи.</text>
+<text x="657" y="1574" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Доверие и применение данных меняются вместе.</text>
+<rect x="1215" y="1210" width="530" height="440" rx="13" fill="url(#ge68519)" stroke="#e68519" stroke-width="2"/>
+<text x="1237" y="1248" font-family="Open Sans, sans-serif" font-size="23" fill="#e68519" font-weight="700" text-anchor="start">Условия реализации</text>
+<text x="1237" y="1286" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Исходный kubeadm принимает готовые УЦ;</text>
+<text x="1237" y="1322" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">это не подтверждает готовность всей DKP.</text>
+<text x="1237" y="1358" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Нужен согласованный способ установки,</text>
+<text x="1237" y="1394" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">смены УЦ и программ выпуска модулей.</text>
+<text x="1237" y="1430" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Проверить добавление узлов, обновление DKP,</text>
+<text x="1237" y="1466" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">замену сертификатов и отказ УЦ.</text>
+<text x="1237" y="1502" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Сбой не должен возвращать платформу</text>
+<text x="1237" y="1538" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">к некорпоративным самоподписанным УЦ.</text>
+<text x="1237" y="1574" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Автономность локальной подписи сохраняется.</text>
+<rect x="55" y="1700" width="1690" height="130" rx="13" fill="url(#g72849c)" stroke="#72849c" stroke-width="2"/>
+<text x="77" y="1738" font-family="Open Sans, sans-serif" font-size="24" fill="#0b1938" font-weight="700" text-anchor="start">Применимость</text>
+<text x="77" y="1776" font-family="Open Sans, sans-serif" font-size="19" fill="#0b1938" font-weight="400" text-anchor="start">Вариант подходит при допустимом делегировании. Он ограничивает полномочия УЦ и сохраняет независимость местной выдачи.</text>
+<text x="77" y="1805" font-family="Open Sans, sans-serif" font-size="19" fill="#0b1938" font-weight="400" text-anchor="start">Нужно изменить все процессы из реестра. Замена одного объекта Secret d8-pki или издателя cert-manager не охватывает всю DKP.</text>
+<text x="55" y="1868" font-family="Open Sans, sans-serif" font-size="15" fill="#72849c" font-weight="400" text-anchor="start">DECKHOUSE 1.73.4 CSE PRO / ПРОЕКТ ДЛЯ ОБСУЖДЕНИЯ / 05.11.2026</text>
+<text x="1745" y="1868" font-family="Open Sans, sans-serif" font-size="17" fill="#72849c" font-weight="400" text-anchor="end">02 / 03</text>
+</svg>

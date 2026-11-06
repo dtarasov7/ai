@@ -1,0 +1,124 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1600" viewBox="0 0 1800 1600">
+<defs>
+<marker id="a0878e8" markerWidth="12" markerHeight="10" refX="11" refY="5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L12 5 L0 10 Z" fill="#0878e8"/></marker>
+<marker id="s0878e8" markerWidth="12" markerHeight="10" refX="1" refY="5" orient="auto" markerUnits="userSpaceOnUse"><path d="M12 0 L0 5 L12 10 Z" fill="#0878e8"/></marker>
+<linearGradient id="g0878e8" x2="0.8" y2="1"><stop stop-color="#ffffff"/><stop offset="1" stop-color="#e2f0ff"/></linearGradient>
+<marker id="a159447" markerWidth="12" markerHeight="10" refX="11" refY="5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L12 5 L0 10 Z" fill="#159447"/></marker>
+<marker id="s159447" markerWidth="12" markerHeight="10" refX="1" refY="5" orient="auto" markerUnits="userSpaceOnUse"><path d="M12 0 L0 5 L12 10 Z" fill="#159447"/></marker>
+<linearGradient id="g159447" x2="0.8" y2="1"><stop stop-color="#ffffff"/><stop offset="1" stop-color="#ddf5e8"/></linearGradient>
+<marker id="add4545" markerWidth="12" markerHeight="10" refX="11" refY="5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L12 5 L0 10 Z" fill="#dd4545"/></marker>
+<marker id="sdd4545" markerWidth="12" markerHeight="10" refX="1" refY="5" orient="auto" markerUnits="userSpaceOnUse"><path d="M12 0 L0 5 L12 10 Z" fill="#dd4545"/></marker>
+<linearGradient id="gdd4545" x2="0.8" y2="1"><stop stop-color="#ffffff"/><stop offset="1" stop-color="#fff0ee"/></linearGradient>
+<marker id="a7951b0" markerWidth="12" markerHeight="10" refX="11" refY="5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L12 5 L0 10 Z" fill="#7951b0"/></marker>
+<marker id="s7951b0" markerWidth="12" markerHeight="10" refX="1" refY="5" orient="auto" markerUnits="userSpaceOnUse"><path d="M12 0 L0 5 L12 10 Z" fill="#7951b0"/></marker>
+<linearGradient id="g7951b0" x2="0.8" y2="1"><stop stop-color="#ffffff"/><stop offset="1" stop-color="#eee9fb"/></linearGradient>
+<marker id="ae68519" markerWidth="12" markerHeight="10" refX="11" refY="5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L12 5 L0 10 Z" fill="#e68519"/></marker>
+<marker id="se68519" markerWidth="12" markerHeight="10" refX="1" refY="5" orient="auto" markerUnits="userSpaceOnUse"><path d="M12 0 L0 5 L12 10 Z" fill="#e68519"/></marker>
+<linearGradient id="ge68519" x2="0.8" y2="1"><stop stop-color="#ffffff"/><stop offset="1" stop-color="#fff0db"/></linearGradient>
+<marker id="a72849c" markerWidth="12" markerHeight="10" refX="11" refY="5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L12 5 L0 10 Z" fill="#72849c"/></marker>
+<marker id="s72849c" markerWidth="12" markerHeight="10" refX="1" refY="5" orient="auto" markerUnits="userSpaceOnUse"><path d="M12 0 L0 5 L12 10 Z" fill="#72849c"/></marker>
+<linearGradient id="g72849c" x2="0.8" y2="1"><stop stop-color="#ffffff"/><stop offset="1" stop-color="#f4f8fc"/></linearGradient>
+</defs><rect width="1800" height="100%" fill="white"/>
+<text x="900" y="65" font-family="Open Sans, sans-serif" font-size="38" fill="#0b1938" font-weight="700" text-anchor="middle">Схема 1. Промежуточный УЦ Istio: ручной выпуск</text>
+<text x="900" y="108" font-family="Open Sans, sans-serif" font-size="21" fill="#72849c" font-weight="400" text-anchor="middle">Корпоративная цепочка доверия · локальное подписание · ключ промежуточного УЦ в кластере</text>
+<text x="900" y="150" font-family="Open Sans, sans-serif" font-size="18" fill="#72849c" font-weight="400" text-anchor="middle">УЦ — удостоверяющий центр; CSR — запрос подписи; под — группа контейнеров; TLS — защита соединения; API — программный интерфейс</text>
+<rect x="55" y="430" width="1130" height="570" rx="13" fill="url(#g72849c)" stroke="#72849c" stroke-width="2" stroke-dasharray="8 7"/>
+<text x="78" y="463" font-family="Open Sans, sans-serif" font-size="22" fill="#72849c" font-weight="700" text-anchor="start">Кластер Kubernetes / сеть сервисов Istio</text>
+<rect x="60" y="175" width="400" height="180" rx="13" fill="url(#g7951b0)" stroke="#7951b0" stroke-width="2" data-visio-target="true"/>
+<text x="82" y="213" font-family="Open Sans, sans-serif" font-size="25" fill="#7951b0" font-weight="700" text-anchor="start">Корпоративный УЦ</text>
+<text x="82" y="251" font-family="Open Sans, sans-serif" font-size="19" fill="#0b1938" font-weight="400" text-anchor="start">Проверяет запрос на сертификат УЦ.</text>
+<text x="82" y="283" font-family="Open Sans, sans-serif" font-size="19" fill="#0b1938" font-weight="400" text-anchor="start">Подписывает сертификат вручную.</text>
+<text x="82" y="315" font-family="Open Sans, sans-serif" font-size="19" fill="#0b1938" font-weight="400" text-anchor="start">Ключ этого УЦ — вне кластера.</text>
+<rect x="650" y="175" width="535" height="180" rx="13" fill="url(#ge68519)" stroke="#e68519" stroke-width="2" data-visio-target="true"/>
+<text x="672" y="213" font-family="Open Sans, sans-serif" font-size="25" fill="#e68519" font-weight="700" text-anchor="start">Администратор сертификатов</text>
+<text x="672" y="251" font-family="Open Sans, sans-serif" font-size="20" fill="#0b1938" font-weight="400" text-anchor="start">Создаёт ключ и запрос на сертификат УЦ.</text>
+<text x="672" y="283" font-family="Open Sans, sans-serif" font-size="20" fill="#0b1938" font-weight="400" text-anchor="start">Передаёт в УЦ только запрос, без ключа.</text>
+<text x="672" y="315" font-family="Open Sans, sans-serif" font-size="20" fill="#0b1938" font-weight="400" text-anchor="start">Вносит ключ и цепочку в настройки Istio.</text>
+<rect x="100" y="500" width="450" height="150" rx="13" fill="url(#ge68519)" stroke="#e68519" stroke-width="2" data-visio-target="true"/>
+<text x="122" y="538" font-family="Open Sans, sans-serif" font-size="23" fill="#e68519" font-weight="700" text-anchor="start">Объект ModuleConfig: istio</text>
+<text x="122" y="576" font-family="Open Sans, sans-serif" font-size="19" fill="#0b1938" font-weight="400" text-anchor="start">Настройки: сертификат УЦ, ключ, цепочка.</text>
+<text x="122" y="604" font-family="Open Sans, sans-serif" font-size="19" fill="#0b1938" font-weight="400" text-anchor="start">Ключ УЦ нужен для локальной подписи.</text>
+<text x="122" y="632" font-family="Open Sans, sans-serif" font-size="19" fill="#0b1938" font-weight="400" text-anchor="start">Ключ корневого УЦ в кластер не вносится.</text>
+<rect x="700" y="500" width="440" height="150" rx="13" fill="url(#g0878e8)" stroke="#0878e8" stroke-width="2" data-visio-target="true"/>
+<text x="722" y="538" font-family="Open Sans, sans-serif" font-size="25" fill="#0878e8" font-weight="700" text-anchor="start">istiod: локальный УЦ</text>
+<text x="722" y="576" font-family="Open Sans, sans-serif" font-size="19" fill="#0b1938" font-weight="400" text-anchor="start">Проверяет служебную учётную запись.</text>
+<text x="722" y="604" font-family="Open Sans, sans-serif" font-size="19" fill="#0b1938" font-weight="400" text-anchor="start">Подписывает запросы подов локально.</text>
+<text x="722" y="632" font-family="Open Sans, sans-serif" font-size="19" fill="#0b1938" font-weight="400" text-anchor="start">Использует ключ промежуточного УЦ.</text>
+<rect x="100" y="810" width="450" height="145" rx="13" fill="url(#g159447)" stroke="#159447" stroke-width="2" data-visio-target="true"/>
+<text x="122" y="848" font-family="Open Sans, sans-serif" font-size="23" fill="#159447" font-weight="700" text-anchor="start">Под A: агент и прокси Istio</text>
+<text x="122" y="886" font-family="Open Sans, sans-serif" font-size="19" fill="#0b1938" font-weight="400" text-anchor="start">Ключ и сертификат приложения.</text>
+<text x="122" y="918" font-family="Open Sans, sans-serif" font-size="19" fill="#0b1938" font-weight="400" text-anchor="start">Агент запрашивает новый сертификат.</text>
+<rect x="700" y="810" width="440" height="145" rx="13" fill="url(#g159447)" stroke="#159447" stroke-width="2" data-visio-target="true"/>
+<text x="722" y="848" font-family="Open Sans, sans-serif" font-size="23" fill="#159447" font-weight="700" text-anchor="start">Под B: агент и прокси Istio</text>
+<text x="722" y="886" font-family="Open Sans, sans-serif" font-size="19" fill="#0b1938" font-weight="400" text-anchor="start">Ключ и сертификат приложения.</text>
+<text x="722" y="918" font-family="Open Sans, sans-serif" font-size="19" fill="#0b1938" font-weight="400" text-anchor="start">Агент запрашивает новый сертификат.</text>
+<path d="M650 220 L460 220" fill="none" stroke="#0878e8" stroke-width="3" marker-end="url(#a0878e8)"/>
+<text x="555" y="202" font-family="Open Sans, sans-serif" font-size="18" fill="#0878e8" font-weight="700" text-anchor="middle">1. Запрос</text>
+<path d="M460 310 L650 310" fill="none" stroke="#7951b0" stroke-width="3" marker-end="url(#a7951b0)"/>
+<text x="555" y="293" font-family="Open Sans, sans-serif" font-size="17" fill="#7951b0" font-weight="700" text-anchor="middle">2. Сертификат</text>
+<path d="M850 355 L850 395 L500 395 L500 500" fill="none" stroke="#e68519" stroke-width="3" marker-end="url(#ae68519)" stroke-dasharray="9 7"/>
+<text x="590" y="384" font-family="Open Sans, sans-serif" font-size="18" fill="#e68519" font-weight="700" text-anchor="middle">3. Защищённая ручная доставка</text>
+<path d="M550 550 L700 550" fill="none" stroke="#e68519" stroke-width="3" marker-end="url(#ae68519)"/>
+<text x="625" y="530" font-family="Open Sans, sans-serif" font-size="17" fill="#e68519" font-weight="700" text-anchor="middle">4. УЦ + ключ</text>
+<path d="M550 850 L625 850 L625 605 L700 605" fill="none" stroke="#0878e8" stroke-width="3" marker-end="url(#a0878e8)"/>
+<text x="570" y="748" font-family="Open Sans, sans-serif" font-size="18" fill="#0878e8" font-weight="700" text-anchor="middle">Запрос A</text>
+<path d="M790 650 L790 715 L325 715 L325 810" fill="none" stroke="#159447" stroke-width="3" marker-end="url(#a159447)"/>
+<text x="430" y="701" font-family="Open Sans, sans-serif" font-size="18" fill="#159447" font-weight="700" text-anchor="middle">Сертификат A + цепочка</text>
+<path d="M975 810 L975 650" fill="none" stroke="#0878e8" stroke-width="3" marker-end="url(#a0878e8)"/>
+<text x="930" y="755" font-family="Open Sans, sans-serif" font-size="17" fill="#0878e8" font-weight="700" text-anchor="middle">Запрос B</text>
+<path d="M1100 650 L1100 810" fill="none" stroke="#159447" stroke-width="3" marker-end="url(#a159447)"/>
+<text x="1045" y="785" font-family="Open Sans, sans-serif" font-size="17" fill="#159447" font-weight="700" text-anchor="middle">Сертификат B</text>
+<path d="M550 925 L700 925" fill="none" stroke="#7951b0" stroke-width="3" marker-end="url(#a7951b0)" marker-start="url(#s7951b0)"/>
+<text x="625" y="906" font-family="Open Sans, sans-serif" font-size="18" fill="#7951b0" font-weight="700" text-anchor="middle">Взаимный TLS</text>
+<text x="80" y="983" font-family="Open Sans, sans-serif" font-size="19" fill="#159447" font-weight="700" text-anchor="start">Выпуск и обновление сертификатов приложений не требуют доступа к корпоративному УЦ.</text>
+<rect x="1230" y="175" width="515" height="395" rx="13" fill="url(#gdd4545)" stroke="#dd4545" stroke-width="2"/>
+<text x="1252" y="213" font-family="Open Sans, sans-serif" font-size="23" fill="#dd4545" font-weight="700" text-anchor="start">Риск 1. Неконтролируемый выпуск</text>
+<text x="1252" y="251" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Корпоративный УЦ ограничивает полномочия:</text>
+<text x="1252" y="283" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">срок, имена, запрет дочерних УЦ.</text>
+<text x="1252" y="315" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">При проверке цепочки ограничения</text>
+<text x="1252" y="347" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">действуют и при подписи вне istiod.</text>
+<text x="1252" y="379" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Нужны проверка учётной записи и журнал.</text>
+<text x="1252" y="411" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Сужена область допустимого выпуска.</text>
+<text x="1252" y="443" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Возможна подделка разрешённых имён;</text>
+<text x="1252" y="475" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">УЦ не ведёт учёт каждой выдачи.</text>
+<text x="1252" y="507" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Контроль каждой выдачи → вариант 2.</text>
+<rect x="1230" y="605" width="515" height="395" rx="13" fill="url(#g7951b0)" stroke="#7951b0" stroke-width="2"/>
+<text x="1252" y="643" font-family="Open Sans, sans-serif" font-size="23" fill="#7951b0" font-weight="700" text-anchor="start">Риск 2. Нецелевое использование</text>
+<text x="1252" y="681" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Угроза: чужой сервис / другой кластер.</text>
+<text x="1252" y="713" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Отдельный УЦ и домен доверия кластера.</text>
+<text x="1252" y="745" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Ограничения имён в сертификате — испытать.</text>
+<text x="1252" y="777" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Запрет дальнейших промежуточных УЦ.</text>
+<text x="1252" y="809" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Ограничить имена и назначение сертификата.</text>
+<text x="1252" y="841" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Во внешних системах — проверка цепочки</text>
+<text x="1252" y="873" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">и разрешённых имён и назначений.</text>
+<text x="1252" y="905" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Общий корневой УЦ: риск остаётся.</text>
+<text x="1252" y="937" font-family="Open Sans, sans-serif" font-size="18" fill="#0b1938" font-weight="400" text-anchor="start">Кража ключа УЦ → подделка разрешённых имён.</text>
+<rect x="55" y="1040" width="830" height="450" rx="13" fill="url(#gdd4545)" stroke="#dd4545" stroke-width="2"/>
+<text x="77" y="1078" font-family="Open Sans, sans-serif" font-size="23" fill="#dd4545" font-weight="700" text-anchor="start">Риск 3. Отзыв и прекращение доступа</text>
+<text x="77" y="1116" font-family="Open Sans, sans-serif" font-size="17" fill="#0b1938" font-weight="400" text-anchor="start">Запись об отзыве в УЦ ещё не означает отказ соединения в прокси Envoy.</text>
+<text x="77" y="1148" font-family="Open Sans, sans-serif" font-size="17" fill="#0b1938" font-weight="400" text-anchor="start">Проверка списков и статуса отзыва в этой сборке не подтверждена.</text>
+<text x="77" y="1180" font-family="Open Sans, sans-serif" font-size="17" fill="#0b1938" font-weight="400" text-anchor="start">Кража сертификата пода: запретить новую выдачу и заблокировать его учётную запись.</text>
+<text x="77" y="1212" font-family="Open Sans, sans-serif" font-size="17" fill="#0b1938" font-weight="400" text-anchor="start">Без отзыва или блокировки украденная копия действует до истечения срока.</text>
+<text x="77" y="1244" font-family="Open Sans, sans-serif" font-size="17" fill="#0b1938" font-weight="400" text-anchor="start">Учётная запись может быть общей у подов: блокировка затронет и законные поды.</text>
+<text x="77" y="1276" font-family="Open Sans, sans-serif" font-size="17" fill="#0b1938" font-weight="400" text-anchor="start">Кража ключа УЦ: исключить старую цепочку у всех принимающих сторон.</text>
+<text x="77" y="1308" font-family="Open Sans, sans-serif" font-size="17" fill="#0b1938" font-weight="400" text-anchor="start">Новый промежуточный УЦ при прежнем корневом не отзывает старый УЦ.</text>
+<text x="77" y="1340" font-family="Open Sans, sans-serif" font-size="17" fill="#0b1938" font-weight="400" text-anchor="start">Нужен проверенный запрет старого УЦ или замена доверенного корневого УЦ.</text>
+<text x="77" y="1372" font-family="Open Sans, sans-serif" font-size="17" fill="#0b1938" font-weight="400" text-anchor="start">Уже установленные защищённые соединения прекратить отдельным действием.</text>
+<text x="77" y="1404" font-family="Open Sans, sans-serif" font-size="17" fill="#0b1938" font-weight="400" text-anchor="start">Короткий срок сертификатов подов не мешает новой подписи украденным ключом УЦ.</text>
+<text x="77" y="1436" font-family="Open Sans, sans-serif" font-size="17" fill="#0b1938" font-weight="400" text-anchor="start">Без испытания нельзя обещать оперативный отзыв по серийному номеру.</text>
+<rect x="920" y="1040" width="825" height="450" rx="13" fill="url(#g72849c)" stroke="#72849c" stroke-width="2"/>
+<text x="942" y="1078" font-family="Open Sans, sans-serif" font-size="23" fill="#0b1938" font-weight="700" text-anchor="start">Что предъявить ИБ для принятия решения</text>
+<text x="942" y="1116" font-family="Open Sans, sans-serif" font-size="17" fill="#0b1938" font-weight="400" text-anchor="start">Ограничения полномочий УЦ действуют и при подписи вне istiod.</text>
+<text x="942" y="1148" font-family="Open Sans, sans-serif" font-size="17" fill="#0b1938" font-weight="400" text-anchor="start">Проверить отказ чужим именам и учёт выдач. Остаётся риск подделки разрешённых имён.</text>
+<text x="942" y="1180" font-family="Open Sans, sans-serif" font-size="17" fill="#0b1938" font-weight="400" text-anchor="start">Проверить отказ при чужом имени или адресе в сертификате, при создании</text>
+<text x="942" y="1212" font-family="Open Sans, sans-serif" font-size="17" fill="#0b1938" font-weight="400" text-anchor="start">дочернего УЦ и при входе во внешние системы с сертификатом Istio.</text>
+<text x="942" y="1244" font-family="Open Sans, sans-serif" font-size="17" fill="#0b1938" font-weight="400" text-anchor="start">Украденный сертификат пода и старый УЦ отклоняются в согласованный срок.</text>
+<text x="942" y="1276" font-family="Open Sans, sans-serif" font-size="17" fill="#0b1938" font-weight="400" text-anchor="start">Измерить время блокировки, прекращение текущего трафика и область отказа.</text>
+<text x="942" y="1308" font-family="Open Sans, sans-serif" font-size="17" fill="#0b1938" font-weight="400" text-anchor="start">Если общий корневой УЦ нельзя исключить и запрета старого УЦ нет — риск остаётся.</text>
+<text x="942" y="1340" font-family="Open Sans, sans-serif" font-size="17" fill="#0b1938" font-weight="400" text-anchor="start">Отработать окончание срока промежуточного УЦ и ошибку ручной замены.</text>
+<text x="942" y="1372" font-family="Open Sans, sans-serif" font-size="17" fill="#0b1938" font-weight="400" text-anchor="start">Согласовать срок сертификатов подов и время прекращения доверия к УЦ.</text>
+<text x="942" y="1404" font-family="Open Sans, sans-serif" font-size="17" fill="#0b1938" font-weight="400" text-anchor="start">Срок 24 ч / обновление около 12 ч — допущение, без гарантии отзыва.</text>
+<text x="942" y="1436" font-family="Open Sans, sans-serif" font-size="17" fill="#0b1938" font-weight="400" text-anchor="start">Поддержку предлагаемых мер в CSE PRO подтвердить у вендора.</text>
+<text x="55" y="1568" font-family="Open Sans, sans-serif" font-size="15" fill="#72849c" font-weight="400" text-anchor="start">DECKHOUSE 1.73.4 CSE PRO / ПРОЕКТ ДЛЯ ОБСУЖДЕНИЯ / 05.11.2026</text>
+<text x="1745" y="1568" font-family="Open Sans, sans-serif" font-size="17" fill="#72849c" font-weight="400" text-anchor="end">01 / 02</text>
+</svg>
